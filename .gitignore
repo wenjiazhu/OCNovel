@@ -1,3 +1,41 @@
+# Python虚拟环境
+venv/
+env/
+.env
+
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 分发/打包
+dist/
+build/
+*.egg-info/
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 项目特定文件
+data/cache/*
+data/output/*
+data/logs/*
+data/reference/*
+!data/cache/.gitkeep
+!data/output/.gitkeep
+!data/logs/.gitkeep
+
+# 环境变量
+.env
+.env.local
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
 config.json
 .env/
-my_novel.txt
+*.txt
