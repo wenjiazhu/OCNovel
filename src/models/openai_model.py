@@ -38,18 +38,18 @@ class OpenAIModel(BaseModel):
         """获取文本嵌入向量"""
         try:
             logging.info(f"Generating embedding for text of length {len(text)}")
-            logging.info(f"Using model: BAAI/bge-m3")
+            logging.info(f"Using model: Pro/BAAI/bge-m3")
             
             # 打印请求信息
             request_data = {
-                "model": "BAAI/bge-m3",
+                "model": "Pro/BAAI/bge-m3",
                 "input": text[:100] + "..." if len(text) > 100 else text  # 只打印前100个字符
             }
             logging.info(f"Request data: {json.dumps(request_data, ensure_ascii=False)}")
             
             try:
                 response = self.client.embeddings.create(
-                    model="BAAI/bge-m3",
+                    model="Pro/BAAI/bge-m3",
                     input=text
                 )
                 

@@ -14,8 +14,8 @@ def test_gemini():
             return False
             
         # 设置代理
-        os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
-        os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
+        # os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7897"
+        # os.environ["HTTP_PROXY"] = "http://127.0.0.1:7897"
         
         # 配置Gemini
         genai.configure(api_key=api_key)
