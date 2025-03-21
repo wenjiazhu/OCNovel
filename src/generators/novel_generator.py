@@ -111,58 +111,140 @@ class NovelGenerator:
         with open(outline_file, 'w', encoding='utf-8') as f:
             json.dump(outline_data, f, ensure_ascii=False, indent=2)
             
-    def generate_outline(self, novel_type: str, theme: str, style: str):
-        """生成小说大纲"""
-        prompt = self._create_outline_prompt(novel_type, theme, style)
-        try:
-            outline_text = self.outline_model.generate(prompt)
-            if not outline_text or outline_text.strip() == "":
-                raise ValueError("模型返回的大纲文本为空")
-            
-            logging.info("成功生成大纲文本，开始解析...")
-            logging.debug(f"模型返回的大纲文本：\n{outline_text}")
-            self.chapter_outlines = self._parse_outline(outline_text)
-            
-            if not self.chapter_outlines:
-                raise ValueError("解析后的大纲为空")
-            
-            logging.info(f"成功解析出 {len(self.chapter_outlines)} 个章节")
-            
-            # 保存大纲
-            self._save_progress()
-            
-            return self.chapter_outlines
-        except Exception as e:
-            logging.error(f"生成大纲时出错: {str(e)}")
-            raise
-        
-    def _create_outline_prompt(self, novel_type: str, theme: str, style: str) -> str:
+    def _create_outline_prompt(self, novel_type: str, theme: str, style: str, start_chapter: int = 1, existing_chapters: List[ChapterOutline] = None, target_chapters: int = None) -> str:
         """创建大纲生成提示词"""
+        if target_chapters is None:
+            target_chapters = self.config['target_length'] // self.config['chapter_length']
+        
+        # 构建现有章节的概要
+        existing_summary = ""
+        if existing_chapters:
+            existing_summary = "\n现有章节概要：\n"
+            for chapter in existing_chapters:
+                existing_summary += f"""
+                第{chapter.chapter_number}章：{chapter.title}
+                - 关键剧情：{' '.join(chapter.key_points)}
+                - 涉及角色：{' '.join(chapter.characters)}
+                - 场景设定：{' '.join(chapter.settings)}
+                - 核心冲突：{' '.join(chapter.conflicts)}
+                """
+        
         return f"""
-        请使用雪花创作法生成一部小说的详细大纲。请严格按照以下格式输出：
+        请使用雪花创作法{f'续写第{start_chapter}章到第{target_chapters}章的' if start_chapter > 1 else '生成'}小说大纲。
+        请严格按照以下格式输出：
 
         [基本信息]
         类型：{novel_type}
         主题：{theme}
         风格：{style}
-        目标字数：{self.config['target_length']}
+        目标总字数：{self.config['target_length']}
+        每章字数：{self.config['chapter_length']}
+        当前起始章节：第{start_chapter}章
+        目标结束章节：第{target_chapters}章
+
+        {existing_summary}
 
         [创作要求]
         1. 使用三幕式结构
         2. 每个章节必须包含以下要素（请严格按照此格式）：
-           第1章：章节标题
+           第N章：章节标题
            - 关键剧情：剧情点1；剧情点2；剧情点3
            - 涉及角色：角色1、角色2、角色3
            - 场景设定：场景1；场景2；场景3
            - 核心冲突：冲突1；冲突2；冲突3
 
-        3. 确保情节递进合理
+        3. 确保情节递进合理，与前面章节保持连贯
         4. 角色弧光完整
         5. 世界观设定统一
+        6. 每章字数控制在{self.config['chapter_length']}字左右
+        7. 需要生成从第{start_chapter}章到第{target_chapters}章的大纲
 
-        请生成至少20个章节的详细大纲，每个章节都必须包含上述所有要素。
+        请生成这些章节的详细大纲，每个章节都必须包含上述所有要素。
         请确保输出格式严格遵循上述示例，每个章节都要有完整的四个要素。
         """
+
+    def generate_outline(self, novel_type: str, theme: str, style: str, continue_from_existing: bool = False, batch_size: int = 20):
+        """生成小说大纲"""
+        if continue_from_existing and self.chapter_outlines:
+            # 获取现有章节数和目标章节数
+            existing_count = len(self.chapter_outlines)
+            target_chapters = self.config['target_length'] // self.config['chapter_length']
+            remaining_chapters = target_chapters - existing_count
+            
+            if remaining_chapters <= 0:
+                logging.info("已达到目标章节数，无需继续生成")
+                return self.chapter_outlines
+            
+            logging.info(f"需要继续生成 {remaining_chapters} 章")
+            
+            # 分批生成剩余章节
+            while len(self.chapter_outlines) < target_chapters:
+                current_count = len(self.chapter_outlines)
+                next_batch = min(batch_size, target_chapters - current_count)
+                logging.info(f"正在生成第 {current_count + 1} 到第 {current_count + next_batch} 章的大纲")
+                
+                # 创建续写提示
+                prompt = self._create_outline_prompt(
+                    novel_type, 
+                    theme, 
+                    style,
+                    start_chapter=current_count + 1,
+                    existing_chapters=self.chapter_outlines[-3:],  # 只传递最后3章作为上下文
+                    target_chapters=current_count + next_batch
+                )
+                
+                try:
+                    outline_text = self.outline_model.generate(prompt)
+                    if not outline_text or outline_text.strip() == "":
+                        raise ValueError("模型返回的大纲文本为空")
+                    
+                    logging.info("成功生成大纲文本，开始解析...")
+                    logging.debug(f"模型返回的大纲文本：\n{outline_text}")
+                    
+                    # 解析新章节并添加到现有大纲后面
+                    new_chapters = self._parse_outline(outline_text)
+                    # 调整新章节的编号
+                    start_num = len(self.chapter_outlines) + 1
+                    for i, chapter in enumerate(new_chapters):
+                        chapter.chapter_number = start_num + i
+                    self.chapter_outlines.extend(new_chapters)
+                    
+                    # 保存当前进度
+                    self._save_progress()
+                    
+                    logging.info(f"成功添加 {len(new_chapters)} 个章节，当前总章节数：{len(self.chapter_outlines)}")
+                    
+                except Exception as e:
+                    logging.error(f"生成批次大纲时出错: {str(e)}")
+                    # 继续下一批次
+                    continue
+                
+        else:
+            # 创建全新大纲提示
+            prompt = self._create_outline_prompt(novel_type, theme, style)
+            
+            try:
+                outline_text = self.outline_model.generate(prompt)
+                if not outline_text or outline_text.strip() == "":
+                    raise ValueError("模型返回的大纲文本为空")
+                
+                logging.info("成功生成大纲文本，开始解析...")
+                logging.debug(f"模型返回的大纲文本：\n{outline_text}")
+                
+                # 完全替换现有大纲
+                self.chapter_outlines = self._parse_outline(outline_text)
+                
+            except Exception as e:
+                logging.error(f"生成大纲时出错: {str(e)}")
+                raise
+            
+        if not self.chapter_outlines:
+            raise ValueError("解析后的大纲为空")
+        
+        # 保存大纲
+        self._save_progress()
+        
+        return self.chapter_outlines
         
     def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
         """解析大纲文本"""
@@ -170,70 +252,109 @@ class NovelGenerator:
         current_chapter = None
         lines = outline_text.strip().split('\n')
         
+        # 记录原始文本以便调试
+        logging.debug(f"开始解析大纲文本：\n{outline_text}")
+        
         for line in lines:
             line = line.strip()
             if not line:
                 continue
                 
+            # 跳过基本信息和创作要求部分
+            if '[基本信息]' in line or '[创作要求]' in line:
+                continue
+                
             # 新章节开始
-            if line.startswith('第') and ('章' in line or '回' in line):
+            if ('第' in line and ('章' in line or '回' in line)) or line.startswith('第') or '章：' in line:
                 # 保存前一章节
                 if current_chapter:
-                    # 验证章节数据完整性
-                    if not all([
-                        current_chapter['key_points'],
-                        current_chapter['characters'],
-                        current_chapter['settings'],
-                        current_chapter['conflicts']
-                    ]):
+                    if self._validate_chapter_outline(current_chapter):
+                        chapters.append(ChapterOutline(**current_chapter))
+                    else:
                         logging.warning(f"章节 {current_chapter['chapter_number']} 数据不完整，将被跳过")
-                        continue
-                    chapters.append(ChapterOutline(**current_chapter))
                 
-                # 初始化新章节
-                chapter_num = len(chapters) + 1
-                title = line.split('：')[-1] if '：' in line else line
-                current_chapter = {
-                    'chapter_number': chapter_num,
-                    'title': title,
-                    'key_points': [],
-                    'characters': [],
-                    'settings': [],
-                    'conflicts': []
-                }
+                try:
+                    # 解析章节号和标题
+                    chapter_num = len(chapters) + 1
+                    if '：' in line:
+                        title = line.split('：')[-1].strip()
+                    elif '章' in line:
+                        title = line.split('章')[-1].strip()
+                    else:
+                        title = line.strip()
+                    
+                    # 初始化新章节
+                    current_chapter = {
+                        'chapter_number': chapter_num,
+                        'title': title,
+                        'key_points': [],
+                        'characters': [],
+                        'settings': [],
+                        'conflicts': []
+                    }
+                    logging.debug(f"开始解析第{chapter_num}章：{title}")
+                except Exception as e:
+                    logging.error(f"解析章节标题时出错：{line}")
+                    logging.error(str(e))
+                    continue
+                
             elif current_chapter:
-                # 解析章节内容
-                if line.startswith('- 关键剧情：'):
-                    points = line.split('：')[1].split('；')
-                    current_chapter['key_points'] = [p.strip() for p in points if p.strip()]
-                elif line.startswith('- 涉及角色：'):
-                    chars = line.split('：')[1].split('、')
-                    current_chapter['characters'] = [c.strip() for c in chars if c.strip()]
-                elif line.startswith('- 场景设定：'):
-                    settings = line.split('：')[1].split('；')
-                    current_chapter['settings'] = [s.strip() for s in settings if s.strip()]
-                elif line.startswith('- 核心冲突：'):
-                    conflicts = line.split('：')[1].split('；')
-                    current_chapter['conflicts'] = [c.strip() for c in conflicts if c.strip()]
+                try:
+                    # 解析章节内容
+                    if '关键剧情' in line:
+                        points = line.split('：')[1].split('；')
+                        current_chapter['key_points'] = [p.strip() for p in points if p.strip()]
+                        logging.debug(f"解析到关键剧情：{current_chapter['key_points']}")
+                    elif '涉及角色' in line:
+                        chars = line.split('：')[1].split('、')
+                        current_chapter['characters'] = [c.strip() for c in chars if c.strip()]
+                        logging.debug(f"解析到涉及角色：{current_chapter['characters']}")
+                    elif '场景设定' in line:
+                        settings = line.split('：')[1].split('；')
+                        current_chapter['settings'] = [s.strip() for s in settings if s.strip()]
+                        logging.debug(f"解析到场景设定：{current_chapter['settings']}")
+                    elif '核心冲突' in line:
+                        conflicts = line.split('：')[1].split('；')
+                        current_chapter['conflicts'] = [c.strip() for c in conflicts if c.strip()]
+                        logging.debug(f"解析到核心冲突：{current_chapter['conflicts']}")
+                except Exception as e:
+                    logging.error(f"解析章节内容时出错：{line}")
+                    logging.error(str(e))
+                    continue
         
         # 添加最后一章
         if current_chapter:
-            # 验证最后一章数据完整性
-            if all([
-                current_chapter['key_points'],
-                current_chapter['characters'],
-                current_chapter['settings'],
-                current_chapter['conflicts']
-            ]):
+            if self._validate_chapter_outline(current_chapter):
                 chapters.append(ChapterOutline(**current_chapter))
             else:
                 logging.warning("最后一章数据不完整，将被跳过")
         
         if not chapters:
+            logging.error("未能解析出任何有效章节，原始文本：")
+            logging.error(outline_text)
             raise ValueError("未能解析出任何有效章节")
         
         logging.info(f"成功解析出 {len(chapters)} 个章节")
         return chapters
+        
+    def _validate_chapter_outline(self, chapter: Dict) -> bool:
+        """验证章节大纲数据的完整性"""
+        required_fields = ['chapter_number', 'title', 'key_points', 'characters', 'settings', 'conflicts']
+        
+        # 检查所有必需字段是否存在且不为空
+        for field in required_fields:
+            if field not in chapter or not chapter[field]:
+                logging.warning(f"章节 {chapter.get('chapter_number', '未知')} 缺少必需字段：{field}")
+                return False
+                
+        # 检查列表字段是否至少包含一个有效元素
+        list_fields = ['key_points', 'characters', 'settings', 'conflicts']
+        for field in list_fields:
+            if not any(item.strip() for item in chapter[field]):
+                logging.warning(f"章节 {chapter['chapter_number']} 的 {field} 字段没有有效内容")
+                return False
+                
+        return True
         
     def _gather_reference_materials(self, outline: ChapterOutline) -> Dict:
         """收集参考材料"""
@@ -552,19 +673,45 @@ class NovelGenerator:
     def generate_novel(self):
         """生成完整小说"""
         try:
+            target_chapters = self.config['target_length'] // self.config['chapter_length']
+            
+            # 如果大纲章节数不足，生成后续章节的大纲
+            if len(self.chapter_outlines) < target_chapters:
+                logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
+                # 从novel_config中获取小说信息
+                novel_config = self.config.get('novel_config', {})
+                self.generate_outline(
+                    novel_config.get('type', '玄幻'),
+                    novel_config.get('theme', '修真逆袭'),
+                    novel_config.get('style', '热血'),
+                    continue_from_existing=True  # 设置为续写模式
+                )
+            
+            # 从当前章节开始生成
             for chapter_idx in range(self.current_chapter, len(self.chapter_outlines)):
                 logging.info(f"正在生成第 {chapter_idx + 1} 章")
                 
-                # 生成章节
-                chapter_content = self.generate_chapter(chapter_idx)
+                try:
+                    # 生成章节
+                    chapter_content = self.generate_chapter(chapter_idx)
+                    
+                    # 保存章节
+                    self._save_chapter(chapter_idx + 1, chapter_content)
+                    
+                    # 更新进度
+                    self.current_chapter = chapter_idx + 1
+                    self._save_progress()
+                    
+                    logging.info(f"第 {chapter_idx + 1} 章生成完成")
+                    
+                except Exception as e:
+                    logging.error(f"生成第 {chapter_idx + 1} 章时出错: {str(e)}")
+                    # 保存当前进度
+                    self._save_progress()
+                    raise
                 
-                # 保存章节
-                self._save_chapter(chapter_idx + 1, chapter_content)
-                
-                # 更新进度
-                self.current_chapter = chapter_idx + 1
-                self._save_progress()
-                
+            logging.info("小说生成完成")
+            
         except Exception as e:
             logging.error(f"生成小说时出错: {str(e)}")
             raise 
