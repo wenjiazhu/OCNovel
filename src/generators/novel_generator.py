@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tenacity import retry, stop_after_attempt, wait_fixed
+import dataclasses
 
 @dataclass
 class ChapterOutline:
@@ -24,6 +25,16 @@ class Character:
     goals: List[str]
     relationships: Dict[str, str]
     development_stage: str  # 当前发展阶段
+    alignment: str = "中立"  # 阵营：正派、反派、中立等，默认为中立
+    realm: str = "凡人"      # 境界，例如：凡人、炼气、筑基、金丹等，默认为凡人
+    level: int = 1          # 等级，默认为1级
+    cultivation_method: str = "无" # 功法，默认为无
+    magic_treasure: List[str] = dataclasses.field(default_factory=list) # 法宝列表，默认为空列表
+    temperament: str = "平和"    # 性情，默认为平和
+    ability: List[str] = dataclasses.field(default_factory=list)      # 能力列表，默认为空列表
+    stamina: int = 100        # 体力值，默认为100
+    sect: str = "无门无派"      # 门派，默认为无门无派
+    position: str = "普通弟子"    # 职务，默认为普通弟子
     
 class NovelGenerator:
     def __init__(self, config: Dict, outline_model, content_model, knowledge_base):
@@ -35,12 +46,15 @@ class NovelGenerator:
         self.chapter_outlines: List[ChapterOutline] = []
         self.current_chapter = 0
         
-        # 从配置中获取输出目录
+        # 从配置中获取输出目录，**提前到这里定义**
         self.output_dir = config.get("output_dir", "data/output")
         os.makedirs(self.output_dir, exist_ok=True)
+
+        self.characters_file = os.path.join(self.output_dir, "characters.json") # 角色库文件路径
         
         self._setup_logging()
         self._load_progress()
+        self._load_characters() # 加载角色库
         
     def _setup_logging(self):
         """设置日志"""
@@ -64,6 +78,9 @@ class NovelGenerator:
                     name: Character(**data)
                     for name, data in progress.get("characters", {}).items()
                 }
+                # 从角色库文件加载角色信息，如果进度文件中没有，则从角色库加载
+                if not self.characters:
+                    self._load_characters()
                 
         if os.path.exists(outline_file):
             with open(outline_file, 'r', encoding='utf-8') as f:
@@ -95,6 +112,8 @@ class NovelGenerator:
         }
         with open(progress_file, 'w', encoding='utf-8') as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
+            
+        self._save_characters() # 保存角色库
             
         # 保存大纲
         outline_data = [
@@ -438,14 +457,15 @@ class NovelGenerator:
         请基于以下信息创作小说章节，要求：
         1. 字数必须严格控制在{self.config['chapter_length']}个汉字左右（允许±20%的误差）
         2. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
-        3. 内容必须完整，包含开头、发展、高潮和结尾
+        3. 内容必须完整，包含开头、发展、高潮和结尾，但结尾不要进行总结性陈述或议论
         4. 情节必须符合逻辑，人物行为要有合理动机
-        5. 场景描写要细致生动
-        6. 人物性格要符合设定
+        5. 场景描写要细致生动，**运用更具创意和想象力的语言，避免使用过于公式化和重复的表达**
+        6. 人物性格要符合设定，**注重描写人物的内心活动和情感变化，使人物形象更加丰满**
         7. 必须与上一章结尾自然衔接
         8. 必须为下一章埋下伏笔或留下悬念
-        9. 多描写，少议论
-        10. 多对话，少叙述
+        9. 多描写，少议论，**尝试运用比喻、拟人等修辞手法，使描写更加生动形象**
+        10. 多对话，少叙述，**对话要自然流畅，符合人物身份和性格**
+        11. **请模仿人类写作的风格（如《牧神记》、《凡人修仙传》、《斗破苍穹》等作品的语言风格），避免明显的AI生成痕迹，例如：过度使用模板句式、逻辑跳跃、缺乏情感深度等**
         {context_info}
         
         [本章信息]
@@ -628,14 +648,44 @@ class NovelGenerator:
                 3. 发展阶段调整
                 """
                 
-                analysis = self.content_model.generate(prompt)
+                analysis_result = self.content_model.generate(prompt)
+                analysis = self._parse_character_analysis(analysis_result) # 解析分析结果
                 self._update_character(name, analysis)
                 
     def _update_character(self, name: str, analysis: str):
         """根据分析更新角色信息"""
-        # 实现角色信息更新逻辑
-        pass
-        
+        if not analysis:
+            logging.warning(f"未能解析角色 {name} 的状态分析结果")
+            return
+
+        character = self.characters[name]
+
+        # 更新性格 (示例：假设分析结果中包含性格变化描述)
+        if "性格变化" in analysis and analysis["性格变化"]:
+            character.temperament = analysis["性格变化"]
+            logging.info(f"角色 {name} 性格更新为：{character.temperament}")
+
+        # 更新境界 (示例：假设分析结果中包含境界提升信息)
+        if "境界提升" in analysis and analysis["境界提升"]:
+            character.realm = analysis["境界提升"]
+            logging.info(f"角色 {name} 境界提升至：{character.realm}")
+
+        # 可以根据 analysis 中的其他信息，更新角色的其他状态属性
+        # ...
+
+    def _parse_character_analysis(self, analysis_text: str) -> Dict:
+        """解析角色状态分析结果"""
+        analysis = {}
+        lines = analysis_text.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if ":" in line:
+                key, value = line.split(":", 1)
+                analysis[key.strip()] = value.strip()
+        return analysis
+
     def _save_chapter(self, chapter_num: int, content: str):
         """保存章节文件"""
         outline = self.chapter_outlines[chapter_num - 1]
@@ -655,6 +705,9 @@ class NovelGenerator:
             f.write(content)
             
         logging.info(f"已保存章节：{filename}")
+        
+        # 更新角色状态
+        self._update_character_states(content, outline)
         
         # 生成并保存章节摘要
         try:
@@ -863,3 +916,51 @@ class NovelGenerator:
         except Exception as e:
             logging.error(f"生成小说时出错: {str(e)}")
             raise 
+
+    def _load_characters(self):
+        """加载角色库"""
+        if os.path.exists(self.characters_file):
+            with open(self.characters_file, 'r', encoding='utf-8') as f:
+                characters_data = json.load(f)
+                self.characters = {
+                    name: Character(**data)
+                    for name, data in characters_data.items()
+                }
+                # 加载旧的角色库时，如果缺少 sect 和 position 属性，则提供默认值
+                for char in self.characters.values():
+                    if not hasattr(char, 'sect'):
+                        char.sect = "无门无派"
+                    if not hasattr(char, 'position'):
+                        char.position = "普通弟子"
+        else:
+            # 如果角色库文件不存在，则初始化为空
+            self.characters = {}
+
+    def _save_characters(self):
+        """保存角色库"""
+        logging.info("开始保存角色库...") # 添加日志：开始保存角色库
+        logging.info(f"当前角色库数据: {self.characters}") # 添加日志：打印当前角色库数据
+        characters_data = {
+            name: {
+                "name": char.name,
+                "role": char.role,
+                "personality": char.personality,
+                "goals": char.goals,
+                "relationships": char.relationships,
+                "development_stage": char.development_stage,
+                "alignment": char.alignment,
+                "realm": char.realm,
+                "level": char.level,
+                "cultivation_method": char.cultivation_method,
+                "magic_treasure": char.magic_treasure,
+                "temperament": char.temperament,
+                "ability": char.ability,
+                "stamina": char.stamina,
+                "sect": char.sect,
+                "position": char.position
+            }
+            for name, char in self.characters.items()
+        }
+        with open(self.characters_file, 'w', encoding='utf-8') as f:
+            json.dump(characters_data, f, ensure_ascii=False, indent=2)
+        logging.info("角色库保存完成。") # 添加日志：角色库保存完成 
