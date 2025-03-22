@@ -134,7 +134,7 @@ class NovelGenerator:
         """创建大纲生成提示词"""
         if target_chapters is None:
             target_chapters = self.config['target_length'] // self.config['chapter_length']
-        
+
         # 构建现有章节的概要
         existing_summary = ""
         if existing_chapters:
@@ -147,7 +147,7 @@ class NovelGenerator:
                 - 场景设定：{' '.join(chapter.settings)}
                 - 核心冲突：{' '.join(chapter.conflicts)}
                 """
-        
+
         return f"""
         请使用雪花创作法{f'续写第{start_chapter}章到第{target_chapters}章的' if start_chapter > 1 else '生成'}小说大纲。
         请严格按照以下格式输出：
@@ -172,7 +172,7 @@ class NovelGenerator:
            - 场景设定：场景1；场景2；场景3
            - 核心冲突：冲突1；冲突2；冲突3
 
-        3. 确保情节递进合理，与前面章节保持连贯
+        3. 确保情节递进合理，与前面章节**和已生成大纲**保持连贯，**避免剧情重复**
         4. 角色弧光完整
         5. 世界观设定统一
         6. 每章字数控制在{self.config['chapter_length']}字左右
@@ -180,6 +180,8 @@ class NovelGenerator:
 
         请生成这些章节的详细大纲，每个章节都必须包含上述所有要素。
         请确保输出格式严格遵循上述示例，每个章节都要有完整的四个要素。
+        **请务必参考已有的章节大纲，避免生成重复或矛盾的剧情。**
+        **生成的大纲情节需要紧密围绕小说主题和风格展开。**
         """
 
     def generate_outline(self, novel_type: str, theme: str, style: str, continue_from_existing: bool = False, batch_size: int = 20):
@@ -492,6 +494,7 @@ class NovelGenerator:
         1. 开头要自然承接上一章结尾的剧情
         2. 结尾要为下一章埋下伏笔或制造悬念
         3. 保持情节的连贯性和人物性格的一致性
+        **12. 请分析上述 [参考材料] 的语言风格，并在创作正文时尝试模仿其风格。例如，如果参考材料的语言偏正式，则正文也使用正式的书面语；如果参考材料的语言比较口语化，则正文也采用相对轻松的口语风格。**
         """
         
         # 判断 review_result 是否存在且不是 "内容正常"，如果是，则添加到 prompt_content 中
