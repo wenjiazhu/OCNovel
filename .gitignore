@@ -27,6 +27,7 @@ data/reference/*
 !data/cache/.gitkeep
 !data/output/.gitkeep
 !data/logs/.gitkeep
+config.json
 
 # 环境变量
 .env
@@ -35,7 +36,5 @@ data/reference/*
 # 系统文件
 .DS_Store
 Thumbs.db
-
-config.json
 .env/
-*.txt
+.cursorignore

@@ -403,15 +403,52 @@ class NovelGenerator:
         
     def _create_chapter_prompt(self, outline: ChapterOutline, references: Dict) -> str:
         """创建章节生成提示词"""
+        # 获取上一章和下一章的信息
+        prev_chapter = None
+        next_chapter = None
+        chapter_idx = outline.chapter_number - 1
+        
+        if chapter_idx > 0:
+            prev_chapter = self.chapter_outlines[chapter_idx - 1]
+            
+        if chapter_idx < len(self.chapter_outlines) - 1:
+            next_chapter = self.chapter_outlines[chapter_idx + 1]
+        
+        # 构建上下文信息
+        context_info = ""
+        if prev_chapter:
+            context_info += f"""
+            [上一章信息]
+            章节号：{prev_chapter.chapter_number}
+            标题：{prev_chapter.title}
+            关键剧情：{' '.join(prev_chapter.key_points)}
+            结尾冲突：{' '.join(prev_chapter.conflicts)}
+            """
+            
+        if next_chapter:
+            context_info += f"""
+            [下一章信息]
+            章节号：{next_chapter.chapter_number}
+            标题：{next_chapter.title}
+            关键剧情：{' '.join(next_chapter.key_points)}
+            开头设定：{' '.join(next_chapter.settings)}
+            """
+        
         return f"""
         请基于以下信息创作小说章节，要求：
-        1. 字数必须严格控制在{self.config['chapter_length']}字左右（允许±20%的误差）
-        2. 内容必须完整，包含开头、发展、高潮和结尾
-        3. 情节必须符合逻辑，人物行为要有合理动机
-        4. 场景描写要细致生动
-        5. 人物性格要符合设定
+        1. 字数必须严格控制在{self.config['chapter_length']}个汉字左右（允许±20%的误差）
+        2. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
+        3. 内容必须完整，包含开头、发展、高潮和结尾
+        4. 情节必须符合逻辑，人物行为要有合理动机
+        5. 场景描写要细致生动
+        6. 人物性格要符合设定
+        7. 必须与上一章结尾自然衔接
+        8. 必须为下一章埋下伏笔或留下悬念
+        9. 多描写，少议论
+        10. 多对话，少叙述
+        {context_info}
         
-        [章节信息]
+        [本章信息]
         章节号：{outline.chapter_number}
         标题：{outline.title}
         
@@ -431,7 +468,10 @@ class NovelGenerator:
         场景参考：
         {self._format_references(references['setting_references'])}
         
-        请严格按照要求创作本章节内容。
+        请严格按照要求创作本章节内容，特别注意：
+        1. 开头要自然承接上一章结尾的剧情
+        2. 结尾要为下一章埋下伏笔或制造悬念
+        3. 保持情节的连贯性和人物性格的一致性
         """
         
     def _validate_chapter(self, content: str, chapter_idx: int) -> bool:
@@ -458,10 +498,14 @@ class NovelGenerator:
             
         return True
         
+    def _count_chinese_chars(self, text: str) -> int:
+        """计算文本中的中文字符数量"""
+        return sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
+
     def _check_length(self, content: str) -> bool:
         """检查章节字数"""
         target_length = self.config['chapter_length']
-        actual_length = len(content)
+        actual_length = self._count_chinese_chars(content)
         
         # 计算与目标字数的偏差百分比
         deviation = abs(actual_length - target_length) / target_length * 100
@@ -584,7 +628,9 @@ class NovelGenerator:
     def _save_chapter(self, chapter_num: int, content: str):
         """保存章节文件"""
         outline = self.chapter_outlines[chapter_num - 1]
-        filename = f"第{chapter_num}章_{outline.title}.txt"
+        # 清理标题中的非法字符
+        clean_title = "".join(c for c in outline.title if c.isalnum() or c in " -_")
+        filename = f"第{chapter_num}章_{clean_title}.txt"
         filepath = os.path.join(self.output_dir, filename)
         
         # 确保输出目录存在
@@ -613,11 +659,11 @@ class NovelGenerator:
 
     def _adjust_content_length(self, content: str, target_length: int) -> str:
         """调整内容长度"""
-        current_length = len(content)
-        if current_length < 0.7 * target_length:
+        current_length = self._count_chinese_chars(content)
+        if current_length < 0.8 * target_length:
             # 内容太短，需要扩充
             prompt = f"""
-            请在保持原有情节和风格的基础上，扩充以下内容，使其达到约{target_length}字：
+            请在保持原有情节和风格的基础上，扩充以下内容，使其达到约{target_length}个汉字：
             
             {content}
             
@@ -626,12 +672,13 @@ class NovelGenerator:
             2. 增加细节描写和内心活动
             3. 扩充对话和场景
             4. 保持风格一致
+            5. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
             """
             return self.content_model.generate(prompt)
-        elif current_length > 1.3 * target_length:
+        elif current_length > 1.6 * target_length:
             # 内容太长，需要精简
             prompt = f"""
-            请在保持原有情节和风格的基础上，将以下内容精简到约{target_length}字：
+            请在保持原有情节和风格的基础上，将以下内容精简到约{1.4 * target_length}个汉字：
             
             {content}
             
@@ -640,6 +687,7 @@ class NovelGenerator:
             2. 删除不必要的细节
             3. 保持关键对话和场景
             4. 保持风格一致
+            5. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
             """
             return self.content_model.generate(prompt)
         else:
