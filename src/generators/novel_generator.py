@@ -59,11 +59,26 @@ class NovelGenerator:
     def _setup_logging(self):
         """设置日志"""
         log_file = os.path.join(self.output_dir, "generation.log")
-        logging.basicConfig(
-            filename=log_file,
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
+        print(f"日志文件路径: {log_file}") # 打印日志文件路径
+
+        try:
+            # 使用 FileHandler 并指定 UTF-8 编码
+            handler = logging.FileHandler(log_file, encoding='utf-8')
+            print("FileHandler 创建成功。") # 确认 FileHandler 创建
+
+            handler.setLevel(logging.INFO) # 设置 handler 的日志级别
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+
+            logger = logging.getLogger() # 获取 root logger
+            logger.addHandler(handler) # 将 handler 添加到 root logger
+            logger.setLevel(logging.INFO) # 设置 root logger 的日志级别
+
+            print("日志 Handler 添加到 Logger。") # 确认 Handler 添加成功
+            logging.info("日志系统初始化完成。") # 添加一条日志，确认日志系统工作
+
+        except Exception as e:
+            print(f"日志系统初始化失败: {e}") # 捕获并打印初始化异常
         
     def _load_progress(self):
         """加载生成进度"""
@@ -629,6 +644,7 @@ class NovelGenerator:
         
     def _update_character_states(self, content: str, outline: ChapterOutline):
         """更新角色状态"""
+        logging.info(f"开始更新角色状态，当前角色库状态: {self.characters}") # 添加日志：角色状态更新开始时打印角色库状态
         for name in outline.characters:
             if name in self.characters:
                 character = self.characters[name]
@@ -827,21 +843,8 @@ class NovelGenerator:
             """
             return self.content_model.generate(prompt)
         elif current_length > 1.6 * target_length:
-            logging.info(f"字数超出，需要精简 - 目标：{target_length}，实际：{current_length}")
-            # 内容太长，需要精简
-            prompt = f"""
-            请在保持原有情节和风格的基础上，将以下内容精简到约{1.4 * target_length}个汉字：
-            
-            {content}
-            
-            要求：
-            1. 保持主要情节不变
-            2. 删除不必要的细节
-            3. 保持关键对话和场景
-            4. 保持风格一致
-            5. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
-            """
-            return self.content_model.generate(prompt)
+            logging.warning(f"字数超出，需要精简 - 目标：{target_length}，实际：{current_length}")
+            return content # 直接返回原始内容，不再缩写
         else:
             logging.info(f"字数符合要求，无需调整 - 目标：{target_length}，实际：{current_length}")
             return content
@@ -850,35 +853,40 @@ class NovelGenerator:
     def generate_chapter(self, chapter_idx: int) -> str:
         """生成章节内容"""
         outline = self.chapter_outlines[chapter_idx]
-        
+
+        logging.info(f"开始生成第 {chapter_idx + 1} 章内容，当前角色库状态: {self.characters}") # 添加日志：章节生成开始时打印角色库状态
+
         # 收集参考材料
         reference_materials = self._gather_reference_materials(outline)
-        
+
         # 生成章节
         review_result = None # 初始化 review_result 为 None
         if (chapter_idx + 1) % 5 == 0: # 判断是否是每5章一次的回顾章节
             review_result = self._review_summaries(chapter_idx + 1) # 获取回顾结果
         chapter_prompt = self._create_chapter_prompt(outline, reference_materials, review_result if (review_result and (chapter_idx + 1) <= self.current_chapter + 3) else None)
         chapter_content = self.content_model.generate(chapter_prompt)
-        
+
         # 调整内容长度
         target_length = self.config['chapter_length']
         chapter_content = self._adjust_content_length(chapter_content, target_length)
-        
+
         # 验证和修正
         if not self._validate_chapter(chapter_content, chapter_idx):
             raise ValueError("Chapter validation failed")
-        
+
         # 更新角色状态
         self._update_character_states(chapter_content, outline)
-        
+
         return chapter_content
     
     def generate_novel(self):
         """生成完整小说"""
         try:
             target_chapters = self.config['target_length'] // self.config['chapter_length']
-            
+
+            # 初始化角色库 (在生成小说前调用)
+            self._initialize_characters()  # 添加：初始化角色
+
             # 如果大纲章节数不足，生成后续章节的大纲
             if len(self.chapter_outlines) < target_chapters:
                 logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
@@ -922,9 +930,11 @@ class NovelGenerator:
 
     def _load_characters(self):
         """加载角色库"""
+        logging.info("开始加载角色库...") # 添加日志：开始加载角色库
         if os.path.exists(self.characters_file):
             with open(self.characters_file, 'r', encoding='utf-8') as f:
                 characters_data = json.load(f)
+                logging.info(f"从文件中加载到角色数据: {characters_data}") # 添加日志：打印加载到的角色数据
                 self.characters = {
                     name: Character(**data)
                     for name, data in characters_data.items()
@@ -938,6 +948,9 @@ class NovelGenerator:
         else:
             # 如果角色库文件不存在，则初始化为空
             self.characters = {}
+            logging.info("角色库文件不存在，初始化为空角色库。") # 添加日志：角色库文件不存在
+
+        logging.info("角色库加载完成。") # 添加日志：角色库加载完成
 
     def _save_characters(self):
         """保存角色库"""
@@ -967,3 +980,19 @@ class NovelGenerator:
         with open(self.characters_file, 'w', encoding='utf-8') as f:
             json.dump(characters_data, f, ensure_ascii=False, indent=2)
         logging.info("角色库保存完成。") # 添加日志：角色库保存完成 
+
+    def _initialize_characters(self):
+        """初始化角色库 (示例代码，需要您根据实际情况修改)"""
+        logging.info("开始初始化角色库...")  # 添加日志
+
+        # 创建一些示例角色
+        self.characters = {
+            "张三": Character(name="张三", role="主角", personality={"勇敢": 0.8, "正直": 0.7}, goals=["成为修真界的强者"], relationships={"李四": "朋友"}, development_stage="青年期", alignment="正派", realm="炼气期", level=5, cultivation_method="无", magic_treasure=["青云剑"], temperament="勇敢", ability=["剑术"], stamina=100, sect="无门无派", position="主角"),
+            "李四": Character(name="李四", role="配角", personality={"聪明": 0.7, "狡猾": 0.5}, goals=["获得更多的修炼资源"], relationships={"张三": "朋友"}, development_stage="青年期", alignment="中立", realm="炼气期", level=5, cultivation_method="无", magic_treasure=["乾坤袋"], temperament="狡猾", ability=["储物"], stamina=100, sect="无门无派", position="配角"),
+            "王五": Character(name="王五", role="反派", personality={"狡猾": 0.9, "残忍": 0.8}, goals=["统治整个修真界"], relationships={}, development_stage="中年期", alignment="反派", realm="金丹期", level=10, cultivation_method="无", magic_treasure=["血魔幡"], temperament="残忍", ability=["魔道"], stamina=150, sect="血魔宗", position="反派")
+        }
+
+        logging.info("角色库初始化完成。")  # 添加日志
+
+        # 保存角色库
+        self._save_characters() 
