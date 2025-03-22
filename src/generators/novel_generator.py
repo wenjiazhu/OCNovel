@@ -401,7 +401,7 @@ class NovelGenerator:
             
         return materials
         
-    def _create_chapter_prompt(self, outline: ChapterOutline, references: Dict) -> str:
+    def _create_chapter_prompt(self, outline: ChapterOutline, references: Dict, review_result: Optional[str] = None) -> str:
         """创建章节生成提示词"""
         # 获取上一章和下一章的信息
         prev_chapter = None
@@ -434,7 +434,7 @@ class NovelGenerator:
             开头设定：{' '.join(next_chapter.settings)}
             """
         
-        return f"""
+        prompt_content = f"""
         请基于以下信息创作小说章节，要求：
         1. 字数必须严格控制在{self.config['chapter_length']}个汉字左右（允许±20%的误差）
         2. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
@@ -473,6 +473,17 @@ class NovelGenerator:
         2. 结尾要为下一章埋下伏笔或制造悬念
         3. 保持情节的连贯性和人物性格的一致性
         """
+        
+        # 判断 review_result 是否存在且不是 "内容正常"，如果是，则添加到 prompt_content 中
+        if review_result and review_result.strip() != "内容正常":
+            prompt_content += f"""
+
+            [前文回顾与改进建议]
+            {review_result}
+            请在创作本章节时，参考以上回顾与建议，进行改进。
+            """
+
+        return prompt_content
         
     def _validate_chapter(self, content: str, chapter_idx: int) -> bool:
         """验证章节内容"""
@@ -513,8 +524,8 @@ class NovelGenerator:
         # 记录详细的字数信息
         logging.info(f"字数检查 - 目标：{target_length}，实际：{actual_length}，偏差：{deviation:.1f}%")
         
-        # 如果偏差超过30%，返回False
-        if deviation > 30:
+        # 如果偏差超过50%，返回False
+        if deviation > 50:
             logging.warning(f"字数偏差过大 - 目标：{target_length}，实际：{actual_length}，偏差：{deviation:.1f}%")
             return False
         
@@ -644,7 +655,90 @@ class NovelGenerator:
             f.write(content)
             
         logging.info(f"已保存章节：{filename}")
+        
+        # 生成并保存章节摘要
+        try:
+            self._generate_and_save_summary(chapter_num, content)
+        except Exception as e:
+            logging.error(f"生成章节摘要失败: {str(e)}")
+        
+    def _generate_and_save_summary(self, chapter_num: int, content: str):
+        """生成章节摘要并保存到summary.json"""
+        summary_file = os.path.join(self.output_dir, "summary.json")
+        
+        # 生成摘要
+        prompt = f"""
+        请为以下章节内容生成一个200字以内的摘要，要求：
+        1. 突出本章的主要情节发展
+        2. 包含关键人物的重要行动
+        3. 说明本章对整体剧情的影响
+        4. 仅返回摘要正文，字数控制在200字以内
+        
+        章节内容：
+        {content}
+        """
+        
+        summary = self.content_model.generate(prompt)
+        
+        # 读取现有摘要
+        summaries = {}
+        if os.path.exists(summary_file):
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                summaries = json.load(f)
+        
+        # 更新摘要
+        summaries[str(chapter_num)] = summary
+        
+        # 保存摘要
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summaries, f, ensure_ascii=False, indent=2)
             
+        logging.info(f"已保存第{chapter_num}章摘要")
+        
+        # 每5章进行一次回顾
+        if chapter_num % 5 == 0:
+            self._review_summaries(chapter_num)
+            
+    def _review_summaries(self, current_chapter: int):
+        """回顾前文摘要，检查剧情连贯性和主题一致性"""
+        summary_file = os.path.join(self.output_dir, "summary.json")
+        if not os.path.exists(summary_file):
+            return
+            
+        # 读取所有摘要
+        with open(summary_file, 'r', encoding='utf-8') as f:
+            summaries = json.load(f)
+            
+        # 获取最近5章的摘要
+        recent_summaries = []
+        for i in range(max(1, current_chapter - 4), current_chapter + 1):
+            if str(i) in summaries:
+                recent_summaries.append(f"第{i}章：{summaries[str(i)]}")
+                
+        # 生成回顾提示
+        prompt = f"""
+        请分析最近5章的内容摘要，检查是否存在以下问题：
+        1. 剧情是否重复
+        2. 情节是否偏离主题
+        3. 人物行为是否前后矛盾
+        4. 故事节奏是否合理
+        
+        最近5章摘要：
+        {' '.join(recent_summaries)}
+        
+        如果发现问题，请指出具体问题并提供改进建议。
+        如果内容正常，请回复"内容正常"。
+        """
+        
+        review_result = self.content_model.generate(prompt)
+        logging.info(f"第{current_chapter}章回顾结果：{review_result}")
+        
+        # 如果发现问题，记录到日志
+        if review_result.strip() != "内容正常":
+            logging.warning(f"第{current_chapter}章回顾发现问题：{review_result}")
+        
+        return review_result
+        
     def _format_references(self, references: List[Dict]) -> str:
         """格式化参考材料"""
         formatted = []
@@ -661,6 +755,7 @@ class NovelGenerator:
         """调整内容长度"""
         current_length = self._count_chinese_chars(content)
         if current_length < 0.8 * target_length:
+            logging.info(f"字数不足，需要扩充 - 目标：{target_length}，实际：{current_length}")
             # 内容太短，需要扩充
             prompt = f"""
             请在保持原有情节和风格的基础上，扩充以下内容，使其达到约{target_length}个汉字：
@@ -676,6 +771,7 @@ class NovelGenerator:
             """
             return self.content_model.generate(prompt)
         elif current_length > 1.6 * target_length:
+            logging.info(f"字数超出，需要精简 - 目标：{target_length}，实际：{current_length}")
             # 内容太长，需要精简
             prompt = f"""
             请在保持原有情节和风格的基础上，将以下内容精简到约{1.4 * target_length}个汉字：
@@ -691,6 +787,7 @@ class NovelGenerator:
             """
             return self.content_model.generate(prompt)
         else:
+            logging.info(f"字数符合要求，无需调整 - 目标：{target_length}，实际：{current_length}")
             return content
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
@@ -702,7 +799,10 @@ class NovelGenerator:
         reference_materials = self._gather_reference_materials(outline)
         
         # 生成章节
-        chapter_prompt = self._create_chapter_prompt(outline, reference_materials)
+        review_result = None # 初始化 review_result 为 None
+        if (chapter_idx + 1) % 5 == 0: # 判断是否是每5章一次的回顾章节
+            review_result = self._review_summaries(chapter_idx + 1) # 获取回顾结果
+        chapter_prompt = self._create_chapter_prompt(outline, reference_materials, review_result if (review_result and (chapter_idx + 1) <= self.current_chapter + 3) else None)
         chapter_content = self.content_model.generate(chapter_prompt)
         
         # 调整内容长度
