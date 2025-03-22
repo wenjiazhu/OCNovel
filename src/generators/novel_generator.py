@@ -646,63 +646,126 @@ class NovelGenerator:
         """更新角色状态"""
         logging.info(f"开始更新角色状态，当前角色库状态: {self.characters}") # 添加日志：角色状态更新开始时打印角色库状态
         for name in outline.characters:
+            logging.info(f"开始更新角色: {name} 的状态，更新前状态: {self.characters.get(name)}") # 添加日志：开始更新角色状态前打印角色信息
             if name in self.characters:
                 character = self.characters[name]
-                
-                # 分析角色在本章的发展
+
                 prompt = f"""
-                分析角色 {name} 在本章的发展变化：
-                
-                原有状态：
-                - 性格：{character.personality}
+                请详细分析角色 **{name}** 在本章节 **内容** 中的发展变化，并 **结构化** 输出分析结果。
+
+                **章节内容：**
+                {content}
+
+                **角色 {name} 的原有状态：**
+                - 性格：{character.temperament}，详细性格特征：{character.personality}
                 - 目标：{character.goals}
                 - 发展阶段：{character.development_stage}
-                
-                本章内容：
-                {content}
-                
-                请提供：
-                1. 性格变化
-                2. 目标更新
-                3. 发展阶段调整
+                - 现有关系：{character.relationships}
+                - 境界：{character.realm}
+                - 等级：{character.level}
+                - 功法：{character.cultivation_method}
+                - 法宝：{character.magic_treasure}
+                - 能力：{character.ability}
+                - 门派：{character.sect}
+                - 职务：{character.position}
+
+                **请分析角色在本章的行为、对话、心理活动等，判断角色在本章中在以下几个方面是否发生了变化：**
+
+                1. **性格变化**:  角色在本章中是否展现出与原有性格不同的特点？例如，变得更加勇敢、冷静、冲动等。请总结性格变化，如果没有明显变化，请回答 "无明显变化"。
+                2. **目标更新**:  角色在本章中是否产生了新的目标，或者原有目标是否发生了改变？例如，目标从 "提升修为" 变为 "为家族复仇"。请总结目标更新，如果没有目标更新，请回答 "无目标更新"。
+                3. **关系变化**:  角色在本章中与哪些角色产生了新的关系，或者原有关系是否发生了改变（变得更亲密、更疏远、敌对等）？请总结关系变化，如果没有关系变化，请回答 "无关系变化"。
+                4. **发展阶段调整**: 角色在本章中的经历是否导致其发展阶段发生变化？例如，从 "青年期" 进入 "中年期"，或者在心智、能力上更加成熟。请总结发展阶段调整，如果没有发展阶段调整，请回答 "无发展阶段调整"。
+                5. **境界/等级提升**: 角色在本章中修为或能力是否有提升，境界或等级是否发生变化？请总结境界/等级提升情况，如果没有提升，请回答 "无境界/等级提升"。
+                6. **新能力/法宝**: 角色在本章中是否获得了新的能力或法宝？请总结新能力/法宝，如果没有，请回答 "无新能力/法宝"。
+                7. **门派/职务变化**: 角色在本章中是否加入了新的门派或者职务发生了变化？请总结门派/职务变化，如果没有，请回答 "无门派/职务变化"。
+
+                **请务必按照以下 JSON 格式返回分析结果：**
+                {
+                  "性格变化": "...",
+                  "目标更新": "...",
+                  "关系变化": "...",
+                  "发展阶段调整": "...",
+                  "境界提升": "...",
+                  "新能力/法宝": "...",
+                  "门派/职务变化": "..."
+                }
+                **如果对应项无变化，请在 JSON 中对应的值设置为 "无"。**
                 """
-                
+
                 analysis_result = self.content_model.generate(prompt)
                 analysis = self._parse_character_analysis(analysis_result) # 解析分析结果
                 self._update_character(name, analysis)
                 
     def _update_character(self, name: str, analysis: str):
         """根据分析更新角色信息"""
+        logging.info(f"开始根据分析结果更新角色: {name} 的信息，分析结果: {analysis}") # 添加日志：开始更新角色信息时打印分析结果
         if not analysis:
             logging.warning(f"未能解析角色 {name} 的状态分析结果")
             return
 
         character = self.characters[name]
 
-        # 更新性格 (示例：假设分析结果中包含性格变化描述)
-        if "性格变化" in analysis and analysis["性格变化"]:
+        # 更新性格
+        if "性格变化" in analysis and analysis["性格变化"] and analysis["性格变化"] != "无明显变化":
             character.temperament = analysis["性格变化"]
-            logging.info(f"角色 {name} 性格更新为：{character.temperament}")
+            logging.info(f"角色 {name} 性格更新为：{character.temperament}") # 添加日志：性格更新日志
 
-        # 更新境界 (示例：假设分析结果中包含境界提升信息)
-        if "境界提升" in analysis and analysis["境界提升"]:
-            character.realm = analysis["境界提升"]
+        # 更新目标
+        if "目标更新" in analysis and analysis["目标更新"] and analysis["目标更新"] != "无目标更新":
+            character.goals.append(analysis["目标更新"]) #  示例：直接添加新的目标
+            logging.info(f"角色 {name} 目标更新为：{character.goals}") # 添加日志：目标更新日志
+
+        # 更新关系
+        if "关系变化" in analysis and analysis["关系变化"] and analysis["关系变化"] != "无关系变化":
+            relation_change = analysis["关系变化"]
+            #  示例：假设关系变化描述包含了 "与[角色名]关系[变化类型]" 的信息
+            #  例如 "与李四关系变得更亲密"
+            #  解析 relation_change，提取角色名和变化类型，并更新 character.relationships
+            logging.info(f"角色 {name} 关系更新为：{character.relationships}")
+
+        # 更新发展阶段
+        if "发展阶段调整" in analysis and analysis["发展阶段调整"] and analysis["发展阶段调整"] != "无发展阶段调整":
+            character.development_stage = analysis["发展阶段调整"]
+            logging.info(f"角色 {name} 发展阶段更新为：{character.development_stage}")
+
+        # 更新境界/等级
+        if "境界提升" in analysis and analysis["境界提升"] and analysis["境界提升"] != "无境界/等级提升":
+            character.realm = analysis["境界提升"] #  示例：假设分析结果直接返回新的境界名称
+            #  或者可以更细致地解析境界提升的描述，例如 "从炼气期提升到筑基期"
             logging.info(f"角色 {name} 境界提升至：{character.realm}")
 
-        # 可以根据 analysis 中的其他信息，更新角色的其他状态属性
-        # ...
+        # 更新新能力/法宝
+        if "新能力/法宝" in analysis and analysis["新能力/法宝"] and analysis["新能力/法宝"] != "无新能力/法宝":
+            new_ability_treasure = analysis["新能力/法宝"]
+            character.ability.extend([item.strip() for item in new_ability_treasure.split("、") if item.strip()]) # 示例：假设新能力/法宝以顿号分隔
+            character.magic_treasure.extend([item.strip() for item in new_ability_treasure.split("、") if item.strip()]) # 同时添加到 ability 和 magic_treasure，根据实际情况调整
+            logging.info(f"角色 {name} 获得新能力/法宝：{character.ability}, {character.magic_treasure}")
+
+        # 更新门派/职务
+        if "门派/职务变化" in analysis and analysis["门派/职务变化"] and analysis["门派/职务变化"] != "无门派/职务变化":
+            character.sect = analysis["门派/职务变化"] # 示例：假设分析结果直接返回新的门派名称
+            character.position = analysis["门派/职务变化"] #  同时更新门派和职务，根据实际情况调整
+            logging.info(f"角色 {name} 门派/职务更新为：{character.sect}, {character.position}") # 添加日志：门派/职务更新日志
+
+        #  ... 可以根据 JSON 分析结果中的其他字段，继续扩展角色属性的更新逻辑 ...
 
     def _parse_character_analysis(self, analysis_text: str) -> Dict:
         """解析角色状态分析结果"""
         analysis = {}
-        lines = analysis_text.strip().split('\n')
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if ":" in line:
-                key, value = line.split(":", 1)
-                analysis[key.strip()] = value.strip()
+        try:
+            analysis = json.loads(analysis_text) # 尝试解析 JSON 格式
+            logging.debug(f"成功解析 JSON 格式的角色分析结果: {analysis}")
+        except json.JSONDecodeError:
+            logging.warning("模型返回的分析结果不是 JSON 格式，尝试文本行解析。")
+            lines = analysis_text.strip().split('\n') # 回退到文本行解析
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    analysis[key.strip()] = value.strip()
+            logging.debug(f"文本行解析的角色分析结果: {analysis}")
         return analysis
 
     def _save_chapter(self, chapter_num: int, content: str):
@@ -876,6 +939,8 @@ class NovelGenerator:
 
         # 更新角色状态
         self._update_character_states(chapter_content, outline)
+
+        logging.info(f"第 {chapter_idx + 1} 章内容生成完成，角色状态更新完成。当前角色库状态: {self.characters}") # 添加日志：章节生成结束时打印角色库状态
 
         return chapter_content
     
