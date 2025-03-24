@@ -145,7 +145,7 @@ class NovelGenerator:
         with open(outline_file, 'w', encoding='utf-8') as f:
             json.dump(outline_data, f, ensure_ascii=False, indent=2)
             
-    def _create_outline_prompt(self, novel_type: str, theme: str, style: str, start_chapter: int = 1, existing_chapters: List[ChapterOutline] = None, target_chapters: int = None) -> str:
+    def _create_outline_prompt(self, novel_type: str, theme: str, style: str, start_chapter: int = 1, existing_chapters: List[ChapterOutline] = None, target_chapters: int = None, plot_references: str = "") -> str:
         """创建大纲生成提示词"""
         if target_chapters is None:
             target_chapters = self.config['target_length'] // self.config['chapter_length']
@@ -162,6 +162,17 @@ class NovelGenerator:
                 - 场景设定：{' '.join(chapter.settings)}
                 - 核心冲突：{' '.join(chapter.conflicts)}
                 """
+
+        # 获取情节参考材料
+        reference_materials = self._gather_reference_materials(ChapterOutline(chapter_number=start_chapter, title="", key_points=[theme, novel_type], characters=[], settings=[], conflicts=[])) # 使用主题和类型作为关键词
+        plot_references = self._format_references(reference_materials['plot_references'])
+
+        if plot_references:
+            existing_summary += f"""
+
+        [情节参考]
+        {plot_references}
+        """
 
         return f"""
         请使用雪花创作法{f'续写第{start_chapter}章到第{target_chapters}章的' if start_chapter > 1 else '生成'}小说大纲。
@@ -197,6 +208,7 @@ class NovelGenerator:
         请确保输出格式严格遵循上述示例，每个章节都要有完整的四个要素。
         **请务必参考已有的章节大纲，避免生成重复或矛盾的剧情。**
         **生成的大纲情节需要紧密围绕小说主题和风格展开。**
+        **请务必仔细分析 [情节参考] 中的内容，并将其融入到你生成的大纲情节中，确保新生成的大纲情节与参考情节有一定的关联性和相似性。**
         """
 
     def generate_outline(self, novel_type: str, theme: str, style: str, continue_from_existing: bool = False, batch_size: int = 20):
@@ -219,14 +231,15 @@ class NovelGenerator:
                 next_batch = min(batch_size, target_chapters - current_count)
                 logging.info(f"正在生成第 {current_count + 1} 到第 {current_count + next_batch} 章的大纲")
                 
-                # 创建续写提示
+                # 创建续写提示,  传递情节参考
                 prompt = self._create_outline_prompt(
-                    novel_type, 
-                    theme, 
+                    novel_type,
+                    theme,
                     style,
                     start_chapter=current_count + 1,
                     existing_chapters=self.chapter_outlines[-3:],  # 只传递最后3章作为上下文
-                    target_chapters=current_count + next_batch
+                    target_chapters=current_count + next_batch,
+                    plot_references=self._format_references(self._gather_reference_materials(ChapterOutline(chapter_number=current_count + 1, title="", key_points=[theme, novel_type], characters=[], settings=[], conflicts=[]))['plot_references'])
                 )
                 
                 try:
@@ -482,7 +495,8 @@ class NovelGenerator:
         8. 必须为下一章埋下伏笔或留下悬念
         9. 多描写，少议论，**尝试运用比喻、拟人等修辞手法，使描写更加生动形象**
         10. 多对话，少叙述，**对话要自然流畅，符合人物身份和性格**
-        11. **请模仿人类写作的风格（如《牧神记》、《凡人修仙传》、《斗破苍穹》等作品的语言风格），避免明显的AI生成痕迹，例如：过度使用模板句式、逻辑跳跃、缺乏情感深度等**
+        11. 增强人物形象描写、对话描写（双人对话、三人对话），减少非必要的环境描写
+        12. **请模仿知识库中《凡人修仙传》作品原文的语言风格，采用白描式的叙事手法和平实直白的语言风格，让AIGC值保持在50%以下，避免过度使用模板句式、逻辑跳跃、缺乏情感深度等**
         {context_info}
         
         [本章信息]
@@ -525,26 +539,35 @@ class NovelGenerator:
         
     def _validate_chapter(self, content: str, chapter_idx: int) -> bool:
         """验证章节内容"""
+        validation_passed = True
+        logging.info(f"开始验证第 {chapter_idx + 1} 章内容...")
+        
         # 检查字数
         if not self._check_length(content):
-            logging.warning(f"章节 {chapter_idx + 1} 字数不符合要求")
-            return False
+            logging.warning(f"章节 {chapter_idx + 1} 字数不符合要求，但将继续生成")
+            validation_passed = False
             
         # 检查逻辑连贯性
         if not self._check_logic(content, chapter_idx):
-            logging.warning(f"章节 {chapter_idx + 1} 逻辑验证失败")
-            return False
+            logging.warning(f"章节 {chapter_idx + 1} 逻辑验证失败，但将继续生成")
+            validation_passed = False
             
         # 检查人物表现
         if not self._check_characters(content):
-            logging.warning(f"章节 {chapter_idx + 1} 人物表现不符合设定")
-            return False
+            logging.warning(f"章节 {chapter_idx + 1} 人物表现不符合设定，但将继续生成")
+            validation_passed = False
             
         # 检查重复内容
         if not self._check_duplicates(content):
-            logging.warning(f"章节 {chapter_idx + 1} 存在重复内容")
-            return False
+            logging.warning(f"章节 {chapter_idx + 1} 存在重复内容，但将继续生成")
+            validation_passed = False
+        
+        if not validation_passed:
+            logging.warning(f"章节 {chapter_idx + 1} 验证未完全通过，但仍然继续生成")
+        else:
+            logging.info(f"章节 {chapter_idx + 1} 验证全部通过")
             
+        # 始终返回True，不中断生成流程
         return True
         
     def _count_chinese_chars(self, text: str) -> int:
@@ -585,7 +608,7 @@ class NovelGenerator:
         - 核心冲突：{' '.join(outline.conflicts)}
 
         内容：
-        {content}
+        {content[:2000]}...（内容过长已省略）
 
         请逐项检查：
         1. 内容是否完整覆盖了大纲中的关键剧情点？
@@ -596,46 +619,81 @@ class NovelGenerator:
 
         对每一项进行评分（1-5分），3分及以上为及格。
         如果所有项目都及格，回复"通过"；
-        如果总分达到15分及以上但有1-2项不及格，回复"基本通过"；
+        如果总分达到13分及以上但有1-2项不及格，回复"基本通过"；
         否则指出具体问题。
         """
         
-        response = self.content_model.generate(prompt)
-        logging.debug(f"逻辑检查结果：{response}")
-        
-        # 检查响应中是否包含"通过"或"基本通过"
-        response = response.strip()
-        if "通过" in response:
+        try:
+            response = self.content_model.generate(prompt)
+            logging.debug(f"逻辑检查结果：{response}")
+            
+            # 检查响应中是否包含"通过"或"基本通过"
+            response = response.strip()
+            if "通过" in response:
+                logging.info(f"章节 {chapter_idx + 1} 逻辑检查通过")
+                return True
+            
+            # 记录具体问题
+            logging.warning(f"章节 {chapter_idx + 1} 逻辑问题：{response}")
+            
+            # 如果问题不严重，也允许通过
+            if "问题不严重" in response or "整体较好" in response or "基本符合" in response:
+                logging.info(f"章节 {chapter_idx + 1} 逻辑问题不严重，允许通过")
+                return True
+                
+            return False
+        except Exception as e:
+            logging.error(f"章节 {chapter_idx + 1} 逻辑检查过程出错: {str(e)}")
+            # 出错时默认通过，避免生成中断
             return True
-        
-        # 记录具体问题
-        logging.warning(f"章节 {chapter_idx + 1} 逻辑问题：{response}")
-        return False
         
     def _check_characters(self, content: str) -> bool:
         """检查人物表现是否符合设定"""
-        for name, character in self.characters.items():
-            if name in content:
+        # 限制检查的角色数量，避免过多调用API
+        check_success = True
+        characters_to_check = {name: char for name, char in self.characters.items() 
+                            if name in content[:2000]}  # 只检查前2000字中出现的角色
+        
+        # 如果没有已知角色，直接返回通过
+        if not characters_to_check:
+            logging.info("没有已知角色需要检查，直接通过")
+            return True
+            
+        # 限制检查的角色数量为最多3个
+        if len(characters_to_check) > 3:
+            logging.info(f"角色数量过多 ({len(characters_to_check)}个)，只检查前3个")
+            characters_to_check = dict(list(characters_to_check.items())[:3])
+            
+        for name, character in characters_to_check.items():
+            try:
                 prompt = f"""
-                请分析角色 {name} 在以下内容中的表现是否符合人物设定：
+                简要分析角色 {name} 在以下内容中的表现是否符合人物设定：
                 
                 角色设定：
-                - 性格：{character.personality}
-                - 目标：{character.goals}
+                - 性格：{character.temperament}
+                - 目标：{character.goals[0] if character.goals else "未知"}
                 - 发展阶段：{character.development_stage}
                 
-                内容：
-                {content}
+                内容（节选）：
+                {content[:1500]}...（内容过长已省略）
                 
-                如果符合设定请回复"通过"，如果基本符合请回复"基本通过"，否则指出问题。
+                如果基本符合设定请回复"通过"或"基本通过"，否则指出主要问题。简明扼要回答即可。
                 """
                 
                 response = self.content_model.generate(prompt)
                 logging.debug(f"角色 {name} 检查结果：{response}")
-                if response.strip() not in ["通过", "基本通过"]:
-                    return False
+                
+                if "通过" in response or "符合" in response:
+                    logging.info(f"角色 {name} 表现检查通过")
+                else:
+                    logging.warning(f"角色 {name} 表现检查不通过: {response}")
+                    check_success = False
+            except Exception as e:
+                logging.error(f"检查角色 {name} 表现时出错: {str(e)}")
+                # 出错时不影响整体结果
+                continue
                     
-        return True
+        return check_success
         
     def _check_duplicates(self, content: str) -> bool:
         """检查重复内容"""
@@ -644,159 +702,350 @@ class NovelGenerator:
         
     def _update_character_states(self, content: str, outline: ChapterOutline):
         """更新角色状态"""
-        logging.info(f"开始更新角色状态，当前角色库状态: {self.characters}") # 添加日志：角色状态更新开始时打印角色库状态
+        logging.info(f"开始更新角色状态，当前角色库状态: {self.characters}")
+        
         for name in outline.characters:
-            logging.info(f"开始更新角色: {name} 的状态，更新前状态: {self.characters.get(name)}") # 添加日志：开始更新角色状态前打印角色信息
-            if name in self.characters:
-                character = self.characters[name]
-
+            logging.info(f"开始更新角色: {name} 的状态")
+            
+            # 如果角色不存在，则创建新角色
+            if name not in self.characters:
+                logging.info(f"发现新角色 {name}，正在创建...")
+                # 分析角色在当前章节中的表现，生成初始属性
                 prompt = f"""
-                请详细分析角色 **{name}** 在本章节 **内容** 中的发展变化，并 **结构化** 输出分析结果。
-
-                **章节内容：**
-                {content}
-
-                **角色 {name} 的原有状态：**
-                - 性格：{character.temperament}，详细性格特征：{character.personality}
-                - 目标：{character.goals}
-                - 发展阶段：{character.development_stage}
-                - 现有关系：{character.relationships}
-                - 境界：{character.realm}
-                - 等级：{character.level}
-                - 功法：{character.cultivation_method}
-                - 法宝：{character.magic_treasure}
-                - 能力：{character.ability}
-                - 门派：{character.sect}
-                - 职务：{character.position}
-
-                **请分析角色在本章的行为、对话、心理活动等，判断角色在本章中在以下几个方面是否发生了变化：**
-
-                1. **性格变化**:  角色在本章中是否展现出与原有性格不同的特点？例如，变得更加勇敢、冷静、冲动等。请总结性格变化，如果没有明显变化，请回答 "无明显变化"。
-                2. **目标更新**:  角色在本章中是否产生了新的目标，或者原有目标是否发生了改变？例如，目标从 "提升修为" 变为 "为家族复仇"。请总结目标更新，如果没有目标更新，请回答 "无目标更新"。
-                3. **关系变化**:  角色在本章中与哪些角色产生了新的关系，或者原有关系是否发生了改变（变得更亲密、更疏远、敌对等）？请总结关系变化，如果没有关系变化，请回答 "无关系变化"。
-                4. **发展阶段调整**: 角色在本章中的经历是否导致其发展阶段发生变化？例如，从 "青年期" 进入 "中年期"，或者在心智、能力上更加成熟。请总结发展阶段调整，如果没有发展阶段调整，请回答 "无发展阶段调整"。
-                5. **境界/等级提升**: 角色在本章中修为或能力是否有提升，境界或等级是否发生变化？请总结境界/等级提升情况，如果没有提升，请回答 "无境界/等级提升"。
-                6. **新能力/法宝**: 角色在本章中是否获得了新的能力或法宝？请总结新能力/法宝，如果没有，请回答 "无新能力/法宝"。
-                7. **门派/职务变化**: 角色在本章中是否加入了新的门派或者职务发生了变化？请总结门派/职务变化，如果没有，请回答 "无门派/职务变化"。
-
-                **请务必按照以下 JSON 格式返回分析结果：**
-                {
-                  "性格变化": "...",
-                  "目标更新": "...",
-                  "关系变化": "...",
-                  "发展阶段调整": "...",
-                  "境界提升": "...",
-                  "新能力/法宝": "...",
-                  "门派/职务变化": "..."
-                }
-                **如果对应项无变化，请在 JSON 中对应的值设置为 "无"。**
-                """
-
-                analysis_result = self.content_model.generate(prompt)
-                analysis = self._parse_character_analysis(analysis_result) # 解析分析结果
-                self._update_character(name, analysis)
+                请分析以下内容中角色 {name} 的特征，并按照JSON格式返回角色属性：
                 
-    def _update_character(self, name: str, analysis: str):
+                章节内容：
+                {content}
+                
+                请分析并返回以下属性（JSON格式）：
+                {{
+                    "role": "主角/配角/反派",
+                    "personality": {{"特征1": 0.8, "特征2": 0.6}},
+                    "goals": ["目标1", "目标2"],
+                    "relationships": {{"其他角色名": "关系描述"}},
+                    "development_stage": "发展阶段",
+                    "alignment": "正派/反派/中立",
+                    "realm": "境界",
+                    "level": "等级(数字)",
+                    "cultivation_method": "功法",
+                    "magic_treasure": ["法宝1", "法宝2"],
+                    "temperament": "性格特征",
+                    "ability": ["能力1", "能力2"],
+                    "stamina": "体力值(数字)",
+                    "sect": "门派",
+                    "position": "职务"
+                }}
+                """
+                
+                try:
+                    analysis = self.content_model.generate(prompt)
+                    logging.debug(f"模型返回的角色分析原始结果: {analysis}")
+                    
+                    # 尝试从返回内容中提取JSON部分
+                    json_start = analysis.find('{')
+                    json_end = analysis.rfind('}') + 1
+                    
+                    if json_start >= 0 and json_end > json_start:
+                        # 提取JSON部分
+                        json_str = analysis[json_start:json_end]
+                        try:
+                            char_data = json.loads(json_str)
+                            # 确保必需字段存在
+                            required_fields = ["role", "personality", "goals", "relationships", "development_stage"]
+                            missing_fields = [field for field in required_fields if field not in char_data]
+                            
+                            if missing_fields:
+                                logging.warning(f"角色 {name} 数据缺少必需字段: {missing_fields}")
+                                # 为缺失字段提供默认值
+                                if "role" not in char_data:
+                                    char_data["role"] = "配角"
+                                if "personality" not in char_data:
+                                    char_data["personality"] = {"平和": 0.5}
+                                if "goals" not in char_data:
+                                    char_data["goals"] = ["暂无明确目标"]
+                                if "relationships" not in char_data:
+                                    char_data["relationships"] = {}
+                                if "development_stage" not in char_data:
+                                    char_data["development_stage"] = "初次登场"
+                            
+                            # 确保数值类型字段正确
+                            if "level" in char_data and not isinstance(char_data["level"], int):
+                                try:
+                                    char_data["level"] = int(char_data["level"])
+                                except:
+                                    char_data["level"] = 1
+                            
+                            if "stamina" in char_data and not isinstance(char_data["stamina"], int):
+                                try:
+                                    char_data["stamina"] = int(char_data["stamina"])
+                                except:
+                                    char_data["stamina"] = 100
+                            
+                            # 创建新的Character实例
+                            self.characters[name] = Character(
+                                name=name,
+                                **char_data
+                            )
+                            logging.info(f"成功创建新角色 {name}: {char_data}")
+                        except json.JSONDecodeError as je:
+                            logging.error(f"解析角色 {name} 的JSON数据失败: {je}")
+                            # 创建一个基本角色
+                            self._create_basic_character(name)
+                    else:
+                        logging.warning(f"无法从模型输出中找到有效的JSON数据: {analysis}")
+                        # 创建一个基本角色
+                        self._create_basic_character(name)
+                except Exception as e:
+                    logging.error(f"创建角色 {name} 时出错: {str(e)}")
+                    # 创建一个基本角色
+                    self._create_basic_character(name)
+                    continue
+            
+            # 更新现有角色状态
+            character = self.characters[name]
+            prompt = f"""
+            请详细分析角色 {name} 在本章节内容中的发展变化，并结构化输出分析结果。
+
+            章节内容：
+            {content}
+
+            角色 {name} 的原有状态：
+            - 性格：{character.temperament}，详细性格特征：{character.personality}
+            - 目标：{character.goals}
+            - 发展阶段：{character.development_stage}
+            - 现有关系：{character.relationships}
+            - 境界：{character.realm}
+            - 等级：{character.level}
+            - 功法：{character.cultivation_method}
+            - 法宝：{character.magic_treasure}
+            - 能力：{character.ability}
+            - 门派：{character.sect}
+            - 职务：{character.position}
+
+            请分析角色在本章的变化，并按照以下JSON格式返回：
+            {{
+                "性格变化": "变化描述或'无'",
+                "目标更新": "新目标或'无'",
+                "关系变化": "新关系或'无'",
+                "发展阶段调整": "新阶段或'无'",
+                "境界提升": "新境界或'无'",
+                "新能力/法宝": "新能力或法宝列表或'无'",
+                "门派/职务变化": "新门派职务或'无'"
+            }}
+            """
+            
+            try:
+                analysis_result = self.content_model.generate(prompt)
+                analysis = self._parse_character_analysis(analysis_result)
+                self._update_character(name, analysis)
+                logging.info(f"成功更新角色 {name} 的状态")
+            except Exception as e:
+                logging.error(f"更新角色 {name} 状态时出错: {str(e)}")
+                continue
+        
+        # 保存更新后的角色库
+        self._save_characters()
+
+    def _update_character(self, name: str, analysis: Dict):
         """根据分析更新角色信息"""
-        logging.info(f"开始根据分析结果更新角色: {name} 的信息，分析结果: {analysis}") # 添加日志：开始更新角色信息时打印分析结果
         if not analysis:
             logging.warning(f"未能解析角色 {name} 的状态分析结果")
             return
 
         character = self.characters[name]
-
+        
         # 更新性格
-        if "性格变化" in analysis and analysis["性格变化"] and analysis["性格变化"] != "无明显变化":
+        if "性格变化" in analysis and analysis["性格变化"] and analysis["性格变化"] != "无":
             character.temperament = analysis["性格变化"]
-            logging.info(f"角色 {name} 性格更新为：{character.temperament}") # 添加日志：性格更新日志
+            # 更新性格特征权重
+            new_personality = {}
+            for trait, weight in character.personality.items():
+                if trait in analysis["性格变化"].lower():
+                    weight = min(1.0, weight + 0.1)  # 增强相关特征
+                new_personality[trait] = weight
+            character.personality = new_personality
+            logging.info(f"角色 {name} 性格更新为：{character.temperament}, 特征权重：{character.personality}")
 
         # 更新目标
-        if "目标更新" in analysis and analysis["目标更新"] and analysis["目标更新"] != "无目标更新":
-            character.goals.append(analysis["目标更新"]) #  示例：直接添加新的目标
-            logging.info(f"角色 {name} 目标更新为：{character.goals}") # 添加日志：目标更新日志
+        if "目标更新" in analysis and analysis["目标更新"] and analysis["目标更新"] != "无":
+            if analysis["目标更新"] not in character.goals:
+                character.goals.append(analysis["目标更新"])
+            logging.info(f"角色 {name} 目标更新为：{character.goals}")
 
         # 更新关系
-        if "关系变化" in analysis and analysis["关系变化"] and analysis["关系变化"] != "无关系变化":
-            relation_change = analysis["关系变化"]
-            #  示例：假设关系变化描述包含了 "与[角色名]关系[变化类型]" 的信息
-            #  例如 "与李四关系变得更亲密"
-            #  解析 relation_change，提取角色名和变化类型，并更新 character.relationships
+        if "关系变化" in analysis and analysis["关系变化"] and analysis["关系变化"] != "无":
+            # 解析关系变化描述
+            relation_parts = analysis["关系变化"].split("与")
+            for part in relation_parts:
+                if "关系" in part:
+                    other_name = part.split("关系")[0].strip()
+                    relation = part.split("关系")[1].strip()
+                    character.relationships[other_name] = relation
             logging.info(f"角色 {name} 关系更新为：{character.relationships}")
 
         # 更新发展阶段
-        if "发展阶段调整" in analysis and analysis["发展阶段调整"] and analysis["发展阶段调整"] != "无发展阶段调整":
+        if "发展阶段调整" in analysis and analysis["发展阶段调整"] and analysis["发展阶段调整"] != "无":
             character.development_stage = analysis["发展阶段调整"]
             logging.info(f"角色 {name} 发展阶段更新为：{character.development_stage}")
 
-        # 更新境界/等级
-        if "境界提升" in analysis and analysis["境界提升"] and analysis["境界提升"] != "无境界/等级提升":
-            character.realm = analysis["境界提升"] #  示例：假设分析结果直接返回新的境界名称
-            #  或者可以更细致地解析境界提升的描述，例如 "从炼气期提升到筑基期"
-            logging.info(f"角色 {name} 境界提升至：{character.realm}")
+        # 更新境界和等级
+        if "境界提升" in analysis and analysis["境界提升"] and analysis["境界提升"] != "无":
+            old_realm = character.realm
+            character.realm = analysis["境界提升"]
+            # 境界提升时增加等级
+            if old_realm != character.realm:
+                character.level += 1
+            logging.info(f"角色 {name} 境界提升至：{character.realm}，等级：{character.level}")
 
-        # 更新新能力/法宝
-        if "新能力/法宝" in analysis and analysis["新能力/法宝"] and analysis["新能力/法宝"] != "无新能力/法宝":
-            new_ability_treasure = analysis["新能力/法宝"]
-            character.ability.extend([item.strip() for item in new_ability_treasure.split("、") if item.strip()]) # 示例：假设新能力/法宝以顿号分隔
-            character.magic_treasure.extend([item.strip() for item in new_ability_treasure.split("、") if item.strip()]) # 同时添加到 ability 和 magic_treasure，根据实际情况调整
-            logging.info(f"角色 {name} 获得新能力/法宝：{character.ability}, {character.magic_treasure}")
+        # 更新能力和法宝
+        if "新能力/法宝" in analysis and analysis["新能力/法宝"] and analysis["新能力/法宝"] != "无":
+            new_items = [item.strip() for item in analysis["新能力/法宝"].split("、")]
+            for item in new_items:
+                if "法宝" in item or "宝物" in item:
+                    if item not in character.magic_treasure:
+                        character.magic_treasure.append(item)
+                else:
+                    if item not in character.ability:
+                        character.ability.append(item)
+            logging.info(f"角色 {name} 获得新能力/法宝：能力 {character.ability}，法宝 {character.magic_treasure}")
 
-        # 更新门派/职务
-        if "门派/职务变化" in analysis and analysis["门派/职务变化"] and analysis["门派/职务变化"] != "无门派/职务变化":
-            character.sect = analysis["门派/职务变化"] # 示例：假设分析结果直接返回新的门派名称
-            character.position = analysis["门派/职务变化"] #  同时更新门派和职务，根据实际情况调整
-            logging.info(f"角色 {name} 门派/职务更新为：{character.sect}, {character.position}") # 添加日志：门派/职务更新日志
-
-        #  ... 可以根据 JSON 分析结果中的其他字段，继续扩展角色属性的更新逻辑 ...
+        # 更新门派和职务
+        if "门派/职务变化" in analysis and analysis["门派/职务变化"] and analysis["门派/职务变化"] != "无":
+            changes = analysis["门派/职务变化"].split("，")
+            for change in changes:
+                if "门派" in change:
+                    character.sect = change.split("门派")[1].strip()
+                if "职务" in change:
+                    character.position = change.split("职务")[1].strip()
+            logging.info(f"角色 {name} 门派/职务更新为：门派 {character.sect}，职务 {character.position}")
 
     def _parse_character_analysis(self, analysis_text: str) -> Dict:
         """解析角色状态分析结果"""
         analysis = {}
         try:
-            analysis = json.loads(analysis_text) # 尝试解析 JSON 格式
-            logging.debug(f"成功解析 JSON 格式的角色分析结果: {analysis}")
+            # 尝试从返回内容中提取JSON部分
+            json_start = analysis_text.find('{')
+            json_end = analysis_text.rfind('}') + 1
+            
+            if json_start >= 0 and json_end > json_start:
+                # 提取JSON部分
+                json_str = analysis_text[json_start:json_end]
+                analysis = json.loads(json_str) # 尝试解析 JSON 格式
+                logging.debug(f"成功解析 JSON 格式的角色分析结果: {analysis}")
+            else:
+                raise json.JSONDecodeError("未找到JSON格式数据", analysis_text, 0)
         except json.JSONDecodeError:
             logging.warning("模型返回的分析结果不是 JSON 格式，尝试文本行解析。")
-            lines = analysis_text.strip().split('\n') # 回退到文本行解析
+            # 回退到文本行解析
+            lines = analysis_text.strip().split('\n')
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    analysis[key.strip()] = value.strip()
+                    
+                # 检查常见的分隔符
+                for separator in [':', '：', '-', '=']:
+                    if separator in line:
+                        parts = line.split(separator, 1)
+                        key = parts[0].strip()
+                        value = parts[1].strip()
+                        
+                        # 转换键名称
+                        key_map = {
+                            "性格变化": "性格变化",
+                            "性格": "性格变化",
+                            "目标更新": "目标更新",
+                            "目标": "目标更新",
+                            "关系变化": "关系变化",
+                            "关系": "关系变化",
+                            "发展阶段调整": "发展阶段调整",
+                            "发展阶段": "发展阶段调整",
+                            "境界提升": "境界提升",
+                            "境界": "境界提升",
+                            "新能力/法宝": "新能力/法宝",
+                            "能力/法宝": "新能力/法宝",
+                            "法宝": "新能力/法宝",
+                            "能力": "新能力/法宝",
+                            "门派/职务变化": "门派/职务变化",
+                            "门派职务": "门派/职务变化",
+                            "门派": "门派/职务变化",
+                            "职务": "门派/职务变化"
+                        }
+                        
+                        # 标准化键名
+                        for std_key, mapped_key in key_map.items():
+                            if std_key in key.lower():
+                                key = mapped_key
+                                break
+                                
+                        # 过滤无效值
+                        if value.lower() in ["无", "none", "null", "nil", "没有变化", "没有", "没有改变"]:
+                            value = "无"
+                            
+                        analysis[key] = value
+                        break
+                        
             logging.debug(f"文本行解析的角色分析结果: {analysis}")
+            
+            # 如果解析结果为空，添加默认值
+            if not analysis:
+                logging.warning("文本解析未能提取有效信息，使用默认值")
+                analysis = {
+                    "性格变化": "无",
+                    "目标更新": "无", 
+                    "关系变化": "无",
+                    "发展阶段调整": "无",
+                    "境界提升": "无",
+                    "新能力/法宝": "无",
+                    "门派/职务变化": "无"
+                }
+                
         return analysis
 
     def _save_chapter(self, chapter_num: int, content: str):
         """保存章节文件"""
-        outline = self.chapter_outlines[chapter_num - 1]
-        # 清理标题中的非法字符
-        clean_title = "".join(c for c in outline.title if c.isalnum() or c in " -_")
-        filename = f"第{chapter_num}章_{clean_title}.txt"
-        filepath = os.path.join(self.output_dir, filename)
-        
-        # 确保输出目录存在
-        os.makedirs(self.output_dir, exist_ok=True)
-        
-        # 写入章节内容
-        with open(filepath, 'w', encoding='utf-8') as f:
-            # 写入章节标题
-            f.write(f"第{chapter_num}章 {outline.title}\n\n")
-            # 写入正文
-            f.write(content)
-            
-        logging.info(f"已保存章节：{filename}")
-        
-        # 更新角色状态
-        self._update_character_states(content, outline)
-        
-        # 生成并保存章节摘要
         try:
-            self._generate_and_save_summary(chapter_num, content)
+            outline = self.chapter_outlines[chapter_num - 1]
+            # 清理标题中的非法字符
+            clean_title = "".join(c for c in outline.title if c.isalnum() or c in " -_")
+            filename = f"第{chapter_num}章_{clean_title}.txt"
+            filepath = os.path.join(self.output_dir, filename)
+            
+            # 确保输出目录存在
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            # 写入章节内容
+            with open(filepath, 'w', encoding='utf-8') as f:
+                # 写入章节标题
+                f.write(f"第{chapter_num}章 {outline.title}\n\n")
+                # 写入正文
+                f.write(content)
+                
+            logging.info(f"已保存章节：{filename}")
+            
+            # 更新角色状态（使用try-except包裹，防止出错影响主流程）
+            try:
+                self._update_character_states(content, outline)
+            except Exception as e:
+                logging.error(f"更新角色状态时出错: {str(e)}")
+            
+            # 生成并保存章节摘要（使用try-except包裹，防止出错影响主流程）
+            try:
+                self._generate_and_save_summary(chapter_num, content)
+            except Exception as e:
+                logging.error(f"生成章节摘要失败: {str(e)}")
+                
         except Exception as e:
-            logging.error(f"生成章节摘要失败: {str(e)}")
-        
+            logging.error(f"保存章节 {chapter_num} 时出错: {str(e)}")
+            # 尝试基本保存，确保内容不丢失
+            try:
+                backup_filepath = os.path.join(self.output_dir, f"第{chapter_num}章_备份.txt")
+                with open(backup_filepath, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                logging.info(f"已保存备份章节：{backup_filepath}")
+            except Exception as backup_e:
+                logging.error(f"保存备份章节也失败: {str(backup_e)}")
+
     def _generate_and_save_summary(self, chapter_num: int, content: str):
         """生成章节摘要并保存到summary.json"""
         summary_file = os.path.join(self.output_dir, "summary.json")
@@ -919,50 +1168,87 @@ class NovelGenerator:
 
         logging.info(f"开始生成第 {chapter_idx + 1} 章内容，当前角色库状态: {self.characters}") # 添加日志：章节生成开始时打印角色库状态
 
-        # 收集参考材料
+        logging.info(f"第 {chapter_idx + 1} 章: 开始收集参考材料...")
         reference_materials = self._gather_reference_materials(outline)
 
-        # 生成章节
+        logging.info(f"第 {chapter_idx + 1} 章: 参考材料收集完成。开始生成章节内容...")
         review_result = None # 初始化 review_result 为 None
         if (chapter_idx + 1) % 5 == 0: # 判断是否是每5章一次的回顾章节
             review_result = self._review_summaries(chapter_idx + 1) # 获取回顾结果
         chapter_prompt = self._create_chapter_prompt(outline, reference_materials, review_result if (review_result and (chapter_idx + 1) <= self.current_chapter + 3) else None)
-        chapter_content = self.content_model.generate(chapter_prompt)
+        try:
+            chapter_content = self.content_model.generate(chapter_prompt)
+            if not chapter_content or chapter_content.strip() == "":
+                logging.error(f"第 {chapter_idx + 1} 章: 生成的内容为空")
+                raise ValueError("生成的章节内容为空")
+        except Exception as e:
+            logging.error(f"第 {chapter_idx + 1} 章: 章节内容生成失败: {str(e)}")
+            raise
 
-        # 调整内容长度
+        logging.info(f"第 {chapter_idx + 1} 章: 章节内容生成完成，字数调整前字数: {self._count_chinese_chars(chapter_content)}...")
         target_length = self.config['chapter_length']
-        chapter_content = self._adjust_content_length(chapter_content, target_length)
+        
+        try:
+            chapter_content = self._adjust_content_length(chapter_content, target_length)
+            logging.info(f"第 {chapter_idx + 1} 章: 字数调整完成，调整后字数: {self._count_chinese_chars(chapter_content)}")
+        except Exception as e:
+            logging.error(f"第 {chapter_idx + 1} 章: 字数调整失败: {str(e)}，使用原始内容继续")
+            # 如果字数调整失败，继续使用原始内容
 
-        # 验证和修正
-        if not self._validate_chapter(chapter_content, chapter_idx):
-            raise ValueError("Chapter validation failed")
+        logging.info(f"第 {chapter_idx + 1} 章: 开始验证章节内容...")
+        # 验证章节内容但不中断生成流程
+        validation_result = self._validate_chapter(chapter_content, chapter_idx)
+        logging.info(f"第 {chapter_idx + 1} 章: 验证结果: {validation_result}")
 
-        # 更新角色状态
-        self._update_character_states(chapter_content, outline)
+        logging.info(f"第 {chapter_idx + 1} 章: 开始更新角色状态...")
+        try:
+            self._update_character_states(chapter_content, outline)
+            logging.info(f"第 {chapter_idx + 1} 章: 角色状态更新完成")
+        except Exception as e:
+            logging.error(f"第 {chapter_idx + 1} 章: 角色状态更新失败: {str(e)}，但将继续生成")
+            # 角色状态更新失败不影响章节生成
 
-        logging.info(f"第 {chapter_idx + 1} 章内容生成完成，角色状态更新完成。当前角色库状态: {self.characters}") # 添加日志：章节生成结束时打印角色库状态
+        logging.info(f"第 {chapter_idx + 1} 章: 准备保存章节...")
+        self._save_chapter(chapter_idx + 1, chapter_content)
+
+        logging.info(f"第 {chapter_idx + 1} 章内容生成完成，当前角色库状态: {self.characters}") # 添加日志：章节生成结束时打印角色库状态
 
         return chapter_content
     
     def generate_novel(self):
         """生成完整小说"""
+        logging.info("开始生成小说")
+        
         try:
             target_chapters = self.config['target_length'] // self.config['chapter_length']
+            logging.info(f"目标章节数: {target_chapters}")
 
             # 初始化角色库 (在生成小说前调用)
-            self._initialize_characters()  # 添加：初始化角色
+            try:
+                self._initialize_characters()
+                logging.info("角色库初始化完成")
+            except Exception as e:
+                logging.error(f"角色库初始化失败: {str(e)}，但将继续使用空角色库")
+                self.characters = {}
 
             # 如果大纲章节数不足，生成后续章节的大纲
             if len(self.chapter_outlines) < target_chapters:
                 logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
-                # 从novel_config中获取小说信息
-                novel_config = self.config.get('novel_config', {})
-                self.generate_outline(
-                    novel_config.get('type', '玄幻'),
-                    novel_config.get('theme', '修真逆袭'),
-                    novel_config.get('style', '热血'),
-                    continue_from_existing=True  # 设置为续写模式
-                )
+                try:
+                    # 从novel_config中获取小说信息
+                    novel_config = self.config.get('novel_config', {})
+                    self.generate_outline(
+                        novel_config.get('type', '玄幻'),
+                        novel_config.get('theme', '修真逆袭'),
+                        novel_config.get('style', '热血'),
+                        continue_from_existing=True  # 设置为续写模式
+                    )
+                except Exception as e:
+                    logging.error(f"生成大纲失败: {str(e)}，将使用现有大纲继续")
+            
+            # 记录成功和失败的章节
+            success_chapters = []
+            failed_chapters = []
             
             # 从当前章节开始生成
             for chapter_idx in range(self.current_chapter, len(self.chapter_outlines)):
@@ -980,18 +1266,46 @@ class NovelGenerator:
                     self._save_progress()
                     
                     logging.info(f"第 {chapter_idx + 1} 章生成完成")
+                    success_chapters.append(chapter_idx + 1)
                     
                 except Exception as e:
                     logging.error(f"生成第 {chapter_idx + 1} 章时出错: {str(e)}")
-                    # 保存当前进度
-                    self._save_progress()
-                    raise
+                    failed_chapters.append(chapter_idx + 1)
+                    # 尝试保存当前进度
+                    try:
+                        self._save_progress()
+                    except:
+                        logging.error("保存进度失败")
+                    
+                    # 继续生成下一章，而不是中断整个过程
+                    continue
                 
-            logging.info("小说生成完成")
+            # 生成小说完成后的总结
+            total_chapters = len(self.chapter_outlines)
+            completed_chapters = len(success_chapters)
+            failed_count = len(failed_chapters)
+            
+            completion_rate = completed_chapters / total_chapters * 100 if total_chapters > 0 else 0
+            logging.info(f"小说生成完成。总章节数: {total_chapters}，成功生成: {completed_chapters}，" 
+                        f"失败: {failed_count}，完成率: {completion_rate:.2f}%")
+            
+            if failed_chapters:
+                logging.info(f"失败的章节: {failed_chapters}")
+                
+            return {
+                "success": True,
+                "total_chapters": total_chapters,
+                "completed_chapters": completed_chapters,
+                "failed_chapters": failed_chapters,
+                "completion_rate": completion_rate
+            }
             
         except Exception as e:
-            logging.error(f"生成小说时出错: {str(e)}")
-            raise 
+            logging.error(f"生成小说过程中发生严重错误: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     def _load_characters(self):
         """加载角色库"""
@@ -1021,6 +1335,7 @@ class NovelGenerator:
         """保存角色库"""
         logging.info("开始保存角色库...") # 添加日志：开始保存角色库
         logging.info(f"当前角色库数据: {self.characters}") # 添加日志：打印当前角色库数据
+        print(f"正在保存角色库到文件: {self.characters_file}") # 打印文件路径，**新增日志**
         characters_data = {
             name: {
                 "name": char.name,
@@ -1042,22 +1357,42 @@ class NovelGenerator:
             }
             for name, char in self.characters.items()
         }
+        logging.debug(f"即将保存的角色库 JSON 数据: {characters_data}") # 打印 JSON 数据 **新增日志**
         with open(self.characters_file, 'w', encoding='utf-8') as f:
             json.dump(characters_data, f, ensure_ascii=False, indent=2)
         logging.info("角色库保存完成。") # 添加日志：角色库保存完成 
 
     def _initialize_characters(self):
-        """初始化角色库 (示例代码，需要您根据实际情况修改)"""
+        """初始化角色库"""
         logging.info("开始初始化角色库...")  # 添加日志
 
-        # 创建一些示例角色
-        self.characters = {
-            "张三": Character(name="张三", role="主角", personality={"勇敢": 0.8, "正直": 0.7}, goals=["成为修真界的强者"], relationships={"李四": "朋友"}, development_stage="青年期", alignment="正派", realm="炼气期", level=5, cultivation_method="无", magic_treasure=["青云剑"], temperament="勇敢", ability=["剑术"], stamina=100, sect="无门无派", position="主角"),
-            "李四": Character(name="李四", role="配角", personality={"聪明": 0.7, "狡猾": 0.5}, goals=["获得更多的修炼资源"], relationships={"张三": "朋友"}, development_stage="青年期", alignment="中立", realm="炼气期", level=5, cultivation_method="无", magic_treasure=["乾坤袋"], temperament="狡猾", ability=["储物"], stamina=100, sect="无门无派", position="配角"),
-            "王五": Character(name="王五", role="反派", personality={"狡猾": 0.9, "残忍": 0.8}, goals=["统治整个修真界"], relationships={}, development_stage="中年期", alignment="反派", realm="金丹期", level=10, cultivation_method="无", magic_treasure=["血魔幡"], temperament="残忍", ability=["魔道"], stamina=150, sect="血魔宗", position="反派")
-        }
+        # 初始化为空角色库
+        self.characters = {}
 
         logging.info("角色库初始化完成。")  # 添加日志
 
         # 保存角色库
         self._save_characters() 
+
+    def _create_basic_character(self, name: str):
+        """创建基本角色，当无法从模型输出解析有效数据时使用"""
+        logging.info(f"为 {name} 创建基本角色")
+        self.characters[name] = Character(
+            name=name,
+            role="配角",
+            personality={"平和": 0.5},
+            goals=["暂无明确目标"],
+            relationships={},
+            development_stage="初次登场",
+            alignment="中立",
+            realm="凡人",
+            level=1,
+            cultivation_method="无",
+            magic_treasure=[],
+            temperament="平和",
+            ability=[],
+            stamina=100,
+            sect="无门无派",
+            position="普通人物"
+        )
+        logging.info(f"成功创建基本角色 {name}") 

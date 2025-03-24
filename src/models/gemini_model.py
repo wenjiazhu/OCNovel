@@ -11,19 +11,29 @@ class GeminiModel(BaseModel):
         super().__init__(config)
         self._validate_config()
         genai.configure(api_key=self.api_key)
+        # 如果配置中没有指定模型名称，使用默认的 'gemini-2.0-flash'
+        self.model_name = config.get('model_name', 'gemini-2.0-flash')
+        # 获取温度参数，默认为0.7
+        self.temperature = config.get('temperature', 0.7)
         self.model = genai.GenerativeModel(self.model_name)
         
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def generate(self, prompt: str, max_tokens: Optional[int] = None) -> str:
         """生成文本"""
         try:
+            generation_config = {
+                "temperature": self.temperature
+            }
+            if max_tokens:
+                generation_config["max_output_tokens"] = max_tokens
+                
             response = self.model.generate_content(
                 prompt,
-                generation_config={"max_output_tokens": max_tokens} if max_tokens else None
+                generation_config=generation_config
             )
             return response.text
         except Exception as e:
-            raise Exception(f"Gemini generation error: {str(e)}")
+            raise Exception(f"Gemini generation error: {str(e)}, prompt: {prompt}")
             
     def embed(self, text: str) -> np.ndarray:
         """获取文本嵌入向量"""

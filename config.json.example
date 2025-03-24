@@ -1,0 +1,121 @@
+{
+  "ai_config": {
+    "gemini_api_key": "your_gemini_api_key",
+    "openai_api_key": "your_openai_api_key",
+    "openai_api_base": "https://openai.com/v1"
+  },
+  "model_config": {
+    "outline_model": {
+      "type": "gemini",
+      "model_name": "gemini_model_name",
+      "temperature": 0.7
+    },
+    "content_model": {
+      "type": "gemini",
+      "model_name": "gemini_model_name",
+      "temperature": 0.2
+    },
+    "embedding_model": {
+      "type": "openai",
+      "api_key": "your_openai_api_key",
+      "base_url": "https://openai.com/v1/embedding",
+      "model_name": "embedding_model_name"
+    }
+  },
+  "knowledge_base_config": {
+    "reference_file": "data/reference/my_novel.txt",
+    "chunk_size": 1000,
+    "chunk_overlap": 200,
+    "cache_dir": "data/cache"
+  },
+  "log_config": {
+    "log_dir": "data/logs",
+    "log_level": "DEBUG",
+    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  },
+  "novel_config": {
+    "type": "玄幻",
+    "theme": "修真逆袭",
+    "style": "热血",
+    "target_length": 1000000,
+    "chapter_length": 2500,
+    "reference_file": "data/reference/my_novel.txt",
+    "writing_guide": {
+      "world_building": {
+        "magic_system": "以灵气修炼为主，分为天地玄黄四个大境界",
+        "social_system": "修真门派为主，世俗王朝为辅",
+        "background": "末法时代，灵气复苏"
+      },
+      "character_guide": {
+        "protagonist": {
+          "background": "普通散修",
+          "initial_personality": "坚韧、重情、智慧",
+          "growth_path": "逆境成长"
+        },
+        "supporting_roles": [
+          {
+            "role_type": "师尊",
+            "personality": "深沉智慧",
+            "relationship": "亦师亦父"
+          },
+          {
+            "role_type": "道侣",
+            "personality": "天真烂漫",
+            "relationship": "互相扶持"
+          }
+        ],
+        "antagonists": [
+          {
+            "role_type": "宿敌",
+            "personality": "阴狠毒辣",
+            "conflict_point": "夺宝之争"
+          }
+        ]
+      },
+      "plot_structure": {
+        "act_one": {
+          "setup": "主角发现自身特殊体质",
+          "inciting_incident": "获得上古传承",
+          "first_plot_point": "被迫离开家乡"
+        },
+        "act_two": {
+          "rising_action": "加入门派，逐步成长",
+          "midpoint": "身世之谜揭开",
+          "complications": "与宿敌的多次对抗"
+        },
+        "act_three": {
+          "climax": "终极决战",
+          "resolution": "飞升成仙"
+        }
+      },
+      "style_guide": {
+        "tone": "热血激昂中带有智慧思考",
+        "pacing": "快节奏，重要场景适当放慢",
+        "description_focus": [
+          "修炼场景要细致",
+          "战斗场景要激烈",
+          "情感描写要真挚",
+          "人物对话要生动",
+          "语言风格要诙谐"
+        ]
+      }
+    }
+  },
+  "generation_config": {
+    "max_retries": 3,
+    "retry_delay": 10,
+    "force_rebuild_kb": false,
+    "validation": {
+      "check_logic": true,
+      "check_consistency": true,
+      "check_duplicates": true
+    }
+  },
+  "output_config": {
+    "format": "txt",
+    "encoding": "utf-8",
+    "save_outline": true,
+    "save_character_states": true,
+    "output_dir": "data/output"
+  }
+} 

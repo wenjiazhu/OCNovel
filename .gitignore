@@ -23,7 +23,7 @@ build/
 data/cache/*
 data/output/*
 data/logs/*
-data/reference/*
+data/reference/my_novel.txt
 !data/cache/.gitkeep
 !data/output/.gitkeep
 !data/logs/.gitkeep

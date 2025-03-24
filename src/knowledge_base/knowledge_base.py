@@ -37,51 +37,75 @@ class KnowledgeBase:
         overlap = self.config["chunk_overlap"]
         chunks = []
         
-        # 使用jieba分句
-        sentences = list(jieba.cut(text, cut_all=False))
-        logging.info(f"分词后得到 {len(sentences)} 个词语")
+        # 按章节分割文本
+        chapters = text.split("第")
+        logging.info(f"文本分割为 {len(chapters)} 个章节")
         
-        chapter = 1
-        current_chunk = []
-        current_length = 0
-        current_chapter_content = ""
-        start_idx = 0
-        
-        for i, sentence in enumerate(sentences):
-            current_chunk.append(sentence)
-            current_length += len(sentence)
-            current_chapter_content += sentence
-            
-            # 检测章节变化
-            if "第" in sentence and "章" in sentence:
-                if i > 0:  # 不是第一章
-                    chapter += 1
-                current_chapter_content = sentence
-            
-            # 当达到目标长度或遇到章节结束时创建新块
-            if current_length >= chunk_size or (i == len(sentences) - 1):
-                chunk_text = "".join(current_chunk)
-                if chunk_text.strip():  # 确保块不为空
-                    chunks.append(TextChunk(
-                        content=chunk_text,
-                        chapter=chapter,
-                        start_idx=start_idx,
-                        end_idx=i,
-                        metadata={
-                            "chapter_content": current_chapter_content,
-                            "previous_context": "".join(sentences[max(0, start_idx-20):start_idx]),
-                            "following_context": "".join(sentences[i+1:min(len(sentences), i+21)])
-                        }
-                    ))
-                    logging.debug(f"创建文本块: 长度={len(chunk_text)}, 章节={chapter}, 起始索引={start_idx}, 结束索引={i}")
+        for chapter_idx, chapter_content in enumerate(chapters[1:], 1):  # 跳过第一个空分片
+            try:
+                # 处理单个章节
+                current_chapter = f"第{chapter_content}"
+                sentences = list(jieba.cut(current_chapter, cut_all=False))
                 
-                # 保留重叠部分
-                if i < len(sentences) - 1:
-                    overlap_start = max(0, len(current_chunk) - overlap)
-                    current_chunk = current_chunk[overlap_start:]
-                    current_length = sum(len(t) for t in current_chunk)
-                    start_idx = i - len(current_chunk) + 1
+                current_chunk = []
+                current_length = 0
+                start_idx = 0
                 
+                for i, sentence in enumerate(sentences):
+                    current_chunk.append(sentence)
+                    current_length += len(sentence)
+                    
+                    # 当达到目标长度时创建新块
+                    if current_length >= chunk_size:
+                        chunk_text = "".join(current_chunk)
+                        if chunk_text.strip():  # 确保块不为空
+                            chunk = TextChunk(
+                                content=chunk_text,
+                                chapter=chapter_idx,
+                                start_idx=start_idx,
+                                end_idx=i,
+                                metadata={
+                                    "chapter_content": current_chapter[:100] + "...",  # 只保存章节开头
+                                    "previous_context": "".join(sentences[max(0, start_idx-10):start_idx]),
+                                    "following_context": "".join(sentences[i+1:min(len(sentences), i+11)])
+                                }
+                            )
+                            chunks.append(chunk)
+                            logging.debug(f"创建文本块: 章节={chapter_idx}, 长度={len(chunk_text)}")
+                        
+                        # 保留重叠部分
+                        overlap_start = max(0, len(current_chunk) - overlap)
+                        current_chunk = current_chunk[overlap_start:]
+                        current_length = sum(len(t) for t in current_chunk)
+                        start_idx = i - len(current_chunk) + 1
+                
+                # 处理最后一个块
+                if current_chunk:
+                    chunk_text = "".join(current_chunk)
+                    if chunk_text.strip():
+                        chunk = TextChunk(
+                            content=chunk_text,
+                            chapter=chapter_idx,
+                            start_idx=start_idx,
+                            end_idx=len(sentences)-1,
+                            metadata={
+                                "chapter_content": current_chapter[:100] + "...",
+                                "previous_context": "".join(sentences[max(0, start_idx-10):start_idx]),
+                                "following_context": ""
+                            }
+                        )
+                        chunks.append(chunk)
+                
+                # 定期清理内存
+                if chapter_idx % 10 == 0:
+                    del sentences
+                    import gc
+                    gc.collect()
+                    
+            except Exception as e:
+                logging.error(f"处理第 {chapter_idx} 章时出错: {str(e)}")
+                continue
+            
         logging.info(f"总共创建了 {len(chunks)} 个文本块")
         return chunks
         
@@ -96,35 +120,53 @@ class KnowledgeBase:
                     cached_data = pickle.load(f)
                 self.index = cached_data['index']
                 self.chunks = cached_data['chunks']
-                logging.info("Successfully loaded knowledge base from cache")
+                logging.info("成功从缓存加载知识库")
                 return
             except Exception as e:
-                logging.warning(f"Failed to load cache: {e}")
+                logging.warning(f"加载缓存失败: {e}")
                 
         # 分块
         self.chunks = self._chunk_text(text)
-        logging.info(f"Created {len(self.chunks)} text chunks")
+        logging.info(f"创建了 {len(self.chunks)} 个文本块")
         
-        # 获取嵌入向量
+        # 分批获取嵌入向量
         vectors = []
-        for i, chunk in enumerate(self.chunks):
-            try:
-                vector = self.embedding_model.embed(chunk.content)
-                if vector is None or len(vector) == 0:
-                    logging.error(f"Empty vector returned for chunk {i}")
-                    continue
-                vectors.append(vector)
-                logging.info(f"Generated embedding for chunk {i}, vector dimension: {len(vector)}")
-            except Exception as e:
-                logging.error(f"Error generating embedding for chunk {i}: {e}")
-                continue
-                
-        if not vectors:
-            raise ValueError("No valid vectors generated")
+        batch_size = 100  # 每批处理100个文本块
+        
+        for i in range(0, len(self.chunks), batch_size):
+            batch_chunks = self.chunks[i:i+batch_size]
+            batch_vectors = []
             
+            for j, chunk in enumerate(batch_chunks):
+                try:
+                    vector = self.embedding_model.embed(chunk.content)
+                    if vector is None or len(vector) == 0:
+                        logging.error(f"文本块 {i+j} 返回空向量")
+                        continue
+                    batch_vectors.append(vector)
+                    logging.info(f"生成文本块 {i+j} 的向量，维度: {len(vector)}")
+                except Exception as e:
+                    logging.error(f"生成文本块 {i+j} 的向量时出错: {e}")
+                    continue
+            
+            vectors.extend(batch_vectors)
+            
+            # 定期保存中间结果
+            if i % 1000 == 0 and i > 0:
+                temp_cache_path = cache_path + f".temp_{i}"
+                with open(temp_cache_path, 'wb') as f:
+                    pickle.dump({
+                        'chunks': self.chunks[:i+batch_size],
+                        'vectors': vectors
+                    }, f)
+                logging.info(f"保存临时进度到 {temp_cache_path}")
+        
+        if not vectors:
+            raise ValueError("没有生成有效的向量")
+        
         # 构建索引
         dimension = len(vectors[0])
-        logging.info(f"Building FAISS index with dimension {dimension}")
+        logging.info(f"构建 FAISS 索引，维度 {dimension}")
         self.index = faiss.IndexFlatL2(dimension)
         vectors_array = np.array(vectors).astype('float32')
         self.index.add(vectors_array)
@@ -135,7 +177,12 @@ class KnowledgeBase:
                 'index': self.index,
                 'chunks': self.chunks
             }, f)
-        logging.info("Knowledge base built and cached successfully")
+        logging.info("知识库构建完成并已缓存")
+        
+        # 清理临时文件
+        for f in os.listdir(self.cache_dir):
+            if f.startswith(os.path.basename(cache_path) + ".temp_"):
+                os.remove(os.path.join(self.cache_dir, f))
         
     def search(self, query: str, k: int = 5) -> List[Tuple[TextChunk, float]]:
         """搜索相关内容"""

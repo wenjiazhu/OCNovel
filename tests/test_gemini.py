@@ -22,7 +22,7 @@ def test_gemini():
         genai.configure(api_key=api_key)
         
         # 创建模型实例
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash-thinking-exp-01-21')
         
         # 准备测试提示词
         prompt = """
@@ -39,9 +39,12 @@ def test_gemini():
         # 记录开始时间
         start_time = time.time()
         
-        # 生成内容
+        # 生成内容，添加温度参数
         logger.info("正在生成内容...")
-        response = model.generate_content(prompt)
+        response = model.generate_content(
+            prompt,
+            generation_config={"temperature": 0.8}
+        )
         
         # 验证结果
         logger.info(f"\n处理时间: {time.time() - start_time:.2f}秒")
