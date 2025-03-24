@@ -1,6 +1,8 @@
 import os
 import argparse
 import logging
+import json
+import hashlib
 from typing import Dict
 from src.config.config import Config
 from src.models.gemini_model import GeminiModel
@@ -67,32 +69,67 @@ def main():
         # 检查参考小说文件
         reference_files = config.knowledge_base_config["reference_files"]
         logging.info(f"正在检查参考小说文件: {reference_files}")
+        
+        # 获取已导入文件的记录
+        imported_files_record = os.path.join(config.knowledge_base_config["cache_dir"], "imported_files.json")
+        imported_files = set()
+        if os.path.exists(imported_files_record):
+            with open(imported_files_record, 'r', encoding='utf-8') as f:
+                imported_files = set(json.load(f))
+                logging.info(f"已导入的文件记录: {imported_files}")
+        
+        # 过滤出需要导入的文件
+        files_to_import = []
         for file_path in reference_files:
             if not os.path.exists(file_path):
-                raise FileNotFoundError(f"参考小说文件不存在: {file_path}")
-        logging.info("参考小说文件检查完成")
+                logging.warning(f"参考小说文件不存在，将跳过: {file_path}")
+                continue
+                
+            file_hash = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
+            file_record = f"{file_path}:{file_hash}"
             
-        # 创建知识库
-        logging.info("正在构建知识库...")
-        knowledge_base = KnowledgeBase(
-            config.knowledge_base_config,
-            embedding_model
-        )
+            if file_record in imported_files and not config.generator_config.get("force_rebuild_kb", False):
+                logging.info(f"文件已导入，将跳过: {file_path}")
+                continue
+                
+            files_to_import.append((file_path, file_record))
         
-        # 导入参考小说
-        all_reference_text = ""
-        for file_path in reference_files:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                reference_text = f.read()
-                all_reference_text += reference_text + "\n"
-                logging.info(f"已导入参考文件: {file_path}, 长度: {len(reference_text)}")
-        
-        logging.info(f"所有参考小说总长度: {len(all_reference_text)}")
-        knowledge_base.build(
-            all_reference_text, 
-            force_rebuild=config.generator_config.get("force_rebuild_kb", False)
-        )
-        logging.info("知识库构建完成")
+        if not files_to_import and imported_files:
+            logging.info("所有文件都已导入，无需重新构建知识库")
+            # 创建知识库但不重新构建
+            knowledge_base = KnowledgeBase(
+                config.knowledge_base_config,
+                embedding_model
+            )
+        else:
+            # 创建知识库
+            logging.info("正在构建知识库...")
+            knowledge_base = KnowledgeBase(
+                config.knowledge_base_config,
+                embedding_model
+            )
+            
+            # 导入参考小说
+            all_reference_text = ""
+            for file_path, file_record in files_to_import:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    reference_text = f.read()
+                    all_reference_text += reference_text + "\n"
+                    logging.info(f"已导入参考文件: {file_path}, 长度: {len(reference_text)}")
+                imported_files.add(file_record)
+            
+            if all_reference_text:
+                knowledge_base.build(
+                    all_reference_text, 
+                    force_rebuild=config.generator_config.get("force_rebuild_kb", False)
+                )
+                logging.info("知识库构建完成")
+                
+                # 保存已导入文件记录
+                os.makedirs(config.knowledge_base_config["cache_dir"], exist_ok=True)
+                with open(imported_files_record, 'w', encoding='utf-8') as f:
+                    json.dump(list(imported_files), f, ensure_ascii=False, indent=2)
+                logging.info("已更新导入文件记录")
         
         # 创建小说生成器
         generator = NovelGenerator(

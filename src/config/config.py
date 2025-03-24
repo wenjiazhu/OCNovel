@@ -41,15 +41,17 @@ class Config:
         
         # 小说配置
         self.novel_config = config["novel_config"]
+        self.novel_config["reference_files"] = [
+            os.path.join(self.base_dir, file_path)
+            for file_path in self.novel_config["reference_files"]
+        ]
         
         # 知识库配置
-        self.knowledge_base_config = {
-            "chunk_size": 500,
-            "chunk_overlap": 50,
-            "cache_dir": os.path.join(self.base_dir, "data", "cache"),
-            "vector_db_path": os.path.join(self.base_dir, "data", "cache", "vector_db"),
-            "reference_file": os.path.join(self.base_dir, self.novel_config["reference_file"])
-        }
+        self.knowledge_base_config = config["knowledge_base_config"]
+        self.knowledge_base_config["reference_files"] = [
+            os.path.join(self.base_dir, file_path)
+            for file_path in self.knowledge_base_config["reference_files"]
+        ]
         
         # 生成器配置
         self.generator_config = {
