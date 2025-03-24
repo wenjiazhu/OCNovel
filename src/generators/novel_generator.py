@@ -415,35 +415,38 @@ class NovelGenerator:
         
         # 搜索情节相关内容
         plot_query = " ".join(outline.key_points)
-        plot_results = self.knowledge_base.search(plot_query, k=3)
+        plot_results = self.knowledge_base.search(plot_query, k=5)  # 增加搜索结果数量
         materials["plot_references"] = [
             {
                 "content": chunk.content,
-                "context": self.knowledge_base.get_context(chunk)
+                "context": self.knowledge_base.get_context(chunk),
+                "source": chunk.metadata.get("source", "未知来源")  # 添加来源信息
             }
             for chunk, _ in plot_results
         ]
         
         # 搜索角色相关内容
         for character in outline.characters:
-            char_results = self.knowledge_base.search(character, k=2)
+            char_results = self.knowledge_base.search(character, k=3)  # 增加每个角色的搜索结果数量
             materials["character_references"].extend([
                 {
                     "character": character,
                     "content": chunk.content,
-                    "context": self.knowledge_base.get_context(chunk)
+                    "context": self.knowledge_base.get_context(chunk),
+                    "source": chunk.metadata.get("source", "未知来源")  # 添加来源信息
                 }
                 for chunk, _ in char_results
             ])
             
         # 搜索场景相关内容
         for setting in outline.settings:
-            setting_results = self.knowledge_base.search(setting, k=2)
+            setting_results = self.knowledge_base.search(setting, k=3)  # 增加每个场景的搜索结果数量
             materials["setting_references"].extend([
                 {
                     "setting": setting,
                     "content": chunk.content,
-                    "context": self.knowledge_base.get_context(chunk)
+                    "context": self.knowledge_base.get_context(chunk),
+                    "source": chunk.metadata.get("source", "未知来源")  # 添加来源信息
                 }
                 for chunk, _ in setting_results
             ])
@@ -496,7 +499,7 @@ class NovelGenerator:
         9. 多描写，少议论，**尝试运用比喻、拟人等修辞手法，使描写更加生动形象**
         10. 多对话，少叙述，**对话要自然流畅，符合人物身份和性格**
         11. 增强人物形象描写、对话描写（双人对话、三人对话），减少非必要的环境描写
-        12. **请模仿知识库中《凡人修仙传》作品原文的语言风格，采用白描式的叙事手法和平实直白的语言风格，让AIGC值保持在50%以下，避免过度使用模板句式、逻辑跳跃、缺乏情感深度等**
+        12. **请分析参考材料中不同作品的语言风格，选择最适合当前情节的表达方式。注意保持风格的一致性，避免不同风格的混杂。**
         {context_info}
         
         [本章信息]
@@ -523,7 +526,8 @@ class NovelGenerator:
         1. 开头要自然承接上一章结尾的剧情
         2. 结尾要为下一章埋下伏笔或制造悬念
         3. 保持情节的连贯性和人物性格的一致性
-        **12. 请分析上述 [参考材料] 的语言风格，并在创作正文时尝试模仿其风格。例如，如果参考材料的语言偏正式，则正文也使用正式的书面语；如果参考材料的语言比较口语化，则正文也采用相对轻松的口语风格。**
+        4. 分析每个参考材料的来源，选择最适合当前情节的写作风格
+        5. 在保持风格一致的前提下，可以借鉴不同参考材料的优秀表达方式
         """
         
         # 判断 review_result 是否存在且不是 "内容正常"，如果是，则添加到 prompt_content 中
@@ -874,14 +878,50 @@ class NovelGenerator:
 
         # 更新关系
         if "关系变化" in analysis and analysis["关系变化"] and analysis["关系变化"] != "无":
-            # 解析关系变化描述
-            relation_parts = analysis["关系变化"].split("与")
+            # 清理和标准化关系描述
+            relation_text = analysis["关系变化"]
+            
+            # 移除不相关的文本
+            if "期待" in relation_text:
+                relation_text = relation_text.split("期待")[0].strip()
+            
+            # 标准化角色名称
+            def standardize_name(name: str) -> str:
+                # 移除常见的后缀
+                suffixes = ["的", "了", "着", "过", "吗", "呢", "啊", "吧", "呀", "哦", "哈", "么"]
+                for suffix in suffixes:
+                    if name.endswith(suffix):
+                        name = name[:-len(suffix)]
+                return name.strip()
+            
+            # 处理关系描述
+            relations = {}
+            # 分割多个关系描述
+            relation_parts = [part.strip() for part in relation_text.split("，") if part.strip()]
+            
             for part in relation_parts:
-                if "关系" in part:
-                    other_name = part.split("关系")[0].strip()
-                    relation = part.split("关系")[1].strip()
+                # 跳过不包含角色名的部分
+                if not any(char in part for char in self.characters.keys()):
+                    continue
+                    
+                # 尝试提取角色名和关系
+                for other_name in self.characters.keys():
+                    if other_name in part:
+                        # 标准化角色名
+                        std_name = standardize_name(other_name)
+                        if std_name:
+                            # 提取关系描述
+                            relation = part.replace(other_name, "").strip()
+                            if relation:
+                                relations[std_name] = relation
+                                break
+            
+            # 更新角色关系
+            for other_name, relation in relations.items():
+                # 如果关系描述合理，则更新
+                if len(relation) > 2 and not any(x in relation for x in ["期待", "**", "：", "："]):
                     character.relationships[other_name] = relation
-            logging.info(f"角色 {name} 关系更新为：{character.relationships}")
+                    logging.info(f"角色 {name} 与 {other_name} 的关系更新为：{relation}")
 
         # 更新发展阶段
         if "发展阶段调整" in analysis and analysis["发展阶段调整"] and analysis["发展阶段调整"] != "无":
@@ -1127,12 +1167,13 @@ class NovelGenerator:
         """格式化参考材料"""
         formatted = []
         for ref in references:
+            source_info = f"[来源：{ref.get('source', '未知来源')}]"
             if "character" in ref:
-                formatted.append(f"角色：{ref['character']}\n内容：{ref['content']}")
+                formatted.append(f"{source_info}\n角色：{ref['character']}\n内容：{ref['content']}")
             elif "setting" in ref:
-                formatted.append(f"场景：{ref['setting']}\n内容：{ref['content']}")
+                formatted.append(f"{source_info}\n场景：{ref['setting']}\n内容：{ref['content']}")
             else:
-                formatted.append(f"内容：{ref['content']}")
+                formatted.append(f"{source_info}\n内容：{ref['content']}")
         return "\n\n".join(formatted)
 
     def _adjust_content_length(self, content: str, target_length: int) -> str:

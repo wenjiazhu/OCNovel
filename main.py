@@ -65,10 +65,11 @@ def main():
         logging.info("AI模型初始化完成")
         
         # 检查参考小说文件
-        reference_file = config.knowledge_base_config["reference_file"]
-        logging.info(f"正在检查参考小说文件: {reference_file}")
-        if not os.path.exists(reference_file):
-            raise FileNotFoundError(f"参考小说文件不存在: {reference_file}")
+        reference_files = config.knowledge_base_config["reference_files"]
+        logging.info(f"正在检查参考小说文件: {reference_files}")
+        for file_path in reference_files:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"参考小说文件不存在: {file_path}")
         logging.info("参考小说文件检查完成")
             
         # 创建知识库
@@ -79,11 +80,16 @@ def main():
         )
         
         # 导入参考小说
-        with open(reference_file, 'r', encoding='utf-8') as f:
-            reference_text = f.read()
-        logging.info(f"参考小说文本长度: {len(reference_text)}")
+        all_reference_text = ""
+        for file_path in reference_files:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reference_text = f.read()
+                all_reference_text += reference_text + "\n"
+                logging.info(f"已导入参考文件: {file_path}, 长度: {len(reference_text)}")
+        
+        logging.info(f"所有参考小说总长度: {len(all_reference_text)}")
         knowledge_base.build(
-            reference_text, 
+            all_reference_text, 
             force_rebuild=config.generator_config.get("force_rebuild_kb", False)
         )
         logging.info("知识库构建完成")
