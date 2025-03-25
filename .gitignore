@@ -29,6 +29,7 @@ data/reference/my_novel.txt
 !data/logs/.gitkeep
 data/src/config/config.py
 config.json
+data/marketing/*
 
 # 环境变量
 .env
