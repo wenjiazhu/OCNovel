@@ -489,7 +489,7 @@ class NovelGenerator:
         prompt_content = f"""
         请基于以下信息创作小说章节，要求：
         1. 字数必须严格控制在{self.config['chapter_length']}个汉字左右（允许±20%的误差）
-        2. 注意：字数统计只计算中文字符，不包括标点符号和英文字符
+        2. 字数统计只计算中文字符，不包括标点符号和英文字符
         3. 内容必须完整，包含开头、发展、高潮和结尾，但结尾不要进行总结性陈述或议论
         4. 情节必须符合逻辑，人物行为要有合理动机
         5. 场景描写要细致生动，**运用更具创意和想象力的语言，避免使用过于公式化和重复的表达**
@@ -500,6 +500,7 @@ class NovelGenerator:
         10. 多对话，少叙述，**对话要自然流畅，符合人物身份和性格**
         11. 增强人物形象描写、对话描写（双人对话、三人对话），减少非必要的环境描写
         12. **请分析参考材料中不同作品的语言风格，选择最适合当前情节的表达方式。注意保持风格的一致性，避免不同风格的混杂。**
+        13. 仅输出章节正文，不使用markdown格式。
         {context_info}
         
         [本章信息]
@@ -1042,7 +1043,7 @@ class NovelGenerator:
                 
         return analysis
 
-    def _save_chapter(self, chapter_num: int, content: str):
+    def _save_chapter(self, chapter_num: int, content: str, skip_character_update: bool = False):
         """保存章节文件"""
         try:
             outline = self.chapter_outlines[chapter_num - 1]
@@ -1063,13 +1064,14 @@ class NovelGenerator:
                 
             logging.info(f"已保存章节：{filename}")
             
-            # 更新角色状态（使用try-except包裹，防止出错影响主流程）
-            try:
-                self._update_character_states(content, outline)
-            except Exception as e:
-                logging.error(f"更新角色状态时出错: {str(e)}")
+            # 如果不跳过角色更新，则更新角色状态
+            if not skip_character_update:
+                try:
+                    self._update_character_states(content, outline)
+                except Exception as e:
+                    logging.error(f"更新角色状态时出错: {str(e)}")
             
-            # 生成并保存章节摘要（使用try-except包裹，防止出错影响主流程）
+            # 生成并保存章节摘要（不管是否跳过角色更新）
             try:
                 self._generate_and_save_summary(chapter_num, content)
             except Exception as e:
@@ -1203,20 +1205,52 @@ class NovelGenerator:
             return content
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def generate_chapter(self, chapter_idx: int) -> str:
+    def generate_chapter(self, chapter_idx: int, extra_prompt: str = "", original_content: str = "", prev_content: str = "", next_content: str = "") -> str:
         """生成章节内容"""
         outline = self.chapter_outlines[chapter_idx]
-
-        logging.info(f"开始生成第 {chapter_idx + 1} 章内容，当前角色库状态: {self.characters}") # 添加日志：章节生成开始时打印角色库状态
-
-        logging.info(f"第 {chapter_idx + 1} 章: 开始收集参考材料...")
-        reference_materials = self._gather_reference_materials(outline)
-
-        logging.info(f"第 {chapter_idx + 1} 章: 参考材料收集完成。开始生成章节内容...")
-        review_result = None # 初始化 review_result 为 None
-        if (chapter_idx + 1) % 5 == 0: # 判断是否是每5章一次的回顾章节
-            review_result = self._review_summaries(chapter_idx + 1) # 获取回顾结果
-        chapter_prompt = self._create_chapter_prompt(outline, reference_materials, review_result if (review_result and (chapter_idx + 1) <= self.current_chapter + 3) else None)
+        
+        logging.info(f"开始生成第 {chapter_idx + 1} 章内容")
+        
+        # 创建一个空的参考材料结构，避免使用知识库
+        reference_materials = {
+            "plot_references": [],
+            "character_references": [],
+            "setting_references": []
+        }
+        
+        logging.info(f"第 {chapter_idx + 1} 章: 参考材料准备完成。开始生成章节内容...")
+        review_result = None
+        
+        # 构建上下文信息
+        context_info = ""
+        if prev_content:
+            context_info += f"""
+            [上一章内容]
+            {prev_content[:2000]}...（内容过长已省略）
+            """
+            
+        if next_content:
+            context_info += f"""
+            [下一章内容]
+            {next_content[:2000]}...（内容过长已省略）
+            """
+            
+        if original_content:
+            context_info += f"""
+            [原章节内容]
+            {original_content[:3000]}...（内容过长已省略）
+            """
+        
+        # 创建提示词    
+        chapter_prompt = self._create_chapter_prompt(outline, reference_materials, None)
+        
+        # 添加额外提示词和上下文信息
+        if extra_prompt:
+            chapter_prompt += f"\n\n[额外要求]\n{extra_prompt}"
+            
+        if context_info:
+            chapter_prompt += f"\n\n[上下文信息]\n{context_info}"
+        
         try:
             chapter_content = self.content_model.generate(chapter_prompt)
             if not chapter_content or chapter_content.strip() == "":
@@ -1226,7 +1260,7 @@ class NovelGenerator:
             logging.error(f"第 {chapter_idx + 1} 章: 章节内容生成失败: {str(e)}")
             raise
 
-        logging.info(f"第 {chapter_idx + 1} 章: 章节内容生成完成，字数调整前字数: {self._count_chinese_chars(chapter_content)}...")
+        logging.info(f"第 {chapter_idx + 1} 章: 章节内容生成完成，字数: {self._count_chinese_chars(chapter_content)}...")
         target_length = self.config['chapter_length']
         
         try:
@@ -1234,25 +1268,11 @@ class NovelGenerator:
             logging.info(f"第 {chapter_idx + 1} 章: 字数调整完成，调整后字数: {self._count_chinese_chars(chapter_content)}")
         except Exception as e:
             logging.error(f"第 {chapter_idx + 1} 章: 字数调整失败: {str(e)}，使用原始内容继续")
-            # 如果字数调整失败，继续使用原始内容
-
-        logging.info(f"第 {chapter_idx + 1} 章: 开始验证章节内容...")
-        # 验证章节内容但不中断生成流程
-        validation_result = self._validate_chapter(chapter_content, chapter_idx)
-        logging.info(f"第 {chapter_idx + 1} 章: 验证结果: {validation_result}")
-
-        logging.info(f"第 {chapter_idx + 1} 章: 开始更新角色状态...")
-        try:
-            self._update_character_states(chapter_content, outline)
-            logging.info(f"第 {chapter_idx + 1} 章: 角色状态更新完成")
-        except Exception as e:
-            logging.error(f"第 {chapter_idx + 1} 章: 角色状态更新失败: {str(e)}，但将继续生成")
-            # 角色状态更新失败不影响章节生成
 
         logging.info(f"第 {chapter_idx + 1} 章: 准备保存章节...")
-        self._save_chapter(chapter_idx + 1, chapter_content)
+        self._save_chapter(chapter_idx + 1, chapter_content, skip_character_update=True)
 
-        logging.info(f"第 {chapter_idx + 1} 章内容生成完成，当前角色库状态: {self.characters}") # 添加日志：章节生成结束时打印角色库状态
+        logging.info(f"第 {chapter_idx + 1} 章内容生成完成")
 
         return chapter_content
     
