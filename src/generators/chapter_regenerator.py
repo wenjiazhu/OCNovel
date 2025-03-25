@@ -5,6 +5,7 @@ import json
 import hashlib
 import sys
 from typing import Dict
+import glob
 
 # 添加项目根目录到 Python 路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -149,12 +150,35 @@ def main():
         try:
             # 读取原章节内容
             output_dir = config.generator_config.get("output_dir", "data/output")
-            chapter_file = os.path.join(output_dir, f"第{chapter_num}章.txt")
+            
+            # 定义多种可能的章节文件名格式
+            possible_chapter_files = [
+                os.path.join(output_dir, f"第{chapter_num}章.txt"),
+                os.path.join(output_dir, f"第{chapter_num} 章.txt"),
+                os.path.join(output_dir, f"第{chapter_num}章_*.txt")  # 通配符匹配带标题的文件
+            ]
+            
+            chapter_file = ""
             original_content = ""
-            if os.path.exists(chapter_file):
+            
+            # 尝试找到并读取章节文件
+            for file_pattern in possible_chapter_files:
+                if '*' in file_pattern:
+                    # 处理带通配符的文件名
+                    matching_files = glob.glob(file_pattern)
+                    if matching_files:
+                        chapter_file = matching_files[0]
+                        break
+                elif os.path.exists(file_pattern):
+                    chapter_file = file_pattern
+                    break
+            
+            if chapter_file and os.path.exists(chapter_file):
                 with open(chapter_file, 'r', encoding='utf-8') as f:
                     original_content = f.read()
-                logging.info(f"已读取原第 {chapter_num} 章内容")
+                logging.info(f"已读取原第 {chapter_num} 章内容: {chapter_file}")
+            else:
+                logging.warning(f"未找到第 {chapter_num} 章原始文件，将创建新章节")
             
             # 读取前后章节内容
             prev_content = ""
@@ -182,25 +206,41 @@ def main():
                 with open(summary_file, 'r', encoding='utf-8') as f:
                     summaries = json.load(f)
                 
-                # 生成新的摘要
-                prompt = f"""
-                请为以下章节内容生成一个200字以内的摘要，要求：
-                1. 突出本章的主要情节发展
-                2. 包含关键人物的重要行动
-                3. 说明本章对整体剧情的影响
-                4. 仅返回摘要正文，字数控制在200字以内
+                # 查找重新生成的章节文件
+                new_chapter_files = [
+                    f for f in os.listdir(output_dir) 
+                    if f.startswith(f"第{chapter_num}章") or f.startswith(f"第{chapter_num} 章")
+                ]
                 
-                章节内容：
-                {original_content}
-                """
-                
-                new_summary = content_model.generate(prompt)
-                summaries[str(chapter_num)] = new_summary
-                
-                # 保存更新后的摘要
-                with open(summary_file, 'w', encoding='utf-8') as f:
-                    json.dump(summaries, f, ensure_ascii=False, indent=2)
-                logging.info(f"已更新第 {chapter_num} 章摘要")
+                if new_chapter_files:
+                    new_chapter_file = os.path.join(output_dir, new_chapter_files[0])
+                    logging.info(f"找到重新生成的章节文件: {new_chapter_files[0]}")
+                    
+                    # 读取重新生成后的章节内容
+                    with open(new_chapter_file, 'r', encoding='utf-8') as f:
+                        new_chapter_content = f.read()
+                    
+                    # 使用新生成的内容来创建摘要
+                    prompt = f"""
+                    请为以下章节内容生成一个200字以内的摘要，要求：
+                    1. 突出本章的主要情节发展
+                    2. 包含关键人物的重要行动
+                    3. 说明本章对整体剧情的影响
+                    4. 仅返回摘要正文，字数控制在200字以内
+                    
+                    章节内容：
+                    {new_chapter_content}
+                    """
+                    
+                    new_summary = content_model.generate(prompt)
+                    summaries[str(chapter_num)] = new_summary
+                    
+                    # 保存更新后的摘要
+                    with open(summary_file, 'w', encoding='utf-8') as f:
+                        json.dump(summaries, f, ensure_ascii=False, indent=2)
+                    logging.info(f"已更新第 {chapter_num} 章摘要")
+                else:
+                    logging.warning(f"无法找到重新生成的第 {chapter_num} 章文件，无法更新摘要")
             
         except Exception as e:
             logging.error(f"重新生成第 {chapter_num} 章时出错: {str(e)}")

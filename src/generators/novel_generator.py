@@ -1284,14 +1284,6 @@ class NovelGenerator:
             target_chapters = self.config['target_length'] // self.config['chapter_length']
             logging.info(f"目标章节数: {target_chapters}")
 
-            # 初始化角色库 (在生成小说前调用)
-            try:
-                self._initialize_characters()
-                logging.info("角色库初始化完成")
-            except Exception as e:
-                logging.error(f"角色库初始化失败: {str(e)}，但将继续使用空角色库")
-                self.characters = {}
-
             # 如果大纲章节数不足，生成后续章节的大纲
             if len(self.chapter_outlines) < target_chapters:
                 logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
@@ -1422,18 +1414,6 @@ class NovelGenerator:
         with open(self.characters_file, 'w', encoding='utf-8') as f:
             json.dump(characters_data, f, ensure_ascii=False, indent=2)
         logging.info("角色库保存完成。") # 添加日志：角色库保存完成 
-
-    def _initialize_characters(self):
-        """初始化角色库"""
-        logging.info("开始初始化角色库...")  # 添加日志
-
-        # 初始化为空角色库
-        self.characters = {}
-
-        logging.info("角色库初始化完成。")  # 添加日志
-
-        # 保存角色库
-        self._save_characters() 
 
     def _create_basic_character(self, name: str):
         """创建基本角色，当无法从模型输出解析有效数据时使用"""

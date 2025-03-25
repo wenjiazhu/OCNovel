@@ -61,7 +61,7 @@ def main():
         logging.info("开始生成小说营销内容...")
         
         # 加载配置
-        config = Config(args.config)
+        config = Config()  # 不传递参数
         logging.info("配置加载完成")
         
         # 创建内容生成模型
@@ -76,18 +76,18 @@ def main():
         if args.summary_file:
             chapter_summaries = load_chapter_summaries(args.summary_file)
             logging.info(f"已加载 {len(chapter_summaries)} 条章节摘要")
-        elif hasattr(config, 'generator_config') and 'output_dir' in config.generator_config:
-            summary_file = os.path.join(config.generator_config['output_dir'], "summary.json")
+        elif hasattr(config, 'output_config') and 'output_dir' in config.output_config:
+            summary_file = os.path.join(config.output_config['output_dir'], "summary.json")
             if os.path.exists(summary_file):
                 chapter_summaries = load_chapter_summaries(summary_file)
                 logging.info(f"已从默认位置加载 {len(chapter_summaries)} 条章节摘要")
         
         # 准备小说配置
         novel_config = {
-            "type": config.generator_config.get("novel_config", {}).get("type", "玄幻"),
-            "theme": config.generator_config.get("novel_config", {}).get("theme", "修真逆袭"),
-            "keywords": args.keywords or config.generator_config.get("novel_config", {}).get("keywords", []),
-            "main_characters": args.characters or config.generator_config.get("novel_config", {}).get("main_characters", [])
+            "type": config.novel_config.get("type", "玄幻"),
+            "theme": config.novel_config.get("theme", "修真逆袭"),
+            "keywords": args.keywords or config.novel_config.get("keywords", []),
+            "main_characters": args.characters or config.novel_config.get("main_characters", [])
         }
         
         # 一键生成所有营销内容
@@ -104,6 +104,15 @@ def main():
             
         print("\n【故事梗概】")
         print(result["summary"])
+        
+        print("\n【封面提示词】")
+        for platform, prompt in result["cover_prompts"].items():
+            print(f"{platform}: {prompt}")
+        
+        if "cover_images" in result and result["cover_images"]:
+            print("\n【封面图片】")
+            for platform, image_path in result["cover_images"].items():
+                print(f"{platform}: {image_path}")
         
         print("\n【已保存到】")
         print(result["saved_file"])
