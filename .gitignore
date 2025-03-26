@@ -27,7 +27,6 @@ data/reference/my_novel.txt
 !data/cache/.gitkeep
 !data/output/.gitkeep
 !data/logs/.gitkeep
-data/src/config/config.py
 config.json
 data/marketing/*
 
