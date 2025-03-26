@@ -23,12 +23,12 @@ class Config:
             "outline_model": {
                 "type": "gemini",
                 "api_key": os.getenv("GEMINI_API_KEY", config["ai_config"]["gemini_api_key"]),
-                "model_name": "gemini-2.0-pro-exp"
+                "model_name": "gemini-2.5-pro-exp-03-25"
             },
             "content_model": {
                 "type": "gemini",
                 "api_key": os.getenv("GEMINI_API_KEY", config["ai_config"]["gemini_api_key"]),
-                "model_name": "gemini-2.0-flash-thinking-exp-01-21"
+                "model_name": "gemini-2.5-pro-exp-03-25"
             },
             "embedding_model": {
                 "type": "openai",
