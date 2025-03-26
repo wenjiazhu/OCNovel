@@ -14,12 +14,22 @@ from src.generators.title_generator import TitleGenerator
 
 def setup_logging():
     """设置日志"""
+    # 获取项目根目录
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # 定义日志目录路径
+    log_dir = os.path.join(base_dir, "data", "logs")
+    # 确保日志目录存在
+    os.makedirs(log_dir, exist_ok=True)
+    # 定义日志文件完整路径
+    log_file_path = os.path.join(log_dir, "marketing_generation.log")
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("marketing_generation.log", encoding='utf-8')
+            # 使用完整的日志文件路径
+            logging.FileHandler(log_file_path, encoding='utf-8')
         ]
     )
 

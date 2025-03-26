@@ -2,6 +2,7 @@ from typing import Dict
 import os
 import json
 from dotenv import load_dotenv
+from .ai_config import AIConfig
 
 class Config:
     def __init__(self):
@@ -18,25 +19,14 @@ class Config:
         else:
             raise FileNotFoundError(f"配置文件 {self.config_file} 不存在")
             
+        # 初始化 AI 配置
+        self.ai_config = AIConfig()
+            
         # AI模型配置
         self.model_config = {
-            "outline_model": {
-                "type": "gemini",
-                "api_key": os.getenv("GEMINI_API_KEY", config["ai_config"]["gemini_api_key"]),
-                "model_name": "gemini-2.5-pro-exp-03-25"
-            },
-            "content_model": {
-                "type": "gemini",
-                "api_key": os.getenv("GEMINI_API_KEY", config["ai_config"]["gemini_api_key"]),
-                "model_name": "gemini-2.5-pro-exp-03-25"
-            },
-            "embedding_model": {
-                "type": "openai",
-                "api_key": os.getenv("OPENAI_API_KEY", config["ai_config"]["openai_api_key"]),
-                "base_url": os.getenv("OPENAI_API_BASE", config["ai_config"]["openai_api_base"]),
-                "model_name": "Pro/BAAI/bge-m3",
-                "dimension": 1024
-            }
+            "outline_model": self.ai_config.get_model_config("gemini_outline"),
+            "content_model": self.ai_config.get_model_config("gemini_content"),
+            "embedding_model": self.ai_config.get_model_config("openai_embedding")
         }
         
         # 小说配置

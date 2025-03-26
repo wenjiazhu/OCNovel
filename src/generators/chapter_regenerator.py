@@ -147,6 +147,21 @@ def main():
         extra_prompt = args.prompt if args.prompt else ""
         logging.info(f"正在重新生成第 {chapter_num} 章，额外提示词: {extra_prompt}")
         
+        # 检查章节号是否为正数
+        if chapter_num <= 0:
+            logging.error("错误：章节号必须是正整数。")
+            raise ValueError("章节号必须是正整数")
+            
+        # 计算章节索引
+        chapter_idx = chapter_num - 1
+        
+        # 检查章节索引是否在有效范围内
+        if chapter_idx >= len(generator.chapter_outlines):
+            logging.error(f"错误：请求重新生成的章节号 {chapter_num} (索引 {chapter_idx}) 超出了现有大纲的范围 (共 {len(generator.chapter_outlines)} 章)。")
+            logging.error("请先确保已生成足够章节的大纲，或检查输入的章节号是否正确。")
+            # 抛出更明确的错误，而不是等待 IndexError
+            raise IndexError(f"章节号 {chapter_num} 超出大纲范围 (最大章节号 {len(generator.chapter_outlines)})")
+
         try:
             # 读取原章节内容
             output_dir = config.generator_config.get("output_dir", "data/output")
@@ -197,7 +212,8 @@ def main():
                 logging.info(f"已读取第 {chapter_num+1} 章内容")
             
             # 使用NovelGenerator中的方法重新生成章节
-            generator.generate_chapter(chapter_num - 1, extra_prompt, original_content, prev_content, next_content)
+            # 使用计算好的 chapter_idx
+            generator.generate_chapter(chapter_idx, extra_prompt, original_content, prev_content, next_content)
             logging.info(f"第 {chapter_num} 章重新生成完成")
             
             # 更新章节摘要

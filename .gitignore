@@ -1,7 +1,6 @@
 # Python虚拟环境
 venv/
 env/
-.env
 
 # Python缓存文件
 __pycache__/
@@ -23,11 +22,10 @@ build/
 data/cache/*
 data/output/*
 data/logs/*
-data/reference/my_novel.txt
+data/reference/*
 !data/cache/.gitkeep
 !data/output/.gitkeep
 !data/logs/.gitkeep
-config.json
 data/marketing/*
 
 # 环境变量
@@ -37,5 +35,4 @@ data/marketing/*
 # 系统文件
 .DS_Store
 Thumbs.db
-.env/
 .cursorignore
