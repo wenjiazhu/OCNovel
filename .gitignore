@@ -1,6 +1,7 @@
 # Python虚拟环境
 venv/
 env/
+.venv/
 
 # Python缓存文件
 __pycache__/
@@ -27,6 +28,7 @@ data/reference/*
 !data/output/.gitkeep
 !data/logs/.gitkeep
 data/marketing/*
+prompt_definitions.py
 
 # 环境变量
 .env

@@ -7,6 +7,8 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 import dataclasses
 import math # 导入 math 模块用于 ceil
 import re # 导入 re 模块用于清理文件名
+from . import prompts # 导入新的 prompts 模块
+from .consistency_checker import ConsistencyChecker # 导入一致性检查器
 
 @dataclass
 class ChapterOutline:
@@ -53,6 +55,9 @@ class NovelGenerator:
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.characters_file = os.path.join(self.output_dir, "characters.json") # 角色库文件路径
+        
+        # 初始化一致性检查器
+        self.consistency_checker = ConsistencyChecker(content_model, self.output_dir)
         
         self._setup_logging()
         self._load_progress()
@@ -147,225 +152,6 @@ class NovelGenerator:
         with open(outline_file, 'w', encoding='utf-8') as f:
             json.dump(outline_data, f, ensure_ascii=False, indent=2)
     
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def generate_chapter(self, chapter_idx: int, extra_prompt: str = "", original_content: str = "", prev_content: str = "", next_content: str = "") -> str:
-        """生成章节内容"""
-        outline = self.chapter_outlines[chapter_idx]
-        
-        logging.info(f"开始生成第 {chapter_idx + 1} 章内容")
-        
-        # 创建一个空的参考材料结构，避免使用知识库
-        reference_materials = {
-            "plot_references": [],
-            "character_references": [],
-            "setting_references": []
-        }
-        
-        logging.info(f"第 {chapter_idx + 1} 章: 参考材料准备完成。开始生成章节内容...")
-        review_result = None
-        
-        # 获取上一章摘要
-        prev_summary = ""
-        if chapter_idx > 0:
-            summary_file = os.path.join(self.output_dir, "summary.json")
-            if os.path.exists(summary_file):
-                try:
-                    with open(summary_file, 'r', encoding='utf-8') as f:
-                        summaries = json.load(f)
-                        prev_chapter_num = str(chapter_idx)
-                        if prev_chapter_num in summaries:
-                            prev_summary = summaries[prev_chapter_num]
-                            logging.info(f"已获取第 {chapter_idx} 章摘要用于参考")
-                except Exception as e:
-                    logging.error(f"读取上一章摘要失败: {str(e)}")
-        
-        # 获取下一章大纲
-        next_outline = None
-        if chapter_idx + 1 < len(self.chapter_outlines):
-            next_outline = self.chapter_outlines[chapter_idx + 1]
-            logging.info(f"已获取第 {chapter_idx + 2} 章大纲用于参考")
-        
-        # 构建上下文信息
-        context_info = ""
-        if prev_summary:
-            context_info += f"""
-            [上一章摘要]
-            {prev_summary}
-            """
-        elif prev_content:  # 如果没有摘要，仍然使用原始内容
-            context_info += f"""
-            [上一章内容]
-            {prev_content[:2000]}...（内容过长已省略）
-            """
-            
-        if next_outline:
-            context_info += f"""
-            [下一章大纲]
-            标题：{next_outline.title}
-            关键剧情：{' '.join(next_outline.key_points)}
-            涉及角色：{' '.join(next_outline.characters)}
-            场景设定：{' '.join(next_outline.settings)}
-            核心冲突：{' '.join(next_outline.conflicts)}
-            """
-        elif next_content:  # 如果没有大纲，仍然使用原始内容
-            context_info += f"""
-            [下一章内容]
-            {next_content[:2000]}...（内容过长已省略）
-            """
-        
-        if original_content:
-            context_info += f"""
-            [原章节内容]
-            {original_content[:3000]}...（内容过长已省略）
-            """
-        
-        # 创建提示词    
-        chapter_prompt = self._create_chapter_prompt(outline, reference_materials, None)
-        
-        # 添加额外提示词和上下文信息
-        if extra_prompt:
-            chapter_prompt += f"\n\n[额外要求]\n{extra_prompt}"
-            
-        if context_info:
-            chapter_prompt += f"\n\n[上下文信息]\n{context_info}"
-            
-        # 添加明确的连贯性指导
-        chapter_prompt += f"""
-        
-        [连贯性要求]
-        1. 请确保本章情节与上一章摘要中描述的情节有明确的连接
-        2. 章节开头应自然承接上一章的结尾，避免跳跃感
-        3. 章节结尾应为下一章大纲中的情节埋下伏笔
-        4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
-        5. 时间线和场景转换要清晰流畅
-        """
-        
-        try:
-            chapter_content = self.content_model.generate(chapter_prompt)
-            if not chapter_content or chapter_content.strip() == "":
-                logging.error(f"第 {chapter_idx + 1} 章: 生成的内容为空")
-                raise ValueError("生成的章节内容为空")
-        except Exception as e:
-            logging.error(f"第 {chapter_idx + 1} 章: 章节内容生成失败: {str(e)}")
-            raise
-
-        logging.info(f"第 {chapter_idx + 1} 章: 章节内容生成完成，字数: {self._count_chinese_chars(chapter_content)}...")
-        target_length = self.config['chapter_length']
-        
-        try:
-            chapter_content = self._adjust_content_length(chapter_content, target_length)
-            logging.info(f"第 {chapter_idx + 1} 章: 字数调整完成，调整后字数: {self._count_chinese_chars(chapter_content)}")
-        except Exception as e:
-            logging.error(f"第 {chapter_idx + 1} 章: 字数调整失败: {str(e)}，使用原始内容继续")
-
-        logging.info(f"第 {chapter_idx + 1} 章: 准备保存章节...")
-        self._save_chapter(chapter_idx + 1, chapter_content, skip_character_update=True)
-
-        logging.info(f"第 {chapter_idx + 1} 章内容生成完成")
-
-        return chapter_content
-    
-    def generate_novel(self):
-        """生成完整小说"""
-        logging.info("开始生成小说")
-        
-        try:
-            target_chapters = self.config['target_length'] // self.config['chapter_length']
-            logging.info(f"目标章节数: {target_chapters}")
-
-            # 如果大纲章节数不足，生成后续章节的大纲
-            if len(self.chapter_outlines) < target_chapters:
-                logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
-                try:
-                    # 从novel_config中获取小说信息
-                    novel_config = self.config.get('novel_config', {})
-                    self.generate_outline(
-                        novel_config.get('type', '玄幻'),
-                        novel_config.get('theme', '修真逆袭'),
-                        novel_config.get('style', '热血'),
-                        continue_from_existing=True  # 设置为续写模式
-                    )
-                except Exception as e:
-                    logging.error(f"生成大纲失败: {str(e)}，将使用现有大纲继续")
-            
-            # 记录成功和失败的章节
-            success_chapters = []
-            failed_chapters = []
-            
-            # 从当前章节开始生成
-            for chapter_idx in range(self.current_chapter, len(self.chapter_outlines)):
-                logging.info(f"正在生成第 {chapter_idx + 1} 章")
-                
-                try:
-                    # 获取上一章摘要
-                    prev_summary = ""
-                    if chapter_idx > 0:
-                        # 先检查是否已经生成了上一章
-                        prev_chapter_file = os.path.join(self.output_dir, f"第{chapter_idx}章_{self.chapter_outlines[chapter_idx-1].title}.txt")
-                        if os.path.exists(prev_chapter_file):
-                            # 如果已经生成了上一章，获取其摘要
-                            summary_file = os.path.join(self.output_dir, "summary.json")
-                            if os.path.exists(summary_file):
-                                with open(summary_file, 'r', encoding='utf-8') as f:
-                                    summaries = json.load(f)
-                                    if str(chapter_idx) in summaries:
-                                        prev_summary = summaries[str(chapter_idx)]
-                    
-                    # 生成章节
-                    chapter_content = self.generate_chapter(
-                        chapter_idx,
-                        prev_content=prev_summary  # 使用摘要而不是完整内容
-                    )
-                    
-                    # 保存章节
-                    self._save_chapter(chapter_idx + 1, chapter_content)
-                    
-                    # 更新进度
-                    self.current_chapter = chapter_idx + 1
-                    self._save_progress()
-                    
-                    logging.info(f"第 {chapter_idx + 1} 章生成完成")
-                    success_chapters.append(chapter_idx + 1)
-                    
-                except Exception as e:
-                    logging.error(f"生成第 {chapter_idx + 1} 章时出错: {str(e)}")
-                    failed_chapters.append(chapter_idx + 1)
-                    # 尝试保存当前进度
-                    try:
-                        self._save_progress()
-                    except:
-                        logging.error("保存进度失败")
-                    
-                    # 继续生成下一章，而不是中断整个过程
-                    continue
-                
-            # 生成小说完成后的总结
-            total_chapters = len(self.chapter_outlines)
-            completed_chapters = len(success_chapters)
-            failed_count = len(failed_chapters)
-            
-            completion_rate = completed_chapters / total_chapters * 100 if total_chapters > 0 else 0
-            logging.info(f"小说生成完成。总章节数: {total_chapters}，成功生成: {completed_chapters}，" 
-                        f"失败: {failed_count}，完成率: {completion_rate:.2f}%")
-            
-            if failed_chapters:
-                logging.info(f"失败的章节: {failed_chapters}")
-                
-            return {
-                "success": True,
-                "total_chapters": total_chapters,
-                "completed_chapters": completed_chapters,
-                "failed_chapters": failed_chapters,
-                "completion_rate": completion_rate
-            }
-            
-        except Exception as e:
-            logging.error(f"生成小说过程中发生严重错误: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
     def _load_characters(self):
         """加载角色库"""
         logging.info("开始加载角色库...") # 添加日志：开始加载角色库
@@ -510,18 +296,9 @@ class NovelGenerator:
                 with open(summary_file, 'r', encoding='utf-8') as f:
                     summaries = json.load(f)
 
-            # 生成新摘要
-            prompt = f"""
-            请为以下章节内容生成一个200字以内的摘要，要求：
-            1. 突出本章的主要情节发展
-            2. 包含关键人物的重要行动
-            3. 说明本章对整体剧情的影响
-            4. 仅返回摘要正文，字数控制在200字以内
-
-            章节内容：
-            {content[:4000]}... (内容过长已截断)
-            """
-            new_summary = self.content_model.generate(prompt) # 假设 content_model 可用
+            # 生成新摘要，使用 prompts 模块
+            prompt = prompts.get_summary_prompt(content[:4000])
+            new_summary = self.content_model.generate(prompt)
             summaries[str(chapter_num)] = new_summary.strip()
 
             # 保存更新后的摘要
@@ -531,6 +308,224 @@ class NovelGenerator:
 
         except Exception as e:
             logging.error(f"更新第 {chapter_num} 章摘要时出错: {str(e)}")
+    
+    @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
+    def generate_chapter(self, chapter_idx: int, extra_prompt: str = "", original_content: str = "", prev_content: str = "", next_content: str = "") -> str:
+        """生成章节内容"""
+        outline = self.chapter_outlines[chapter_idx]
+        
+        logging.info(f"开始生成第 {chapter_idx + 1} 章内容")
+        
+        # 创建一个空的参考材料结构，避免使用知识库
+        reference_materials = {
+            "plot_references": [],
+            "character_references": [],
+            "setting_references": []
+        }
+        
+        logging.info(f"第 {chapter_idx + 1} 章: 参考材料准备完成。开始生成章节内容...")
+        
+        # 获取上一章摘要
+        prev_summary = ""
+        if chapter_idx > 0:
+            summary_file = os.path.join(self.output_dir, "summary.json")
+            if os.path.exists(summary_file):
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summaries = json.load(f)
+                        prev_chapter_num = str(chapter_idx)
+                        if prev_chapter_num in summaries:
+                            prev_summary = summaries[prev_chapter_num]
+                            logging.info(f"已获取第 {chapter_idx} 章摘要用于参考")
+                except Exception as e:
+                    logging.error(f"读取上一章摘要失败: {str(e)}")
+        
+        # 获取下一章大纲
+        next_outline = None
+        if chapter_idx + 1 < len(self.chapter_outlines):
+            next_outline = self.chapter_outlines[chapter_idx + 1]
+            logging.info(f"已获取第 {chapter_idx + 2} 章大纲用于参考")
+        
+        # 构建上下文信息
+        context_info = ""
+        if prev_summary:
+            context_info += f"""
+            [上一章摘要]
+            {prev_summary}
+            """
+        elif prev_content:  # 如果没有摘要，仍然使用原始内容
+            context_info += f"""
+            [上一章内容]
+            {prev_content[:2000]}...（内容过长已省略）
+            """
+            
+        if next_outline:
+            context_info += f"""
+            [下一章大纲]
+            标题：{next_outline.title}
+            关键剧情：{' '.join(next_outline.key_points)}
+            涉及角色：{' '.join(next_outline.characters)}
+            场景设定：{' '.join(next_outline.settings)}
+            核心冲突：{' '.join(next_outline.conflicts)}
+            """
+        elif next_content:  # 如果没有大纲，仍然使用原始内容
+            context_info += f"""
+            [下一章内容]
+            {next_content[:2000]}...（内容过长已省略）
+            """
+        
+        if original_content:
+            context_info += f"""
+            [原章节内容]
+            {original_content[:3000]}...（内容过长已省略）
+            """
+        
+        # 使用 prompts 模块生成提示词
+        # 将 ChapterOutline 对象转换为字典传递
+        outline_dict = dataclasses.asdict(outline)
+        chapter_prompt = prompts.get_chapter_prompt(
+            outline=outline_dict,
+            references=reference_materials,
+            extra_prompt=extra_prompt,
+            context_info=context_info
+        )
+        
+        try:
+            chapter_content = self.content_model.generate(chapter_prompt)
+            if not chapter_content or chapter_content.strip() == "":
+                logging.error(f"第 {chapter_idx + 1} 章: 生成的内容为空")
+                raise ValueError("生成的章节内容为空")
+        except Exception as e:
+            logging.error(f"第 {chapter_idx + 1} 章: 章节内容生成失败: {str(e)}")
+            raise
+
+        logging.info(f"第 {chapter_idx + 1} 章: 章节内容生成完成，字数: {self._count_chinese_chars(chapter_content)}...")
+        target_length = self.config['chapter_length']
+        
+        try:
+            chapter_content = self._adjust_content_length(chapter_content, target_length)
+            logging.info(f"第 {chapter_idx + 1} 章: 字数调整完成，调整后字数: {self._count_chinese_chars(chapter_content)}")
+        except Exception as e:
+            logging.error(f"第 {chapter_idx + 1} 章: 字数调整失败: {str(e)}，使用原始内容继续")
+
+        # --- 添加一致性检查和修正流程 ---
+        # 使用一致性检查器进行检查和修正
+        logging.info(f"第 {chapter_idx + 1} 章: 开始一致性检查和修正流程...")
+        chapter_content = self.consistency_checker.ensure_chapter_consistency(
+            chapter_content=chapter_content,
+            chapter_outline=outline_dict,
+            chapter_idx=chapter_idx,
+            characters=self.characters
+        )
+        logging.info(f"第 {chapter_idx + 1} 章: 一致性检查和修正流程完成")
+        
+        logging.info(f"第 {chapter_idx + 1} 章: 准备保存章节...")
+        self._save_chapter(chapter_idx + 1, chapter_content, skip_character_update=True)
+
+        logging.info(f"第 {chapter_idx + 1} 章内容生成完成")
+
+        return chapter_content
+    
+    def generate_novel(self):
+        """生成完整小说"""
+        logging.info("开始生成小说")
+        
+        try:
+            target_chapters = self.config['target_length'] // self.config['chapter_length']
+            logging.info(f"目标章节数: {target_chapters}")
+
+            # 如果大纲章节数不足，生成后续章节的大纲
+            if len(self.chapter_outlines) < target_chapters:
+                logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
+                try:
+                    # 从novel_config中获取小说信息
+                    novel_config = self.config.get('novel_config', {})
+                    self.generate_outline(
+                        novel_config.get('type', '玄幻'),
+                        novel_config.get('theme', '修真逆袭'),
+                        novel_config.get('style', '热血'),
+                        continue_from_existing=True  # 设置为续写模式
+                    )
+                except Exception as e:
+                    logging.error(f"生成大纲失败: {str(e)}，将使用现有大纲继续")
+            
+            # 记录成功和失败的章节
+            success_chapters = []
+            failed_chapters = []
+            
+            # 从当前章节开始生成
+            for chapter_idx in range(self.current_chapter, len(self.chapter_outlines)):
+                logging.info(f"正在生成第 {chapter_idx + 1} 章")
+                
+                try:
+                    # 获取上一章摘要
+                    prev_summary = ""
+                    if chapter_idx > 0:
+                        # 先检查是否已经生成了上一章
+                        prev_chapter_file = os.path.join(self.output_dir, f"第{chapter_idx}章_{self.chapter_outlines[chapter_idx-1].title}.txt")
+                        if os.path.exists(prev_chapter_file):
+                            # 如果已经生成了上一章，获取其摘要
+                            summary_file = os.path.join(self.output_dir, "summary.json")
+                            if os.path.exists(summary_file):
+                                with open(summary_file, 'r', encoding='utf-8') as f:
+                                    summaries = json.load(f)
+                                    if str(chapter_idx) in summaries:
+                                        prev_summary = summaries[str(chapter_idx)]
+                    
+                    # 生成章节
+                    chapter_content = self.generate_chapter(
+                        chapter_idx,
+                        prev_content=prev_summary  # 使用摘要而不是完整内容
+                    )
+                    
+                    # 保存章节
+                    self._save_chapter(chapter_idx + 1, chapter_content)
+                    
+                    # 更新进度
+                    self.current_chapter = chapter_idx + 1
+                    self._save_progress()
+                    
+                    logging.info(f"第 {chapter_idx + 1} 章生成完成")
+                    success_chapters.append(chapter_idx + 1)
+                    
+                except Exception as e:
+                    logging.error(f"生成第 {chapter_idx + 1} 章时出错: {str(e)}")
+                    failed_chapters.append(chapter_idx + 1)
+                    # 尝试保存当前进度
+                    try:
+                        self._save_progress()
+                    except:
+                        logging.error("保存进度失败")
+                    
+                    # 继续生成下一章，而不是中断整个过程
+                    continue
+                
+            # 生成小说完成后的总结
+            total_chapters = len(self.chapter_outlines)
+            completed_chapters = len(success_chapters)
+            failed_count = len(failed_chapters)
+            
+            completion_rate = completed_chapters / total_chapters * 100 if total_chapters > 0 else 0
+            logging.info(f"小说生成完成。总章节数: {total_chapters}，成功生成: {completed_chapters}，" 
+                        f"失败: {failed_count}，完成率: {completion_rate:.2f}%")
+            
+            if failed_chapters:
+                logging.info(f"失败的章节: {failed_chapters}")
+                
+            return {
+                "success": True,
+                "total_chapters": total_chapters,
+                "completed_chapters": completed_chapters,
+                "failed_chapters": failed_chapters,
+                "completion_rate": completion_rate
+            }
+            
+        except Exception as e:
+            logging.error(f"生成小说过程中发生严重错误: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10)) # 添加重试机制
     def generate_outline(self, novel_type: str, theme: str, style: str, continue_from_existing: bool = False, batch_size: int = 10): # 减小默认 batch_size
@@ -572,31 +567,16 @@ class NovelGenerator:
             current_start_chapter_num = start_chapter_index + generated_count + 1 # 章节号从1开始
             logging.info(f"--- 开始生成批次 {batch_num + 1}/{total_batches} (章节 {current_start_chapter_num} - {current_start_chapter_num + current_batch_size - 1}) ---")
 
-            # --- 构建提示词 ---
-            prompt = f"""{context}
-
-请严格按照要求，基于以上小说信息和已有大纲（如果是续写），创作后续的小说大纲。
-
-任务要求：
-1.  生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。
-2.  确保情节连贯，与已有大纲结尾部分自然衔接（如果是续写）。推动主线发展，引入新的冲突和看点。
-3.  每章大纲必须包含以下字段：章节号 (chapter_number, 整数)，标题 (title, 字符串)，关键剧情点列表 (key_points, 字符串列表)，涉及角色列表 (characters, 字符串列表)，场景列表 (settings, 字符串列表)，核心冲突列表 (conflicts, 字符串列表)。
-4.  严格按照以下 JSON 格式返回一个包含 {current_batch_size} 个章节大纲对象的列表。不要在 JSON 列表前后添加任何其他文字、解释或代码标记 (如 ```json ... ```)。
-
-```json
-[
-  {{
-    "chapter_number": {current_start_chapter_num},
-    "title": "...",
-    "key_points": ["...", "..."],
-    "characters": ["...", "..."],
-    "settings": ["...", "..."],
-    "conflicts": ["...", "..."]
-  }},
-  // ... (如果 current_batch_size > 1, 继续添加后续章节对象)
-]
-```
-"""
+            # --- 使用 prompts 模块生成提示词 ---
+            prompt = prompts.get_outline_prompt(
+                novel_type=novel_type,
+                theme=theme,
+                style=style,
+                current_start_chapter_num=current_start_chapter_num,
+                current_batch_size=current_batch_size,
+                existing_context=context
+            )
+            
             try:
                 # --- 调用 AI 模型 ---
                 logging.debug(f"发送给 AI 的提示词 (部分):\n{prompt[:500]}...")

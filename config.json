@@ -1,7 +1,8 @@
 {
   "knowledge_base_config": {
     "reference_files": [
-      "data/reference/my_novel.txt"
+      "data/reference/my_novel.txt",
+      "data/reference/凡人修仙传(501-1000章).txt"
     ],
     "chunk_size": 1000,
     "chunk_overlap": 200,
@@ -16,10 +17,11 @@
     "type": "玄幻",
     "theme": "修真逆袭",
     "style": "热血",
-    "target_length": 1002500,
+    "target_length": 1005000,
     "chapter_length": 2500,
     "reference_files": [
-      "data/reference/my_novel.txt"
+      "data/reference/my_novel.txt",
+      "data/reference/.txt"
     ],
     "writing_guide": {
       "world_building": {
