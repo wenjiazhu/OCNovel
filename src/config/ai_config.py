@@ -18,7 +18,7 @@ class AIConfig:
                     "temperature": 0.8
                 },
                 "content": {
-                    "name": "gemini-2.5-pro-exp-03-25",
+                    "name": "gemini-2.0-flash-thinking-exp-01-21",
                     "temperature": 0.7
                 }
             }

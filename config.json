@@ -17,12 +17,17 @@
     "type": "玄幻",
     "theme": "修真逆袭",
     "style": "热血",
-    "target_length": 1005000,
+    "target_chapters": 405,
     "chapter_length": 2500,
     "reference_files": [
       "data/reference/my_novel.txt",
-      "data/reference/.txt"
+      "data/reference/凡人修仙传(501-1000章).txt"
     ],
+    "knowledge_base": {
+      "chunk_size": 1000,
+      "chunk_overlap": 200,
+      "cache_dir": "data/cache"
+    },
     "writing_guide": {
       "world_building": {
         "magic_system": "以灵气修炼为主，分为天地玄黄四个大境界",
@@ -89,9 +94,9 @@
     "retry_delay": 10,
     "force_rebuild_kb": false,
     "validation": {
-      "check_logic": true,
-      "check_consistency": true,
-      "check_duplicates": true
+      "check_logic": false,
+      "check_consistency": false,
+      "check_duplicates": false
     }
   },
   "output_config": {

@@ -9,6 +9,11 @@ import math # 导入 math 模块用于 ceil
 import re # 导入 re 模块用于清理文件名
 from . import prompts # 导入新的 prompts 模块
 from .consistency_checker import ConsistencyChecker # 导入一致性检查器
+from .validators import LogicValidator, DuplicateValidator
+from ..models import ContentModel, OutlineModel, EmbeddingModel
+from ..knowledge_base.knowledge_base import KnowledgeBase
+from ..config.config import Config
+import time # 需要 import time
 
 @dataclass
 class ChapterOutline:
@@ -41,28 +46,52 @@ class Character:
     position: str = "普通弟子"    # 职务，默认为普通弟子
     
 class NovelGenerator:
-    def __init__(self, config: Dict, outline_model, content_model, knowledge_base):
+    def __init__(self, config, outline_model, content_model, knowledge_base):
         self.config = config
         self.outline_model = outline_model
         self.content_model = content_model
         self.knowledge_base = knowledge_base
-        self.characters: Dict[str, Character] = {}
-        self.chapter_outlines: List[ChapterOutline] = []
-        self.current_chapter = 0
-        
-        # 从配置中获取输出目录，**提前到这里定义**
-        self.output_dir = config.get("output_dir", "data/output")
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        self.characters_file = os.path.join(self.output_dir, "characters.json") # 角色库文件路径
         
         # 初始化一致性检查器
-        self.consistency_checker = ConsistencyChecker(content_model, self.output_dir)
+        self.consistency_checker = ConsistencyChecker(self.content_model, config.output_config["output_dir"])
         
+        # 初始化验证器
+        self.logic_validator = LogicValidator(self.content_model)
+        self.duplicate_validator = DuplicateValidator(self.content_model)
+        
+        # 设置输出目录
+        self.output_dir = config.output_config["output_dir"]
+        
+        # 设置角色库文件路径
+        self.characters_file = os.path.join(self.output_dir, "characters.json")
+        
+        # --- 调整加载顺序 ---
+        # 1. 初始化默认值
+        self.characters = {} 
+        self.chapter_outlines = []
+        self.current_chapter = 0 # 默认从 0 开始
+        logging.debug("Initialized defaults before loading.")
+
+        # 2. 加载大纲 (如果存在)
+        self.chapter_outlines = self._load_outline()
+        logging.info(f"Loaded {len(self.chapter_outlines)} outlines initially.")
+
+        # 3. 加载角色库 (如果存在)
+        loaded_chars = self._load_characters() 
+        if isinstance(loaded_chars, dict):
+             self.characters = loaded_chars
+             logging.info(f"Successfully loaded characters. Count: {len(self.characters)}")
+        else:
+             logging.warning("_load_characters did not return a valid dictionary. Keeping characters empty.")
+        
+        # 4. 加载进度 (如果存在，会覆盖 self.current_chapter 和 self.characters)
+        self._load_progress() 
+        logging.info(f"Progress loaded. Current chapter set to: {self.current_chapter}")
+        logging.info(f"Characters after loading progress. Count: {len(self.characters)}")
+
+        # 5. 设置日志 (可以在前面或后面)
         self._setup_logging()
-        self._load_progress()
-        self._load_characters() # 加载角色库
-    
+
     def _setup_logging(self):
         """设置日志"""
         log_file = os.path.join(self.output_dir, "generation.log")
@@ -73,13 +102,13 @@ class NovelGenerator:
             handler = logging.FileHandler(log_file, encoding='utf-8')
             print("FileHandler 创建成功。") # 确认 FileHandler 创建
 
-            handler.setLevel(logging.INFO) # 设置 handler 的日志级别
+            handler.setLevel(logging.DEBUG) # 设置 handler 的日志级别
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
 
             logger = logging.getLogger() # 获取 root logger
             logger.addHandler(handler) # 将 handler 添加到 root logger
-            logger.setLevel(logging.INFO) # 设置 root logger 的日志级别
+            logger.setLevel(logging.DEBUG) # 设置 root logger 的日志级别
 
             print("日志 Handler 添加到 Logger。") # 确认 Handler 添加成功
             logging.info("日志系统初始化完成。") # 添加一条日志，确认日志系统工作
@@ -129,7 +158,8 @@ class NovelGenerator:
                     "relationships": char.relationships,
                     "development_stage": char.development_stage
                 }
-                for name, char in self.characters.items()
+                # 使用 (self.characters or {}) 确保即使 self.characters 是 None 也不会出错
+                for name, char in (self.characters or {}).items()
             }
         }
         with open(progress_file, 'w', encoding='utf-8') as f:
@@ -153,28 +183,48 @@ class NovelGenerator:
             json.dump(outline_data, f, ensure_ascii=False, indent=2)
     
     def _load_characters(self):
-        """加载角色库"""
-        logging.info("开始加载角色库...") # 添加日志：开始加载角色库
+        """加载角色库, 返回字典或 None"""
+        logging.info("开始加载角色库...")
+        characters_dict = {} # 使用局部变量
         if os.path.exists(self.characters_file):
-            with open(self.characters_file, 'r', encoding='utf-8') as f:
-                characters_data = json.load(f)
-                logging.info(f"从文件中加载到角色数据: {characters_data}") # 添加日志：打印加载到的角色数据
-                self.characters = {
-                    name: Character(**data)
-                    for name, data in characters_data.items()
-                }
-                # 加载旧的角色库时，如果缺少 sect 和 position 属性，则提供默认值
-                for char in self.characters.values():
-                    if not hasattr(char, 'sect'):
-                        char.sect = "无门无派"
-                    if not hasattr(char, 'position'):
-                        char.position = "普通弟子"
-        else:
-            # 如果角色库文件不存在，则初始化为空
-            self.characters = {}
-            logging.info("角色库文件不存在，初始化为空角色库。") # 添加日志：角色库文件不存在
+            try:
+                with open(self.characters_file, 'r', encoding='utf-8') as f:
+                    characters_data = json.load(f)
+                    # 检查加载的数据是否为字典
+                    if not isinstance(characters_data, dict):
+                        logging.error(f"角色库文件 {self.characters_file} 包含无效数据 (不是字典): {type(characters_data)}")
+                        return None # 返回 None 表示加载失败
 
-        logging.info("角色库加载完成。") # 添加日志：角色库加载完成
+                    logging.info(f"从文件中加载到角色数据 (前 500 字符): {str(characters_data)[:500]}") # 记录加载内容（部分）
+                    
+                    # 尝试构建 Character 对象
+                    temp_chars = {}
+                    for name, data in characters_data.items():
+                        try:
+                            char = Character(**data)
+                            # 补充旧数据兼容性处理
+                            if not hasattr(char, 'sect'): char.sect = "无门无派"
+                            if not hasattr(char, 'position'): char.position = "普通弟子"
+                            temp_chars[name] = char
+                        except TypeError as te:
+                            logging.warning(f"创建角色 '{name}' 时数据字段不匹配或缺失: {te}. Data: {data}")
+                        except Exception as char_e:
+                            logging.error(f"创建角色 '{name}' 时发生未知错误: {char_e}. Data: {data}")
+                    
+                    characters_dict = temp_chars # 赋值给局部变量
+
+            except json.JSONDecodeError as e:
+                logging.error(f"加载角色库文件 {self.characters_file} 时 JSON 解析失败: {e}")
+                return None # 返回 None 表示加载失败
+            except Exception as e:
+                logging.error(f"加载角色库文件 {self.characters_file} 时发生未知错误: {e}", exc_info=True)
+                return None # 返回 None 表示加载失败
+        else:
+            logging.info("角色库文件不存在，初始化为空角色库。")
+            # characters_dict 保持为空 {}
+
+        logging.info("角色库加载完成。")
+        return characters_dict # 返回加载的字典（可能为空）
 
     def _save_characters(self):
         """保存角色库"""
@@ -200,7 +250,8 @@ class NovelGenerator:
                 "sect": char.sect,
                 "position": char.position
             }
-            for name, char in self.characters.items()
+            # 使用 (self.characters or {}) 确保即使 self.characters 是 None 也不会出错
+            for name, char in (self.characters or {}).items()
         }
         logging.debug(f"即将保存的角色库 JSON 数据: {characters_data}") # 打印 JSON 数据 **新增日志**
         with open(self.characters_file, 'w', encoding='utf-8') as f:
@@ -244,9 +295,56 @@ class NovelGenerator:
         return sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
     
     def _adjust_content_length(self, content: str, target_length: int) -> str:
-        """调整内容长度"""
-        # 实现长度调整逻辑
-        # 此处仅为占位实现
+        """调整内容长度
+        
+        Args:
+            content: 原始内容
+            target_length: 目标字数
+            
+        Returns:
+            str: 调整后的内容
+        """
+        current_length = self._count_chinese_chars(content)
+        if current_length >= target_length:
+            return content
+            
+        # 如果当前字数不足目标字数的80%，需要扩充内容
+        if current_length < target_length * 0.8:
+            logging.info(f"当前字数({current_length})不足目标字数({target_length})的80%，开始扩充内容...")
+            expansion_prompt = f"""
+            请扩充以下小说章节内容，要求：
+            1. 保持原有情节和风格不变
+            2. 在适当位置增加细节描写和场景刻画
+            3. 扩充后的内容应该更加丰富生动
+            4. 确保扩充的内容与原文自然衔接
+            5. 扩充后的总字数应该达到{target_length}字左右
+            
+            原文内容：
+            {content}
+            """
+            logging.debug(f"Expansion prompt (first 300 chars): {expansion_prompt[:300]}") # 记录部分提示词
+            try:
+                logging.info("Calling content model for expansion...")
+                start_time = time.time() # 需要 import time
+                # --- 第二次调用 generate ---
+                logging.debug("Calling content_model.generate for expansion...")
+                expanded_content = self.content_model.generate(expansion_prompt)
+                logging.debug("Expansion content generation finished.")
+                # --- 结束第二次调用 ---
+                end_time = time.time()
+                expanded_length = self._count_chinese_chars(expanded_content)
+                logging.info(f"Content model expansion finished in {end_time - start_time:.2f} seconds. Expanded length: {expanded_length}")
+                if expanded_length < target_length * 0.8:
+                    logging.warning(f"Expansion attempt resulted in insufficient length ({expanded_length}/{target_length}). Model might not be following instructions or hitting limits.")
+                return expanded_content
+            except KeyError as e: # 添加 KeyError 捕获
+                logging.error(f"内容扩充时捕获到 KeyError: {e}", exc_info=True)
+                # 扩充失败，返回原始内容
+                return content
+            except Exception as e:
+                logging.error(f"内容扩充失败：{str(e)}，返回原始内容", exc_info=True)
+                return content
+                
         return content
     
     def _save_chapter(self, chapter_num: int, content: str, skip_character_update: bool = False):
@@ -312,6 +410,7 @@ class NovelGenerator:
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
     def generate_chapter(self, chapter_idx: int, extra_prompt: str = "", original_content: str = "", prev_content: str = "", next_content: str = "") -> str:
         """生成章节内容"""
+        logging.debug(f"Start generate_chapter for index {chapter_idx}. self.characters is: {type(self.characters)}") # 添加日志
         outline = self.chapter_outlines[chapter_idx]
         
         logging.info(f"开始生成第 {chapter_idx + 1} 章内容")
@@ -391,38 +490,139 @@ class NovelGenerator:
         )
         
         try:
+            # --- 第一次调用 generate ---
+            logging.debug("Calling content_model.generate for initial content...")
             chapter_content = self.content_model.generate(chapter_prompt)
+            logging.debug("Initial content generation finished.")
+            # --- 结束第一次调用 ---
             if not chapter_content or chapter_content.strip() == "":
                 logging.error(f"第 {chapter_idx + 1} 章: 生成的内容为空")
                 raise ValueError("生成的章节内容为空")
+        except KeyError as e: # 添加 KeyError 捕获
+            logging.error(f"第 {chapter_idx + 1} 章: 初始内容生成时捕获到 KeyError: {e}", exc_info=True)
+            raise # 重新抛出错误以便 retry 生效
         except Exception as e:
             logging.error(f"第 {chapter_idx + 1} 章: 章节内容生成失败: {str(e)}")
             raise
 
         logging.info(f"第 {chapter_idx + 1} 章: 章节内容生成完成，字数: {self._count_chinese_chars(chapter_content)}...")
-        target_length = self.config['chapter_length']
-        
+        target_length = self.config.novel_config.get("chapter_length", 2500) # 使用 .get() 并提供默认值
+
+        # --- 添加日志：调用 _adjust_content_length 之前 ---
+        logging.debug(f"[{chapter_idx + 1}] Calling _adjust_content_length...")
         try:
             chapter_content = self._adjust_content_length(chapter_content, target_length)
+            # --- 添加日志：调用 _adjust_content_length 之后 ---
+            logging.debug(f"[{chapter_idx + 1}] Finished _adjust_content_length.")
             logging.info(f"第 {chapter_idx + 1} 章: 字数调整完成，调整后字数: {self._count_chinese_chars(chapter_content)}")
         except Exception as e:
+            # --- 添加日志：_adjust_content_length 异常 ---
+            logging.error(f"[{chapter_idx + 1}] Exception during _adjust_content_length: {e}", exc_info=True)
             logging.error(f"第 {chapter_idx + 1} 章: 字数调整失败: {str(e)}，使用原始内容继续")
 
-        # --- 添加一致性检查和修正流程 ---
-        # 使用一致性检查器进行检查和修正
-        logging.info(f"第 {chapter_idx + 1} 章: 开始一致性检查和修正流程...")
-        chapter_content = self.consistency_checker.ensure_chapter_consistency(
-            chapter_content=chapter_content,
-            chapter_outline=outline_dict,
-            chapter_idx=chapter_idx,
-            characters=self.characters
-        )
-        logging.info(f"第 {chapter_idx + 1} 章: 一致性检查和修正流程完成")
-        
-        logging.info(f"第 {chapter_idx + 1} 章: 准备保存章节...")
-        self._save_chapter(chapter_idx + 1, chapter_content, skip_character_update=True)
+        # --- 根据配置进行验证 ---
+        validation_config = self.config.generation_config["validation"]
+        logging.debug(f"[{chapter_idx + 1}] Before validation block. Validation config: {validation_config}") # 确认配置
 
-        logging.info(f"第 {chapter_idx + 1} 章内容生成完成")
+        if validation_config.get('check_logic', True):
+            logging.info(f"第 {chapter_idx + 1} 章: 开始逻辑严密性验证...")
+            logic_report, needs_logic_revision = self.logic_validator.check_logic(
+                chapter_content=chapter_content,
+                chapter_outline=outline_dict
+            )
+            if needs_logic_revision:
+                logging.warning(f"第 {chapter_idx + 1} 章: 逻辑验证发现问题，开始修正...")
+                # 生成修正提示词
+                revision_prompt = prompts.get_chapter_revision_prompt(
+                    original_content=chapter_content,
+                    consistency_report=logic_report,
+                    chapter_outline=outline_dict,
+                    previous_summary=prev_summary if prev_summary else "",
+                    global_summary=""  # 暂时不需要全局摘要
+                )
+                try:
+                    chapter_content = self.content_model.generate(revision_prompt)
+                    logging.info(f"第 {chapter_idx + 1} 章: 逻辑问题修正完成")
+                except Exception as e:
+                    logging.error(f"第 {chapter_idx + 1} 章: 逻辑问题修正失败: {str(e)}")
+            
+        if validation_config.get('check_consistency', True):
+            logging.info(f"第 {chapter_idx + 1} 章: 开始内容一致性验证...")
+            # 为 consistency_checker 调用添加更安全的处理
+            try:
+                # 确保传递的是字典，即使是空的
+                characters_to_check = self.characters if isinstance(self.characters, dict) else {}
+                chapter_content = self.consistency_checker.ensure_chapter_consistency(
+                    chapter_content=chapter_content,
+                    chapter_outline=outline_dict,
+                    chapter_idx=chapter_idx,
+                    characters=characters_to_check 
+                )
+            except KeyError as e:
+                logging.error(f"KeyError during consistency check: {e}. Characters data might be incomplete or None.", exc_info=True)
+                # 决定如何处理：可以跳过一致性检查，或者重新抛出错误
+                # logging.warning("Skipping consistency check due to error.")
+                raise # 暂时重新抛出以观察错误
+            except Exception as e:
+                logging.error(f"Unexpected error during consistency check: {e}", exc_info=True)
+                raise # 暂时重新抛出
+            
+        if validation_config.get('check_duplicates', True):
+            logging.info(f"第 {chapter_idx + 1} 章: 开始重复文字验证...")
+            duplicate_report, needs_duplicate_revision = self.duplicate_validator.check_duplicates(
+                chapter_content=chapter_content,
+                prev_content=prev_content,
+                next_content=next_content
+            )
+            if needs_duplicate_revision:
+                logging.warning(f"第 {chapter_idx + 1} 章: 重复文字验证发现问题，开始修正...")
+                # 生成修正提示词
+                revision_prompt = prompts.get_chapter_revision_prompt(
+                    original_content=chapter_content,
+                    consistency_report=duplicate_report,
+                    chapter_outline=outline_dict,
+                    previous_summary=prev_summary if prev_summary else "",
+                    global_summary=""  # 暂时不需要全局摘要
+                )
+                try:
+                    chapter_content = self.content_model.generate(revision_prompt)
+                    logging.info(f"第 {chapter_idx + 1} 章: 重复文字问题修正完成")
+                except Exception as e:
+                    logging.error(f"第 {chapter_idx + 1} 章: 重复文字问题修正失败: {str(e)}")
+
+        # 最终验证
+        logging.debug(f"[{chapter_idx + 1}] Before final validation block.") # 确认执行到这里
+        logging.info(f"第 {chapter_idx + 1} 章: 开始最终验证...")
+        final_logic_report, final_logic_needs_revision = self.logic_validator.check_logic(
+            chapter_content=chapter_content,
+            chapter_outline=outline_dict
+        )
+        final_duplicate_report, final_duplicate_needs_revision = self.duplicate_validator.check_duplicates(
+            chapter_content=chapter_content,
+            prev_content=prev_content,
+            next_content=next_content
+        )
+        
+        if final_logic_needs_revision or final_duplicate_needs_revision:
+            logging.warning(f"第 {chapter_idx + 1} 章: 最终验证未通过，但已达到最大修正次数，将使用当前版本")
+        else:
+            logging.info(f"第 {chapter_idx + 1} 章: 最终验证通过")
+
+        # --- 添加日志：调用 _save_chapter 之前 ---
+        logging.debug(f"[{chapter_idx + 1}] Calling _save_chapter...")
+        logging.info(f"第 {chapter_idx + 1} 章: 准备保存章节...")
+        try:
+            self._save_chapter(chapter_idx + 1, chapter_content, skip_character_update=True)
+             # --- 添加日志：调用 _save_chapter 之后 ---
+            logging.debug(f"[{chapter_idx + 1}] Finished _save_chapter.")
+        except Exception as e:
+             # --- 添加日志：_save_chapter 异常 ---
+            logging.error(f"[{chapter_idx + 1}] Exception during _save_chapter: {e}", exc_info=True)
+            # 注意：原始代码在这里没有重新抛出异常，如果保存失败，函数仍会继续
+
+        # --- 添加日志：返回之前 ---
+        logging.debug(f"[{chapter_idx + 1}] Preparing to return chapter content.")
+        logging.info(f"第 {chapter_idx + 1} 章内容生成完成") # 这是函数成功返回前的最后一条 INFO 日志
 
         return chapter_content
     
@@ -431,7 +631,7 @@ class NovelGenerator:
         logging.info("开始生成小说")
         
         try:
-            target_chapters = self.config['target_length'] // self.config['chapter_length']
+            target_chapters = self.config.novel_config["target_chapters"]
             logging.info(f"目标章节数: {target_chapters}")
 
             # 如果大纲章节数不足，生成后续章节的大纲
@@ -439,11 +639,11 @@ class NovelGenerator:
                 logging.info(f"当前大纲只有{len(self.chapter_outlines)}章，需要生成后续章节大纲以达到{target_chapters}章")
                 try:
                     # 从novel_config中获取小说信息
-                    novel_config = self.config.get('novel_config', {})
+                    novel_config = self.config.novel_config
                     self.generate_outline(
-                        novel_config.get('type', '玄幻'),
-                        novel_config.get('theme', '修真逆袭'),
-                        novel_config.get('style', '热血'),
+                        novel_config.get("type", "玄幻"),
+                        novel_config.get("theme", "修真逆袭"),
+                        novel_config.get("style", "热血"),
                         continue_from_existing=True  # 设置为续写模式
                     )
                 except Exception as e:
@@ -452,6 +652,9 @@ class NovelGenerator:
             # 记录成功和失败的章节
             success_chapters = []
             failed_chapters = []
+            
+            # 在循环开始前添加日志，检查实际使用的值
+            logging.info(f"准备进入章节生成循环: self.current_chapter = {self.current_chapter}, len(self.chapter_outlines) = {len(self.chapter_outlines)}")
             
             # 从当前章节开始生成
             for chapter_idx in range(self.current_chapter, len(self.chapter_outlines)):
@@ -531,7 +734,7 @@ class NovelGenerator:
     def generate_outline(self, novel_type: str, theme: str, style: str, continue_from_existing: bool = False, batch_size: int = 10): # 减小默认 batch_size
         """生成或续写小说大纲"""
         logging.info(f"开始{'续写' if continue_from_existing else '生成'}小说大纲...")
-        target_chapters = self.config['target_length'] // self.config['chapter_length']
+        target_chapters = self.config.novel_config["target_chapters"]
         start_chapter_index = 0 # 索引起始为 0
         num_to_generate = target_chapters
 
@@ -660,10 +863,34 @@ class NovelGenerator:
         logging.info(f"大纲生成/续写完成。当前总章节数: {final_chapter_count} (目标: {target_chapters})")
         if final_chapter_count > start_chapter_index or not continue_from_existing: # 只有在大纲确实被修改或全新生成时才保存
             logging.info("正在保存更新后的大纲及进度...")
+            logging.debug(f"Before saving progress in generate_outline, self.characters is: {type(self.characters)}") # 添加日志
             try:
                 self._save_progress() # _save_progress 会保存大纲和角色等
                 logging.info("大纲及进度保存完成。")
             except Exception as e:
-                logging.error(f"保存大纲或进度时出错: {e}")
+                logging.error(f"保存大纲或进度时出错: {e}", exc_info=True) # 添加 exc_info=True
         else:
             logging.info("大纲未发生变化，无需保存。") 
+
+    def _load_outline(self):
+        """加载小说大纲"""
+        logging.info("开始加载小说大纲...")
+        outline_file = os.path.join(self.output_dir, "outline.json")
+        
+        if os.path.exists(outline_file):
+            try:
+                with open(outline_file, 'r', encoding='utf-8') as f:
+                    outline_data = json.load(f)
+                    logging.info(f"从文件中加载到大纲数据: {outline_data}")
+                    outlines = [
+                        ChapterOutline(**chapter)
+                        for chapter in outline_data
+                    ]
+                    logging.info(f"成功加载 {len(outlines)} 章大纲")
+                    return outlines
+            except Exception as e:
+                logging.error(f"加载大纲文件时出错: {str(e)}")
+                return []
+        else:
+            logging.info("大纲文件不存在，初始化为空大纲")
+            return [] 
