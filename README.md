@@ -11,6 +11,8 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 - 🎯 支持章节重新生成和内容优化
 - 📊 完整的日志记录系统
 - 🎨 支持生成营销内容（标题、封面等）
+- 🔄 支持多轮对话和内容迭代优化
+- 📈 可视化数据分析和进度追踪
 
 ## 系统要求
 
@@ -26,12 +28,20 @@ git clone https://github.com/yourusername/OCNovel.git
 cd OCNovel
 ```
 
-2. 安装依赖：
+2. 创建并激活虚拟环境：
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# 或
+.venv\Scripts\activate  # Windows
+```
+
+3. 安装依赖：
 ```bash
 pip install -r requirements.txt
 ```
 
-3. 配置环境变量：
+4. 配置环境变量：
 创建 `.env` 文件并添加以下内容：
 ```
 # Gemini API配置
@@ -41,13 +51,6 @@ GEMINI_API_KEY=你的Gemini API密钥
 OPENAI_API_KEY=你的OpenAI API密钥
 OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ```
-
-4. 配置项目：
-编辑 `config.json` 文件，设置：
-- 小说类型、主题和风格
-- 目标长度和章节长度
-- 参考小说文件路径
-- 其他生成参数
 
 ## 使用方法
 
@@ -89,10 +92,12 @@ OCNovel/
 │   ├── generators/    # 生成器
 │   ├── knowledge_base/# 知识库
 │   ├── models/        # AI模型
-│   └── tools/         # 工具脚本
+│   ├── tools/         # 工具脚本
+│   └── visualization/ # 数据可视化
 ├── tests/             # 测试文件
 ├── config.json        # 主配置文件
 ├── requirements.txt   # 依赖列表
+├── prompt_definitions.py  # 提示词定义
 └── README.md         # 项目说明
 ```
 
@@ -152,7 +157,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
   "type": "玄幻",                                      // 小说类型：如玄幻、武侠、都市等
   "theme": "修真逆袭",                                 // 小说主题：如修真逆袭、都市重生等
   "style": "热血",                                     // 写作风格：如热血、轻松、严肃等
-  "target_length": 1000000,                            // 目标总字数
+  "target_chapters": 405,                              // 目标章节数
   "chapter_length": 2500,                              // 每章字数
   "reference_files": ["data/reference/my_novel.txt"]   // 参考小说文件列表
 }

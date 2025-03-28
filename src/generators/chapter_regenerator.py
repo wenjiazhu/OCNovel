@@ -136,7 +136,7 @@ def main():
         
         # 创建小说生成器
         generator = NovelGenerator(
-            config.generator_config,
+            config,
             outline_model,
             content_model,
             knowledge_base

@@ -94,9 +94,9 @@
     "retry_delay": 10,
     "force_rebuild_kb": false,
     "validation": {
-      "check_logic": false,
-      "check_consistency": false,
-      "check_duplicates": false
+      "check_logic": true,
+      "check_consistency": true,
+      "check_duplicates": true
     }
   },
   "output_config": {
