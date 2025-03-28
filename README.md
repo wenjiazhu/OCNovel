@@ -110,7 +110,6 @@ OCNovel/
 ├── tests/             # 测试文件
 ├── config.json        # 主配置文件
 ├── requirements.txt   # 依赖列表
-├── prompt_definitions.py  # 提示词定义
 └── README.md         # 项目说明
 ```
 
@@ -170,7 +169,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
   "type": "玄幻",                                      // 小说类型：如玄幻、武侠、都市等
   "theme": "修真逆袭",                                 // 小说主题：如修真逆袭、都市重生等
   "style": "热血",                                     // 写作风格：如热血、轻松、严肃等
-  "target_chapters": 405,                              // 目标章节数
+  "target_chapters": 400,                              // 目标章节数
   "chapter_length": 2500,                              // 每章字数
   "reference_files": ["data/reference/my_novel.txt"]   // 参考小说文件列表
 }
