@@ -457,7 +457,23 @@ class NovelGenerator:
             # 生成新摘要，使用 prompts 模块
             prompt = prompts.get_summary_prompt(content[:4000])
             new_summary = self.content_model.generate(prompt)
-            summaries[str(chapter_num)] = new_summary.strip()
+            
+            # 清理摘要文本，移除可能的描述性文字
+            new_summary = new_summary.strip()
+            # 移除常见的描述性开头
+            descriptive_starts = [
+                "本章讲述了", "本章主要讲述了", "本章描述了", "本章主要描述了",
+                "本章叙述了", "本章主要叙述了", "本章介绍了", "本章主要介绍了",
+                "本章", "这一章", "这一章节", "这一回", "这一章节主要",
+                "本章节", "本章节主要", "这一章节主要", "这一回主要"
+            ]
+            
+            for start in descriptive_starts:
+                if new_summary.startswith(start):
+                    new_summary = new_summary[len(start):].strip()
+                    break
+            
+            summaries[str(chapter_num)] = new_summary
 
             # 保存更新后的摘要
             with open(summary_file, 'w', encoding='utf-8') as f:
@@ -1392,7 +1408,23 @@ class NovelGenerator:
             # 生成新摘要，使用 prompts 模块
             prompt = prompts.get_summary_prompt(content[:4000])
             new_summary = self.content_model.generate(prompt)
-            summaries[str(chapter_num)] = new_summary.strip()
+            
+            # 清理摘要文本，移除可能的描述性文字
+            new_summary = new_summary.strip()
+            # 移除常见的描述性开头
+            descriptive_starts = [
+                "本章讲述了", "本章主要讲述了", "本章描述了", "本章主要描述了",
+                "本章叙述了", "本章主要叙述了", "本章介绍了", "本章主要介绍了",
+                "本章", "这一章", "这一章节", "这一回", "这一章节主要",
+                "本章节", "本章节主要", "这一章节主要", "这一回主要"
+            ]
+            
+            for start in descriptive_starts:
+                if new_summary.startswith(start):
+                    new_summary = new_summary[len(start):].strip()
+                    break
+            
+            summaries[str(chapter_num)] = new_summary
 
             # 保存更新后的摘要
             with open(summary_file, 'w', encoding='utf-8') as f:

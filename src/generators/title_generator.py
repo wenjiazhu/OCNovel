@@ -169,8 +169,9 @@ class TitleGenerator:
         title_list = list(titles.values())
         platforms = list(titles.keys())
         
-        prompt = f"""
-        请为以下小说标题生成封面设计提示词，用于AI绘图生成小说封面。
+        # 第一步：生成每个平台的具体风格描述
+        style_prompt = f"""
+        请为以下小说标题生成每个平台的具体风格描述，用于后续生成封面提示词。
         
         【小说信息】
         类型：{novel_type}
@@ -178,59 +179,118 @@ class TitleGenerator:
         标题：
         {chr(10).join([f"{i+1}. {title}" for i, title in enumerate(title_list)])}
         
-        【要求】
-        1. 为每个标题生成一组适合的封面设计提示词
-        2. 提示词必须全部使用中文，不包含任何英文单词
-        3. 提示词应包含以下要素：
-           - 主要人物（性别、外观、服装等）
-           - 场景氛围
-           - 色调风格
-           - 构图要点（适合2:3的竖版比例）
-        4. 提示词要能反映出小说的类型和氛围
-        5. 关键细节要与标题内涵相匹配
-        6. 每组提示词需要简洁明了
+        【平台风格要求】
+        1. 番茄小说：现代感强、色彩鲜艳、视觉冲击力强
+        2. 七猫小说：仙侠风格、飘逸唯美、意境深远
+        3. 起点中文网：气势磅礴、热血沸腾、画面震撼
+        4. 书旗小说：简洁大气、重点突出、富有张力
+        5. 掌阅：细腻唯美、情感丰富、画面精致
         
-        请按照以下格式输出结果：
-        标题1：【提示词】
-        标题2：【提示词】
-        标题3：【提示词】
-        标题4：【提示词】
-        标题5：【提示词】
+        请为每个平台生成一个独特的风格描述，包含：
+        1. 人物特点（外貌、气质、表情等）
+        2. 场景特点（环境、氛围、光线等）
+        3. 色彩风格（主色调、色彩搭配等）
+        4. 构图特点（画面布局、重点等）
+        5. 特殊效果（光效、粒子、氛围等）
+        
+        请按照以下格式输出（每行一个平台，使用冒号分隔）：
+        平台名称：风格描述1、风格描述2、风格描述3、风格描述4、风格描述5
         """
         
         try:
+            # 获取风格描述
+            style_response = self.model.generate(style_prompt)
+            logging.info(f"生成的风格描述：\n{style_response}")
+            
+            # 第二步：根据风格描述生成最终提示词
+            prompt = f"""
+            请根据以下风格描述，为每个平台生成具体的封面提示词。
+            
+            【小说信息】
+            类型：{novel_type}
+            梗概：{summary}
+            标题：
+            {chr(10).join([f"{i+1}. {title}" for i, title in enumerate(title_list)])}
+            
+            【风格描述】
+            {style_response}
+            
+            【要求】
+            1. 根据每个平台的风格描述生成具体的提示词
+            2. 提示词必须全部使用中文，不包含任何英文单词
+            3. 每个提示词至少包含6个要素，用顿号分隔
+            4. 提示词要能反映出小说的类型和氛围
+            5. 关键细节要与标题内涵相匹配
+            6. 每组提示词需要简洁明了
+            7. 不同平台的提示词必须完全不同
+            
+            请按照以下格式输出（每行一个平台，使用冒号分隔）：
+            平台名称：提示词1、提示词2、提示词3、提示词4、提示词5、提示词6
+            """
+            
             response = self.model.generate(prompt)
+            logging.info(f"生成的原始响应：\n{response}")
             cover_prompts = {}
             
             # 解析响应并匹配标题与平台
             lines = response.strip().split('\n')
-            for i, line in enumerate(lines):
-                if ':' in line or '：' in line:
-                    parts = line.replace('：', ':').split(':', 1)
-                    prompt_text = parts[1].strip()
-                    
-                    # 清理可能的多余字符
-                    for char in ['【', '】']:
-                        prompt_text = prompt_text.replace(char, '')
-                    
-                    # 按照顺序匹配平台
-                    if i < len(platforms):
-                        platform = platforms[i]
-                        cover_prompts[platform] = prompt_text
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # 尝试不同的分隔符
+                if ':' in line:
+                    platform, prompt_text = line.split(':', 1)
+                elif '：' in line:
+                    platform, prompt_text = line.split('：', 1)
+                else:
+                    continue
+                
+                platform = platform.strip()
+                prompt_text = prompt_text.strip()
+                
+                # 清理可能的多余字符
+                for char in ['【', '】', '"', '"', '*']:
+                    prompt_text = prompt_text.replace(char, '')
+                
+                # 验证提示词是否有效
+                if prompt_text and len(prompt_text.split('、')) >= 6 and platform in platforms:
+                    cover_prompts[platform] = prompt_text
+                    logging.info(f"成功解析平台 {platform} 的提示词：{prompt_text}")
             
-            # 确保所有平台都有封面提示词
-            for platform in platforms:
-                if platform not in cover_prompts:
-                    cover_prompts[platform] = f"年轻男子、修仙服饰、{titles[platform]}、2:3竖版构图、幻彩光效"
+            # 检查是否所有平台都有有效的提示词
+            missing_platforms = [p for p in platforms if p not in cover_prompts]
+            if missing_platforms:
+                logging.warning(f"以下平台缺少有效的提示词：{missing_platforms}")
+            
+            if not missing_platforms:
+                return cover_prompts
+            
+            # 如果有缺失的平台，生成默认提示词
+            for platform in missing_platforms:
+                title = titles[platform]
+                if platform == "番茄小说":
+                    cover_prompts[platform] = f"俊朗青年、现代修仙服、眼神坚毅、都市高楼背景、霓虹光效、2:3竖版构图"
+                elif platform == "七猫小说":
+                    cover_prompts[platform] = f"仙气飘飘的男子、古风长袍、云雾缭绕、仙山背景、水墨意境、2:3竖版构图"
+                elif platform == "起点中文网":
+                    cover_prompts[platform] = f"英气逼人的少年、战甲、金光万丈、战场背景、热血沸腾、2:3竖版构图"
+                elif platform == "书旗小说":
+                    cover_prompts[platform] = f"气质沉稳的男子、道袍、水墨风格、道观背景、简洁大气、2:3竖版构图"
+                else:  # 掌阅
+                    cover_prompts[platform] = f"温润如玉的男子、儒雅长衫、月光如水、庭院背景、细腻唯美、2:3竖版构图"
             
             return cover_prompts
+            
         except Exception as e:
             logging.error(f"生成封面提示词时出错: {str(e)}")
+            # 如果出错，使用默认提示词
             return {platform: f"年轻男子、修仙服饰、{title}、2:3竖版构图、幻彩光效" 
                    for platform, title in titles.items()}
-                   
+            
     def save_to_file(self, titles: Dict[str, str], summary: str, 
-                     cover_prompts: Dict[str, str], cover_images: Dict[str, str] = None) -> str:
+                     cover_prompts: Dict[str, str]) -> str:
         """
         保存生成的内容到文件
         
@@ -238,7 +298,6 @@ class TitleGenerator:
             titles: 生成的标题
             summary: 故事梗概
             cover_prompts: 封面提示词
-            cover_images: 封面图片路径
             
         Returns:
             str: 保存的文件路径
@@ -252,9 +311,6 @@ class TitleGenerator:
             "summary": summary,
             "cover_prompts": cover_prompts
         }
-        
-        if cover_images:
-            data["cover_images"] = cover_images
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -277,13 +333,6 @@ class TitleGenerator:
                 title = titles.get(platform, "")
                 f.write(f"### {platform}（{title}）\n")
                 f.write(f"{prompt}\n\n")
-                
-                # 添加封面图片链接（如果有）
-                if cover_images and platform in cover_images:
-                    image_path = cover_images[platform]
-                    # 获取相对路径，方便在Markdown中显示
-                    rel_path = os.path.relpath(image_path, self.output_dir)
-                    f.write(f"![{platform}封面]({rel_path})\n\n")
                 
         return filename
         
@@ -327,160 +376,13 @@ class TitleGenerator:
         cover_prompts = self.generate_cover_prompts(novel_type, titles, summary)
         logging.info(f"已生成{len(cover_prompts)}个封面提示词")
         
-        # 4. 生成封面图片
-        cover_images = self.generate_cover_images(cover_prompts)
-        logging.info(f"已生成{len(cover_images)}个封面图片")
-        
-        # 5. 保存到文件
-        saved_file = self.save_to_file(titles, summary, cover_prompts, cover_images)
+        # 4. 保存到文件
+        saved_file = self.save_to_file(titles, summary, cover_prompts)
         logging.info(f"已保存到文件：{saved_file}")
         
         return {
             "titles": titles,
             "summary": summary,
             "cover_prompts": cover_prompts,
-            "cover_images": cover_images,
             "saved_file": saved_file
-        }
-
-    def generate_cover_images(self, cover_prompts: Dict[str, str], output_dir: str = None) -> Dict[str, str]:
-        """
-        根据提示词生成封面图片，使用谷歌Gemini API
-        
-        Args:
-            cover_prompts: 封面提示词
-            output_dir: 输出目录，默认为self.output_dir下的covers子目录
-            
-        Returns:
-            Dict[str, str]: 平台名称到图片路径的映射
-        """
-        import requests
-        from PIL import Image, ImageDraw, ImageFont
-        from io import BytesIO
-        import time
-        import base64
-        
-        if output_dir is None:
-            output_dir = os.path.join(self.output_dir, "covers")
-        
-        os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # 用于存储生成的图片路径
-        image_paths = {}
-        
-        try:
-            # 为每个平台生成封面图片
-            for platform, prompt in cover_prompts.items():
-                try:
-                    logging.info(f"正在为 {platform} 生成封面图片...")
-                    
-                    # 使用谷歌Gemini API生成图片
-                    api_key = os.environ.get("GEMINI_API_KEY")
-                    if not api_key:
-                        logging.warning("未设置GEMINI_API_KEY环境变量，无法调用Gemini API")
-                        raise ValueError("请设置GEMINI_API_KEY环境变量")
-                    
-                    # Gemini图像生成API端点
-                    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent"
-                    
-                    # 构建请求数据
-                    request_data = {
-                        "contents": [
-                            {
-                                "parts": [
-                                    {
-                                        "text": prompt + "，高清，精细，精美，小说封面，2:3比例"
-                                    }
-                                ]
-                            }
-                        ],
-                        "generationConfig": {
-                            "temperature": 0.4,
-                            "topK": 32,
-                            "topP": 1,
-                            "candidateCount": 1,
-                        },
-                        "safetySettings": [
-                            {
-                                "category": "HARM_CATEGORY_HARASSMENT",
-                                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                            },
-                            {
-                                "category": "HARM_CATEGORY_HATE_SPEECH",
-                                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                            },
-                            {
-                                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                            },
-                            {
-                                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                            }
-                        ]
-                    }
-                    
-                    # 发送API请求
-                    response = requests.post(
-                        f"{api_url}?key={api_key}",
-                        json=request_data,
-                        headers={"Content-Type": "application/json"}
-                    )
-                    
-                    if response.status_code == 200:
-                        response_data = response.json()
-                        # 从响应中提取图像数据
-                        if "candidates" in response_data and len(response_data["candidates"]) > 0:
-                            for candidate in response_data["candidates"]:
-                                if "content" in candidate and "parts" in candidate["content"]:
-                                    for part in candidate["content"]["parts"]:
-                                        if "inlineData" in part and "data" in part["inlineData"]:
-                                            # 获取base64编码的图像数据
-                                            image_data = part["inlineData"]["data"]
-                                            # 解码base64数据
-                                            img_data = base64.b64decode(image_data)
-                                            img = Image.open(BytesIO(img_data))
-                                            
-                                            # 保存图片
-                                            clean_platform_name = platform.replace(" ", "_").replace("：", "_").replace(":", "_")
-                                            image_filename = f"cover_{timestamp}_{clean_platform_name}.png"
-                                            image_path = os.path.join(output_dir, image_filename)
-                                            img.save(image_path)
-                                            
-                                            image_paths[platform] = image_path
-                                            logging.info(f"已成功生成 {platform} 的封面图片: {image_path}")
-                                            break
-                        else:
-                            raise ValueError(f"API返回数据中没有找到图像: {response_data}")
-                    else:
-                        logging.error(f"API请求失败，状态码: {response.status_code}, 响应: {response.text}")
-                        raise ValueError(f"API请求失败: {response.text}")
-                    
-                    # 避免API限制
-                    time.sleep(2)
-                
-                except Exception as e:
-                    logging.error(f"为 {platform} 生成封面图片时出错: {str(e)}")
-                    # 创建一个错误图片
-                    img = Image.new('RGB', (768, 1152), color=(255, 0, 0))
-                    d = ImageDraw.Draw(img)
-                    try:
-                        font = ImageFont.truetype("arial.ttf", 36)
-                    except IOError:
-                        font = ImageFont.load_default()
-                    d.text((384, 576), f"生成失败: {platform}", fill=(255, 255, 255), anchor="mm", font=font)
-                    d.text((384, 650), str(e)[:50], fill=(255, 255, 255), anchor="mm", font=font)
-                    
-                    clean_platform_name = platform.replace(" ", "_").replace("：", "_").replace(":", "_")
-                    image_filename = f"error_{timestamp}_{clean_platform_name}.png"
-                    image_path = os.path.join(output_dir, image_filename)
-                    img.save(image_path)
-                    
-                    image_paths[platform] = image_path
-            
-            return image_paths
-                
-        except Exception as e:
-            logging.error(f"生成封面图片时出错: {str(e)}")
-            return {} 
+        } 
