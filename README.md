@@ -180,9 +180,9 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ###### 世界观设定 (world_building)
 ```json
 {
-  "magic_system": "以灵气修炼为主，分为天地玄黄四个大境界",  // 修炼体系说明
-  "social_system": "修真门派为主，世俗王朝为辅",            // 社会体系说明
-  "background": "末法时代，灵气复苏"                       // 时代背景说明
+  "magic_system": "描述你的世界观设定 - 力量体系",       // 修炼体系说明
+  "social_system": "描述你的世界观设定 - 社会结构",         // 社会体系说明
+  "background": "描述你的世界观设定 - 时代背景"            // 时代背景说明
 }
 ```
 
@@ -190,23 +190,25 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ```json
 {
   "protagonist": {                                      // 主角设定
-    "background": "普通散修",                           // 背景设定
-    "initial_personality": "坚韧、重情、智慧",           // 初始性格特点
-    "growth_path": "逆境成长"                           // 成长路线
+    "background": "主角背景设定",                        // 背景设定
+    "initial_personality": "主角初始性格特点",            // 初始性格特点
+    "growth_path": "主角成长路线"                        // 成长路线
   },
   "supporting_roles": [                                 // 配角设定列表
     {
-      "role_type": "师尊",                              // 角色类型
-      "personality": "深沉智慧",                         // 性格特点
-      "relationship": "亦师亦父"                         // 与主角关系
+      "role_type": "角色类型 (例如: 师尊, 朋友)",           // 角色类型
+      "personality": "角色性格",                          // 性格特点
+      "relationship": "与主角的关系"                      // 与主角关系
     }
+    // 可以添加更多配角
   ],
   "antagonists": [                                      // 反派设定列表
     {
-      "role_type": "宿敌",
-      "personality": "阴狠毒辣",
-      "conflict_point": "夺宝之争"                      // 冲突点
+      "role_type": "反派类型 (例如: 宿敌, 幕后黑手)",      // 反派类型
+      "personality": "反派性格",                          // 性格特点
+      "conflict_point": "与主角的核心冲突点"               // 冲突点
     }
+    // 可以添加更多反派
   ]
 }
 ```
@@ -215,18 +217,18 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ```json
 {
   "act_one": {                                          // 第一幕：开篇
-    "setup": "主角发现自身特殊体质",                     // 开场设定
-    "inciting_incident": "获得上古传承",                 // 引子事件
-    "first_plot_point": "被迫离开家乡"                   // 第一个转折点
+    "setup": "开篇设定/背景介绍",                         // 开场设定
+    "inciting_incident": "激励事件/故事起点",              // 引子事件
+    "first_plot_point": "第一情节转折点"                   // 第一个转折点
   },
   "act_two": {                                          // 第二幕：发展
-    "rising_action": "加入门派，逐步成长",               // 上升情节
-    "midpoint": "身世之谜揭开",                          // 中点转折
-    "complications": "与宿敌的多次对抗"                  // 复杂化情节
+    "rising_action": "上升情节/主要发展",                // 上升情节
+    "midpoint": "中点事件/关键转折",                       // 中点转折
+    "complications": "遇到的困难与挑战"                   // 复杂化情节
   },
   "act_three": {                                        // 第三幕：结局
-    "climax": "终极决战",                               // 高潮
-    "resolution": "飞升成仙"                            // 结局
+    "climax": "高潮/最终对决",                            // 高潮
+    "resolution": "结局/故事收尾"                         // 结局
   }
 }
 ```
@@ -234,14 +236,12 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ###### 写作风格指南 (style_guide)
 ```json
 {
-  "tone": "热血激昂中带有智慧思考",                      // 整体基调
-  "pacing": "快节奏，重要场景适当放慢",                  // 节奏控制
+  "tone": "整体基调 (例如: 轻松愉快, 沉重严肃)",           // 整体基调
+  "pacing": "节奏控制 (例如: 快节奏, 慢热)",               // 节奏控制
   "description_focus": [                                // 重点描写方向列表
-    "修炼场景要细致",
-    "战斗场景要激烈",
-    "情感描写要真挚",
-    "人物对话要生动",
-    "语言风格要诙谐"
+    "描写侧重点1 (例如: 环境描写)",
+    "描写侧重点2 (例如: 心理描写)"
+    // 可以添加更多侧重点
   ]
 }
 ```

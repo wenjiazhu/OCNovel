@@ -29,7 +29,8 @@ data/reference/*
 !data/output/.gitkeep
 !data/logs/.gitkeep
 data/marketing/*
-prompt_definitions.py
+config.json
+.cursor/rules/*
 
 # 环境变量
 .env

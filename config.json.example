@@ -1,0 +1,104 @@
+{
+  "knowledge_base_config": {
+    "reference_files": [
+      "path/to/your/reference/file1.txt",
+      "path/to/your/reference/file2.txt"
+    ],
+    "chunk_size": 1000,
+    "chunk_overlap": 200,
+    "cache_dir": "data/cache"
+  },
+  "log_config": {
+    "log_dir": "data/logs",
+    "log_level": "DEBUG",
+    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  },
+  "novel_config": {
+    "type": "小说类型 (例如: 玄幻, 科幻, 都市)",
+    "theme": "小说主题 (例如: 冒险, 爱情, 成长)",
+    "style": "写作风格 (例如: 轻松, 严肃, 幽默)",
+    "target_chapters": 100, // 目标章节数
+    "chapter_length": 2000, // 每章大致字数
+    "reference_files": [
+       "path/to/your/reference/file1.txt", // 与知识库配置中的文件通常一致
+       "path/to/your/reference/file2.txt"
+    ],
+    "knowledge_base": { // 通常与顶层 knowledge_base_config 一致
+      "chunk_size": 1000,
+      "chunk_overlap": 200,
+      "cache_dir": "data/cache"
+    },
+    "writing_guide": {
+      "world_building": {
+        "magic_system": "描述你的世界观设定 - 力量体系",
+        "social_system": "描述你的世界观设定 - 社会结构",
+        "background": "描述你的世界观设定 - 时代背景"
+      },
+      "character_guide": {
+        "protagonist": {
+          "background": "主角背景设定",
+          "initial_personality": "主角初始性格特点",
+          "growth_path": "主角成长路线"
+        },
+        "supporting_roles": [
+          {
+            "role_type": "角色类型 (例如: 师尊, 朋友)",
+            "personality": "角色性格",
+            "relationship": "与主角的关系"
+          }
+          // 可以添加更多配角
+        ],
+        "antagonists": [
+          {
+            "role_type": "反派类型 (例如: 宿敌, 幕后黑手)",
+            "personality": "反派性格",
+            "conflict_point": "与主角的核心冲突点"
+          }
+          // 可以添加更多反派
+        ]
+      },
+      "plot_structure": {
+        "act_one": { // 第一幕/开端
+          "setup": "开篇设定/背景介绍",
+          "inciting_incident": "激励事件/故事起点",
+          "first_plot_point": "第一情节转折点"
+        },
+        "act_two": { // 第二幕/发展
+          "rising_action": "上升情节/主要发展",
+          "midpoint": "中点事件/关键转折",
+          "complications": "遇到的困难与挑战"
+        },
+        "act_three": { // 第三幕/结局
+          "climax": "高潮/最终对决",
+          "resolution": "结局/故事收尾"
+        }
+      },
+      "style_guide": {
+        "tone": "整体基调 (例如: 轻松愉快, 沉重严肃)",
+        "pacing": "节奏控制 (例如: 快节奏, 慢热)",
+        "description_focus": [
+          "描写侧重点1 (例如: 环境描写)",
+          "描写侧重点2 (例如: 心理描写)"
+          // 可以添加更多侧重点
+        ]
+      }
+    }
+  },
+  "generation_config": {
+    "max_retries": 3,
+    "retry_delay": 10,
+    "force_rebuild_kb": false, // 是否强制重新构建知识库
+    "validation": { // 生成内容校验选项
+      "check_logic": true,
+      "check_consistency": true,
+      "check_duplicates": true
+    }
+  },
+  "output_config": {
+    "format": "txt", // 输出格式 (例如: txt, md)
+    "encoding": "utf-8",
+    "save_outline": true, // 是否保存生成的大纲
+    "save_character_states": true, // 是否保存角色状态
+    "output_dir": "data/output" // 输出文件目录
+  }
+}
