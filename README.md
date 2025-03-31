@@ -132,7 +132,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 
 ### 2. 项目配置（config.json）
 
-编辑 `config.json` 文件，设置项目相关参数。详细配置说明如下：
+将`config.json.example`的文件名改为`config.json`，编辑 `config.json` 文件，设置项目相关参数。详细配置说明如下：
 
 #### 2.1 知识库配置 (knowledge_base_config)
 
