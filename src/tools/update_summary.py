@@ -11,9 +11,10 @@ import sys
 # 添加项目根目录到 Python 路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from src.config.config import Config
+from src.config.ai_config import AIConfig
+from src.models import ContentModel, OutlineModel
 from src.generators.novel_generator import NovelGenerator
-from src.config import load_config
-from src.models import load_model
 
 def update_chapter_summaries(chapter_nums: List[int], output_dir: str, config_file: str) -> None:
     """
@@ -26,11 +27,16 @@ def update_chapter_summaries(chapter_nums: List[int], output_dir: str, config_fi
     """
     try:
         # 加载配置
-        config = load_config(config_file)
+        config = Config(config_file)
+        ai_config = AIConfig()
+        
+        # 将AI配置中的嵌入模型配置添加到config中
+        if not hasattr(config, 'embedding_config'):
+            config.embedding_config = ai_config.openai_config["models"]["embedding"]
         
         # 初始化模型
-        content_model = load_model(config['content_model'])
-        outline_model = load_model(config['outline_model'])
+        content_model = ContentModel(config.get_model_config("content_model"))
+        outline_model = OutlineModel(config.get_model_config("outline_model"))
         knowledge_base = None  # 这里可以根据需要加载知识库
         
         # 初始化 NovelGenerator
@@ -80,16 +86,23 @@ def main():
     parser = argparse.ArgumentParser(description="更新指定章节的摘要")
     parser.add_argument("chapter_nums", type=int, nargs="+", help="需要更新摘要的章节号，可以指定多个，用空格分隔")
     parser.add_argument("--output_dir", type=str, default="data/output", help="输出目录路径")
-    parser.add_argument("--config", type=str, default="config/config.json", help="配置文件路径")
+    parser.add_argument("--config", type=str, default="config.json", help="配置文件路径")
     parser.add_argument("--log_level", type=str, default="INFO", help="日志级别")
     
     args = parser.parse_args()
     
-    # 设置日志级别
+    # 设置日志级别和格式
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format=log_format
     )
+    
+    # 添加控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(getattr(logging, args.log_level.upper()))
+    console_handler.setFormatter(logging.Formatter(log_format))
+    logging.getLogger().addHandler(console_handler)
     
     try:
         update_chapter_summaries(args.chapter_nums, args.output_dir, args.config)
