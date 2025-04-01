@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from tenacity import retry, stop_after_attempt, wait_fixed
 import dataclasses
@@ -812,44 +812,73 @@ class NovelGenerator:
             }
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10)) # 添加重试机制
-    def generate_outline(self, novel_type: str, theme: str, style: str, continue_from_existing: bool = False, batch_size: int = 10): # 减小默认 batch_size
-        """生成或续写小说大纲"""
-        logging.info(f"开始{'续写' if continue_from_existing else '生成'}小说大纲...")
+    def generate_outline(self, novel_type: str, theme: str, style: str,
+                         mode: str = 'append', # 'append' (追加) or 'replace' (替换)
+                         replace_range: Optional[Tuple[int, int]] = None, # (start_chap_num, end_chap_num) for replace mode
+                         extra_prompt: Optional[str] = None, # 新增：用户额外提示词
+                         batch_size: int = 10): # 减小默认 batch_size
+        """生成或续写/替换小说大纲"""
+        logging.info(f"开始 {mode} 小说大纲...")
         target_chapters = self.config.novel_config["target_chapters"]
         start_chapter_index = 0 # 索引起始为 0
-        num_to_generate = target_chapters
+        num_to_generate = 0
 
-        if continue_from_existing:
+        # --- 根据模式确定起始索引和生成数量 ---
+        if mode == 'append':
             start_chapter_index = len(self.chapter_outlines)
             num_to_generate = target_chapters - start_chapter_index
-            logging.info(f"续写大纲：从第 {start_chapter_index + 1} 章开始，目标总章数 {target_chapters}，需要生成 {num_to_generate} 章。")
+            logging.info(f"追加大纲：从第 {start_chapter_index + 1} 章开始，目标总章数 {target_chapters}，需要生成 {num_to_generate} 章。")
             if num_to_generate <= 0:
-                logging.info("当前大纲章节数已达到或超过目标，无需生成新的大纲章节。")
+                logging.info("当前大纲章节数已达到或超过目标，无需追加。")
                 return
+            context_start_index = max(0, start_chapter_index - 5) # 上下文取追加点之前的
+        elif mode == 'replace':
+            if replace_range is None or len(replace_range) != 2:
+                logging.error("替换模式需要提供有效的 replace_range=(start_chap_num, end_chap_num)")
+                return
+            start_chap_num, end_chap_num = replace_range
+            # 检查范围是否在现有大纲内
+            if not (1 <= start_chap_num <= end_chap_num <= len(self.chapter_outlines)):
+                 logging.error(f"无效的替换范围: {replace_range}。当前总章数: {len(self.chapter_outlines)}")
+                 return
+
+            start_chapter_index = start_chap_num - 1 # 转换为 0-based index
+            num_to_generate = end_chap_num - start_chap_num + 1
+            logging.info(f"替换大纲：范围 {start_chap_num}-{end_chap_num} (索引 {start_chapter_index}-{start_chapter_index + num_to_generate - 1}，共 {num_to_generate} 章)。")
+            context_start_index = max(0, start_chapter_index - 5) # 上下文取替换范围之前的
         else:
-            logging.info(f"生成全新大纲：共 {target_chapters} 章。")
-            self.chapter_outlines = [] # 如果不是续写，清空现有大纲
+            logging.error(f"无效的模式: {mode}。请使用 'append' 或 'replace'。")
+            return
 
         # --- 上下文准备 ---
         context = f"小说基本信息：\n类型：{novel_type}\n主题：{theme}\n风格：{style}\n"
-        # 可以考虑加入更多全局信息，例如主角设定、世界观等
-
-        if continue_from_existing and self.chapter_outlines:
-            context += "\n[已有大纲结尾部分]\n"
-            # 包含最后几章（最多5章）的大纲作为上下文
-            context_start_index = max(0, start_chapter_index - 5)
-            for i in range(context_start_index, start_chapter_index):
-                outline = self.chapter_outlines[i]
-                context += f"第{outline.chapter_number}章 {outline.title}: 关键剧情点: {', '.join(outline.key_points)}; 涉及角色: {', '.join(outline.characters)};\n"
-            logging.info("已添加已有大纲结尾部分到上下文。")
+        if start_chapter_index > 0: # 无论是追加还是替换，只要不是从第一章开始，都需要上下文
+            context += "\n[参考：之前的章节大纲结尾部分]\n"
+            # 包含前面几章（最多5章）的大纲作为上下文
+            actual_context_start = max(0, start_chapter_index - 5) # 确保不越界
+            for i in range(actual_context_start, start_chapter_index):
+                 # 健壮性检查：确保索引有效
+                 if i < len(self.chapter_outlines):
+                     outline = self.chapter_outlines[i]
+                     context += f"第{outline.chapter_number}章 {outline.title}: 关键剧情点: {', '.join(outline.key_points)}; 涉及角色: {', '.join(outline.characters)};\n"
+                 else:
+                      logging.warning(f"尝试访问越界的大纲索引 {i}，跳过。")
+            logging.info(f"已添加章节 {actual_context_start + 1} 到 {start_chapter_index} 的大纲到上下文。")
 
         # --- 分批生成循环 ---
-        generated_count = 0
+        generated_outlines_batch = [] # 存储当前批次生成的所有新大纲
         total_batches = math.ceil(num_to_generate / batch_size)
         for batch_num in range(total_batches):
-            current_batch_size = min(batch_size, num_to_generate - generated_count)
-            current_start_chapter_num = start_chapter_index + generated_count + 1 # 章节号从1开始
-            logging.info(f"--- 开始生成批次 {batch_num + 1}/{total_batches} (章节 {current_start_chapter_num} - {current_start_chapter_num + current_batch_size - 1}) ---")
+            # 计算当前批次应生成的数量和起始章节号
+            current_generated_count = len(generated_outlines_batch)
+            current_batch_size = min(batch_size, num_to_generate - current_generated_count)
+            # 章节号是 1-based
+            current_start_chapter_num = start_chapter_index + current_generated_count + 1
+
+            if current_batch_size <= 0: # 如果已经生成足够数量，则跳出
+                 break
+
+            logging.info(f"--- 开始生成批次 {batch_num + 1}/{total_batches} (请求章节 {current_start_chapter_num} - {current_start_chapter_num + current_batch_size - 1}) ---")
 
             # --- 使用 prompts 模块生成提示词 ---
             prompt = prompts.get_outline_prompt(
@@ -858,9 +887,10 @@ class NovelGenerator:
                 style=style,
                 current_start_chapter_num=current_start_chapter_num,
                 current_batch_size=current_batch_size,
-                existing_context=context
+                existing_context=context,
+                extra_prompt=extra_prompt # 传递 extra_prompt
             )
-            
+
             try:
                 # --- 调用 AI 模型 ---
                 logging.debug(f"发送给 AI 的提示词 (部分):\n{prompt[:500]}...")
@@ -869,7 +899,7 @@ class NovelGenerator:
 
                 # --- 解析响应 ---
                 try:
-                    # 尝试清理响应，去除可能的代码块标记和首尾空白
+                    # 尝试清理响应
                     response = response.strip()
                     if response.startswith("```json"):
                         response = response[7:]
@@ -881,77 +911,105 @@ class NovelGenerator:
                     if not isinstance(new_outlines_data, list):
                         raise ValueError("AI 返回的不是 JSON 列表")
 
-                    # --- 验证并添加大纲 ---
+                    # --- 验证并添加到批处理结果列表 ---
                     batch_added_count = 0
                     for i, outline_data in enumerate(new_outlines_data):
+                        # 预期章节号
                         expected_chapter_num = current_start_chapter_num + i
                         # 基本结构验证
                         required_keys = ["chapter_number", "title", "key_points", "characters", "settings", "conflicts"]
                         if not isinstance(outline_data, dict) or not all(k in outline_data for k in required_keys):
-                            logging.warning(f"批次 {batch_num + 1} 中第 {i+1} 个大纲数据结构不完整或格式错误，跳过: {outline_data}")
+                            logging.warning(f"批次 {batch_num + 1} 中第 {i+1} 个大纲数据结构不完整或格式错误，跳过: {str(outline_data)[:200]}")
                             continue
 
                         # 章节号验证和修正
-                        if not isinstance(outline_data["chapter_number"], int) or outline_data["chapter_number"] != expected_chapter_num:
-                            logging.warning(f"批次 {batch_num + 1} 中第 {i+1} 个大纲章节号错误或类型错误 (应为 {expected_chapter_num}，实际为 {outline_data.get('chapter_number')})，尝试修正...")
+                        if not isinstance(outline_data.get("chapter_number"), int) or outline_data["chapter_number"] != expected_chapter_num:
+                            actual_num = outline_data.get('chapter_number')
+                            logging.warning(f"批次 {batch_num + 1} 中第 {i+1} 个大纲章节号与预期不符 (预期 {expected_chapter_num}，实际 {actual_num})，尝试修正...")
                             outline_data["chapter_number"] = expected_chapter_num
 
-                        # 列表字段验证和修正
+                        # 列表字段验证和修正 (确保是列表)
                         list_keys = ["key_points", "characters", "settings", "conflicts"]
                         for key in list_keys:
-                            if not isinstance(outline_data[key], list):
-                                logging.warning(f"章节 {expected_chapter_num} 大纲的 '{key}' 字段不是列表 (实际类型: {type(outline_data[key])})，尝试修正...")
-                                # 简单处理：如果是字符串，放入列表中；否则设为空列表
-                                outline_data[key] = [outline_data[key]] if isinstance(outline_data[key], str) else []
+                            if key not in outline_data or not isinstance(outline_data[key], list):
+                                logging.warning(f"章节 {expected_chapter_num} 大纲的 '{key}' 字段缺失或不是列表 (实际类型: {type(outline_data.get(key))})，尝试修正为空列表...")
+                                outline_data[key] = []
 
-                        # 标题验证
-                        if not isinstance(outline_data["title"], str) or not outline_data["title"]:
+                        # 标题验证 (确保是字符串且非空)
+                        if not isinstance(outline_data.get("title"), str) or not outline_data["title"]:
                              logging.warning(f"章节 {expected_chapter_num} 大纲标题无效，使用默认标题。")
                              outline_data["title"] = f"第 {expected_chapter_num} 章（标题生成失败）"
 
-
                         try:
                             new_outline = ChapterOutline(**outline_data)
-                            self.chapter_outlines.append(new_outline)
+                            generated_outlines_batch.append(new_outline) # 添加到总列表
                             batch_added_count += 1
                         except Exception as e:
                             logging.error(f"根据解析数据创建 ChapterOutline 对象失败 (章节 {expected_chapter_num}): {e} 数据: {outline_data}")
 
-                    logging.info(f"批次 {batch_num + 1}: 成功解析并添加了 {batch_added_count}/{current_batch_size} 个大纲章节。")
-                    generated_count += batch_added_count
+                    logging.info(f"批次 {batch_num + 1}: 成功解析并添加了 {batch_added_count} 个大纲。")
 
-                    # 如果该批次未能成功添加任何章节，可能需要停止
-                    if batch_added_count == 0:
-                         logging.error(f"批次 {batch_num + 1} 未能成功添加任何章节，停止后续大纲生成。请检查 AI 响应或提示词。")
+                    # 如果该批次未能成功添加任何章节，并且请求的数量大于0，记录错误并可能停止
+                    if batch_added_count == 0 and current_batch_size > 0:
+                         logging.error(f"批次 {batch_num + 1} 未能成功添加任何章节，但请求数量为 {current_batch_size}。可能存在严重问题，停止后续大纲生成。")
                          break # 停止生成
 
                 except json.JSONDecodeError as e:
                     logging.error(f"批次 {batch_num + 1}: 解析AI返回的大纲JSON失败: {e}\n原始响应 (部分): {response[:500]}...")
-                    # 可以选择跳过此批次或停止，这里选择停止
-                    break
+                    break # 停止
                 except ValueError as e:
                     logging.error(f"批次 {batch_num + 1}: AI返回的数据格式或内容错误: {e}\n原始响应 (部分): {response[:500]}...")
-                    # 停止
-                    break
+                    break # 停止
+
+                # (可选) 更新上下文，为下一批次准备 (如果需要基于上一批生成结果的话)
+                # context += "\n[刚生成的批次摘要]...\n" # 示例
 
             except Exception as e:
                 logging.error(f"批次 {batch_num + 1}: 调用AI生成大纲时发生意外错误: {str(e)}")
-                # 停止
                 break # 发生其他错误也停止
 
-        # --- 保存最终结果 ---
-        final_chapter_count = len(self.chapter_outlines)
-        logging.info(f"大纲生成/续写完成。当前总章节数: {final_chapter_count} (目标: {target_chapters})")
-        if final_chapter_count > start_chapter_index or not continue_from_existing: # 只有在大纲确实被修改或全新生成时才保存
+        # --- 处理生成结果 ---
+        actual_generated_count = len(generated_outlines_batch)
+        if actual_generated_count != num_to_generate:
+            logging.warning(f"警告：请求生成 {num_to_generate} 个大纲，但实际只成功生成了 {actual_generated_count} 个。")
+            # 替换模式下，数量不匹配则中止操作
+            if mode == 'replace':
+                logging.error("替换模式下，生成的大纲数量与请求不符，操作中止，未修改原大纲。")
+                return # 不进行替换
+
+        # --- 应用更改 ---
+        if generated_outlines_batch: # 确保有新内容生成
+            if mode == 'append':
+                self.chapter_outlines.extend(generated_outlines_batch)
+                logging.info(f"成功追加 {actual_generated_count} 个大纲。当前总数: {len(self.chapter_outlines)}")
+            elif mode == 'replace':
+                # 验证 generated_outlines_batch 中的章节号是否连续且与请求范围一致
+                is_consistent = True
+                for i, outline in enumerate(generated_outlines_batch):
+                    if outline.chapter_number != start_chap_num + i:
+                        logging.error(f"生成的第 {i+1} 个大纲章节号 ({outline.chapter_number}) 与预期 ({start_chap_num + i}) 不符。替换中止。")
+                        is_consistent = False
+                        break
+                if not is_consistent:
+                    return # 中止替换
+
+                # 执行替换
+                # 计算结束索引 (exclusive)
+                end_replace_index = start_chapter_index + num_to_generate
+                self.chapter_outlines = self.chapter_outlines[:start_chapter_index] + \
+                                        generated_outlines_batch + \
+                                        self.chapter_outlines[end_replace_index:]
+                logging.info(f"成功替换章节 {start_chap_num}-{end_chap_num} (共 {actual_generated_count} 章) 的大纲。当前总章数: {len(self.chapter_outlines)}")
+
+            # 保存结果
             logging.info("正在保存更新后的大纲及进度...")
-            logging.debug(f"Before saving progress in generate_outline, self.characters is: {type(self.characters)}") # 添加日志
             try:
-                self._save_progress() # _save_progress 会保存大纲和角色等
+                self._save_progress() # 保存大纲和进度
                 logging.info("大纲及进度保存完成。")
             except Exception as e:
-                logging.error(f"保存大纲或进度时出错: {e}", exc_info=True) # 添加 exc_info=True
+                logging.error(f"保存大纲或进度时出错: {e}", exc_info=True)
         else:
-            logging.info("大纲未发生变化，无需保存。") 
+             logging.info("没有生成任何有效的新大纲，未做修改。")
 
     def _load_outline(self):
         """加载小说大纲"""

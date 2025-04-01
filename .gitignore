@@ -23,10 +23,12 @@ build/
 # 项目特定文件
 data/cache/*
 data/output/*
+data/output2/*
 data/logs/*
 data/reference/*
 !data/cache/.gitkeep
 !data/output/.gitkeep
+!data/output2/.gitkeep
 !data/logs/.gitkeep
 data/marketing/*
 config.json

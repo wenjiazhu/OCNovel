@@ -22,18 +22,21 @@ def get_outline_prompt(
     style: str,
     current_start_chapter_num: int,
     current_batch_size: int,
-    existing_context: str = ""
+    existing_context: str = "",
+    extra_prompt: Optional[str] = None
 ) -> str:
     """生成用于创建小说大纲的提示词。"""
+    extra_requirements = f"\n[额外要求]\n{extra_prompt}\n" if extra_prompt else ""
+
     prompt = f"""{existing_context}
 
-你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。请严格按照要求，基于以上小说信息和已有大纲（如果是续写），创作后续的小说大纲。
+你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。请严格按照要求，基于以上小说信息和已有大纲（如果是续写或替换），创作后续的小说大纲。
 
 任务要求：
 1.  生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。
-2.  确保情节连贯，与已有大纲结尾部分自然衔接（如果是续写）。推动主线发展，引入新的冲突和看点。
-3.  每章大纲必须包含以下字段：章节号 (chapter_number, 整数)，标题 (title, 字符串)，关键剧情点列表 (key_points, 字符串列表)，涉及角色列表 (characters, 字符串列表)，场景列表 (settings, 字符串列表)，核心冲突列表 (conflicts, 字符串列表)。
-4.  严格按照以下 JSON 格式返回一个包含 {current_batch_size} 个章节大纲对象的列表。不要在 JSON 列表前后添加任何其他文字、解释或代码标记 (如 ```json ... ```)。
+2.  确保情节连贯，与已有上下文自然衔接。推动主线发展，引入新的冲突和看点。{extra_requirements}
+3.  每章大纲必须包含以下字段：章节号 (chapter_number, 整数，必须与请求的章节号对应)，标题 (title, 字符串)，关键剧情点列表 (key_points, 字符串列表)，涉及角色列表 (characters, 字符串列表)，场景列表 (settings, 字符串列表)，核心冲突列表 (conflicts, 字符串列表)。
+4.  严格按照以下 JSON 格式返回一个包含 {current_batch_size} 个章节大纲对象的列表。不要在 JSON 列表前后添加任何其他文字、解释或代码标记 (如 ```json ... ```)。JSON 列表必须直接开始于 '[' 结束于 ']'。
 
 ```json
 [
@@ -45,7 +48,7 @@ def get_outline_prompt(
     "settings": ["...", "..."],
     "conflicts": ["...", "..."]
   }},
-  // ... (如果 current_batch_size > 1, 继续添加后续章节对象)
+  // ... (如果 current_batch_size > 1, 继续添加后续章节对象，确保 chapter_number 连续递增)
 ]
 ```
 """
