@@ -122,7 +122,7 @@
     }
   },
   "generation_config": {
-    "max_retries": 5,
+    "max_retries": 3,
     "retry_delay": 10,
     "force_rebuild_kb": false,
     "validation": {
