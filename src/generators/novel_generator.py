@@ -61,6 +61,7 @@ class NovelGenerator:
         
         # 设置输出目录
         self.output_dir = config.output_config["output_dir"]
+        print(f"Output directory: {self.output_dir}") # 添加这行代码
         
         # 设置角色库文件路径
         self.characters_file = os.path.join(self.output_dir, "characters.json")
@@ -102,13 +103,13 @@ class NovelGenerator:
             handler = logging.FileHandler(log_file, encoding='utf-8')
             print("FileHandler 创建成功。") # 确认 FileHandler 创建
 
-            handler.setLevel(logging.DEBUG) # 设置 handler 的日志级别
+            handler.setLevel(logging.INFO) # 设置 handler 的日志级别
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
 
             logger = logging.getLogger() # 获取 root logger
             logger.addHandler(handler) # 将 handler 添加到 root logger
-            logger.setLevel(logging.DEBUG) # 设置 root logger 的日志级别
+            logger.setLevel(logging.INFO) # 设置 root logger 的日志级别
 
             print("日志 Handler 添加到 Logger。") # 确认 Handler 添加成功
             logging.info("日志系统初始化完成。") # 添加一条日志，确认日志系统工作

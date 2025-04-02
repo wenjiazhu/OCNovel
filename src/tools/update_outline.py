@@ -13,7 +13,7 @@ if project_root not in sys.path:
 try:
     from src.config.config import Config
     # 假设你的模型导入路径如下，如果不同请修改
-    from src.models import OutlineModel, ContentModel
+    from src.models import OutlineModel, ContentModel, EmbeddingModel
     from src.knowledge_base.knowledge_base import KnowledgeBase
     from src.generators.novel_generator import NovelGenerator
 except ImportError as e:
@@ -22,7 +22,7 @@ except ImportError as e:
     print(f"Current sys.path: {sys.path}")
     sys.exit(1)
 
-def setup_logging(log_level_str="INFO"):
+def setup_logging(log_level_str="WARNING"):
     """配置基本的日志记录到控制台"""
     log_level = getattr(logging, log_level_str.upper(), logging.INFO)
     logging.basicConfig(level=log_level,
@@ -81,8 +81,12 @@ def main():
         knowledge_base = None
         if hasattr(config, 'knowledge_base_config'):
             try:
-                knowledge_base = KnowledgeBase(config.knowledge_base_config)
+                embedding_model = EmbeddingModel(config.get_model_config("embedding_model"))
+                knowledge_base = KnowledgeBase(config.knowledge_base_config, embedding_model)
                 logger.info("知识库初始化成功。")
+            except KeyError as e:
+                 logger.error(f"模型配置错误：缺少键 {e} in models_config 或模型配置名称错误 (例如 'outline_model', 'content_model')")
+                 sys.exit(1)
             except Exception as kb_err:
                  logger.warning(f"初始化 KnowledgeBase 时出错: {kb_err}。将不使用知识库功能。")
         else:

@@ -2,7 +2,14 @@
   "knowledge_base_config": {
     "reference_files": [
       "data/reference/my_novel.txt",
-      "data/reference/凡人修仙传(501-1000章).txt"
+      "data/reference/凡人修仙传(501-1000章).txt",
+      "data/reference/凡人修仙传(1001-1500章).txt",
+      "data/reference/凡人修仙传(1501-2000章).txt",
+      "data/reference/凡人修仙传(2001-2464章).txt",
+      "data/reference/修真聊天群(1-500章).txt",
+      "data/reference/修真聊天群(501-1000章).txt",
+      "data/reference/没钱修什么仙？(1-306章).txt",
+      "data/reference/谁让他修仙的！(1-500章).txt"
     ],
     "chunk_size": 1000,
     "chunk_overlap": 200,
@@ -10,19 +17,15 @@
   },
   "log_config": {
     "log_dir": "data/logs",
-    "log_level": "DEBUG",
+    "log_level": "WARNING",
     "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   },
   "novel_config": {
     "type": "玄幻",
     "theme": "废柴逆袭",
     "style": "轻松搞笑",
-    "target_chapters": 405,
+    "target_chapters": 400,
     "chapter_length": 2500,
-    "reference_files": [
-      "data/reference/my_novel.txt",
-      "data/reference/凡人修仙传(501-1000章).txt"
-    ],
     "knowledge_base": {
       "chunk_size": 1000,
       "chunk_overlap": 200,
@@ -37,7 +40,7 @@
       "character_guide": {
         "protagonist": {
           "background": "出身于没落修真家族的废柴，或来自偏远山村的普通少年，身怀特殊体质（例如混沌体、鸿蒙体、先天道体），前期默默无闻，受尽嘲讽。",
-          "initial_personality": "坚韧不屈，性格略微内向，但内心渴望变强，重视感情，有恩必报，有仇必还，逐渐变得成熟和果断。",
+          "initial_personality": "坚韧不屈，性格略微内向，表面淡定但内心渴望变强，重视感情，有恩必报，有仇必还，逐渐变得成熟和果断。",
           "growth_path": "开局获得金手指（系统开启，戒指老爷爷苏醒，捡到神秘宝物等），人生轨迹发生改变。被退婚或家族排挤后崛起，在冒险中不断升级打怪，在战斗中磨砺意志，在奇遇中获得机缘，在复仇中逐步变强，最终成长为顶尖强者。"
         },
         "supporting_roles": [
@@ -119,7 +122,7 @@
     }
   },
   "generation_config": {
-    "max_retries": 3,
+    "max_retries": 5,
     "retry_delay": 10,
     "force_rebuild_kb": false,
     "validation": {
