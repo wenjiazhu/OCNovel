@@ -31,7 +31,7 @@ data/reference/*
 !data/output2/.gitkeep
 !data/logs/.gitkeep
 data/marketing/*
-*.json
+config.json
 .cursor/rules/*
 
 # 环境变量
