@@ -17,7 +17,7 @@
   },
   "log_config": {
     "log_dir": "data/logs",
-    "log_level": "WARNING",
+    "log_level": "INFO",
     "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   },
   "novel_config": {
