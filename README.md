@@ -207,7 +207,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ```json
 {
   "log_dir": "data/logs",                              // 日志文件存储目录
-  "log_level": "DEBUG",                                // 日志级别：DEBUG/INFO/WARNING/ERROR
+  "log_level": "INFO",                                // 日志级别：DEBUG/INFO/WARNING/ERROR
   "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  // 日志格式
 }
 ```
@@ -223,8 +223,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
   "theme": "修真逆袭",                                 // 小说主题：如修真逆袭、都市重生等
   "style": "热血",                                     // 写作风格：如热血、轻松、严肃等
   "target_chapters": 400,                              // 目标章节数
-  "chapter_length": 2500,                              // 每章字数
-  "reference_files": ["data/reference/my_novel.txt"]   // 参考小说文件列表
+  "chapter_length": 2500                              // 每章字数
 }
 ```
 
