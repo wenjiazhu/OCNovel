@@ -78,6 +78,59 @@ python src/generators/chapter_regenerator.py --chapter <章节号> --prompt "额
 python src/tools/generate_marketing.py --keywords "关键词1" "关键词2" --characters "角色1" "角色2"
 ```
 
+### 4. 手动更新小说大纲
+
+如果你需要手动更新小说的大纲，可以使用 `src/tools/update_outline.py` 脚本。这允许你指定章节范围和额外的提示词来重新生成大纲。
+
+```bash
+python src/tools/update_outline.py --start <起始章节号> --end <结束章节号> [--prompt "额外提示词"] [--config <配置文件路径>] [--log-level <日志级别>]
+```
+
+**参数说明:**
+
+- `--start <起始章节号>`:  起始章节号 (包含)，从 1 开始。**必需参数**。
+- `--end <结束章节号>`:  结束章节号 (包含)，从 1 开始。**必需参数**。
+- `--prompt "额外提示词"`:  *(可选)* 用于指导大纲生成的额外提示词。如果需要更精细地控制大纲生成，可以添加此参数。
+- `--config <配置文件路径>`:  *(可选)* 配置文件路径，默认为 `config.json`。如果你的配置文件不在项目根目录或者文件名不同，可以使用此参数指定。
+- `--log-level <日志级别>`:  *(可选)* 日志级别，默认为 `INFO`。可以选择 `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` 等。
+
+**示例:**
+
+更新第 10 章到第 20 章的大纲，并添加额外提示词 "增加主角的冒险元素":
+
+```bash
+python src/tools/update_outline.py --start 10 --end 20 --prompt "增加主角的冒险元素"
+```
+
+### 5. 手动更新章节摘要
+
+如果你希望更新已生成章节的摘要信息，可以使用 `src/tools/update_summary.py` 脚本。这在你修改了章节内容后，希望更新摘要以保持信息同步时非常有用。
+
+```bash
+python src/tools/update_summary.py <章节号1> [<章节号2> ...] [--output_dir <输出目录路径>] [--config <配置文件路径>] [--log-level <日志级别>]
+```
+
+**参数说明:**
+
+- `<章节号1> [<章节号2> ...]`:  需要更新摘要的章节号，可以指定一个或多个，用空格分隔。**必需参数**。
+- `--output_dir <输出目录路径>`:  *(可选)* 输出目录路径，默认为 `data/output`。如果你的小说章节输出目录不是默认路径，可以使用此参数指定。
+- `--config <配置文件路径>`:  *(可选)* 配置文件路径，默认为 `config.json`。
+- `--log-level <日志级别>`:  *(可选)* 日志级别，默认为 `INFO`。
+
+**示例:**
+
+更新第 5 章和第 8 章的摘要:
+
+```bash
+python src/tools/update_summary.py 5 8
+```
+
+更新第 12 章的摘要，并指定输出目录为 `output` 文件夹:
+
+```bash
+python src/tools/update_summary.py 12 --output_dir output
+```
+
 ## 项目结构
 
 ```
@@ -154,7 +207,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 ```json
 {
   "log_dir": "data/logs",                              // 日志文件存储目录
-  "log_level": "DEBUG",                                // 日志级别：DEBUG/INFO/WARNING/ERROR
+  "log_level": "INFO",                                // 日志级别：DEBUG/INFO/WARNING/ERROR
   "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  // 日志格式
 }
 ```
@@ -170,8 +223,7 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
   "theme": "修真逆袭",                                 // 小说主题：如修真逆袭、都市重生等
   "style": "热血",                                     // 写作风格：如热血、轻松、严肃等
   "target_chapters": 400,                              // 目标章节数
-  "chapter_length": 2500,                              // 每章字数
-  "reference_files": ["data/reference/my_novel.txt"]   // 参考小说文件列表
+  "chapter_length": 2500                              // 每章字数
 }
 ```
 

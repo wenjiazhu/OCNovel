@@ -27,7 +27,10 @@ class Config:
             
         # 初始化 AI 配置
         self.ai_config = AIConfig()
-            
+        
+        # 从配置文件中读取 output_dir
+        config_output_dir = self.config["output_config"].get("output_dir")
+        
         # AI模型配置
         self.model_config = {
             "outline_model": self.ai_config.get_model_config("gemini_outline"),
@@ -37,10 +40,6 @@ class Config:
         
         # 小说配置
         self.novel_config = self.config["novel_config"]
-        self.novel_config["reference_files"] = [
-            os.path.join(self.base_dir, file_path)
-            for file_path in self.novel_config["reference_files"]
-        ]
         
         # 知识库配置
         self.knowledge_base_config = self.config["knowledge_base_config"]
@@ -53,7 +52,7 @@ class Config:
         self.generator_config = {
             "target_chapters": self.novel_config["target_chapters"],
             "chapter_length": self.novel_config["chapter_length"],
-            "output_dir": os.path.join(self.base_dir, "data", "output"),
+            "output_dir": config_output_dir if config_output_dir else os.path.join(self.base_dir, "data", "output"),
             "max_retries": self.config["generation_config"]["max_retries"],
             "retry_delay": self.config["generation_config"]["retry_delay"],
             "validation": self.config["generation_config"]["validation"]
@@ -69,7 +68,7 @@ class Config:
         # 输出配置
         self.output_config = self.config["output_config"]
         self.output_config.update({
-            "output_dir": os.path.join(self.base_dir, "data", "output")
+            "output_dir": config_output_dir if config_output_dir else os.path.join(self.base_dir, "data", "output")
         })
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
