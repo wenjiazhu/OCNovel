@@ -166,6 +166,20 @@ def main():
             # 读取原章节内容
             output_dir = config.generator_config.get("output_dir", "data/output")
             
+            # --- 新增：提前加载章节摘要 ---
+            summaries = {}
+            summary_file = os.path.join(output_dir, "summary.json")
+            if os.path.exists(summary_file):
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summaries = json.load(f)
+                    logging.info(f"已加载章节摘要文件: {summary_file}")
+                except json.JSONDecodeError:
+                    logging.error(f"无法解析摘要文件: {summary_file}，将忽略摘要。")
+            else:
+                logging.warning(f"摘要文件不存在: {summary_file}，将无法使用章节摘要。")
+            # --- 新增结束 ---
+            
             # 定义多种可能的章节文件名格式
             possible_chapter_files = [
                 os.path.join(output_dir, f"第{chapter_num}章.txt"),
@@ -211,17 +225,54 @@ def main():
                     next_content = f.read()
                 logging.info(f"已读取第 {chapter_num+1} 章内容")
             
+            # --- 新增：获取前后章节摘要 ---
+            prev_summaries = []
+            next_summaries = []
+
+            # 获取前三个章节摘要
+            for i in range(1, 4):
+                prev_chapter_num_str = str(chapter_num - i)
+                if prev_chapter_num_str in summaries:
+                    prev_summaries.append(summaries[prev_chapter_num_str])
+                else:
+                    break # 如果找不到更早的摘要，就停止
+
+            # 获取后三个章节摘要
+            for i in range(1, 4):
+                next_chapter_num_str = str(chapter_num + i)
+                if next_chapter_num_str in summaries:
+                    next_summaries.append(summaries[next_chapter_num_str])
+                else:
+                    break # 如果找不到更晚的摘要，就停止
+            
+            # 按章节顺序组合摘要
+            prev_summaries_text = "\n".join(reversed(prev_summaries))
+            next_summaries_text = "\n".join(next_summaries)
+            
+            if prev_summaries_text:
+                 logging.info(f"获取了 {len(prev_summaries)} 个前续章节摘要。")
+            if next_summaries_text:
+                 logging.info(f"获取了 {len(next_summaries)} 个后续章节摘要。")
+            # --- 新增结束 ---
+
             # 使用NovelGenerator中的方法重新生成章节
-            # 使用计算好的 chapter_idx
-            generator.generate_chapter(chapter_idx, extra_prompt, original_content, prev_content, next_content)
+            # 注意：需要修改 NovelGenerator.generate_chapter 方法以接收新的摘要参数
+            generator.generate_chapter(
+                chapter_idx, 
+                extra_prompt, 
+                original_content, 
+                prev_content, 
+                next_content,
+                prev_summaries=prev_summaries_text, # 新增参数
+                next_summaries=next_summaries_text  # 新增参数
+            )
             logging.info(f"第 {chapter_num} 章重新生成完成")
             
             # 更新章节摘要
-            summary_file = os.path.join(output_dir, "summary.json")
             if os.path.exists(summary_file):
-                with open(summary_file, 'r', encoding='utf-8') as f:
-                    summaries = json.load(f)
-                
+                # with open(summary_file, 'r', encoding='utf-8') as f: # 这部分可以移除，因为 summaries 已加载
+                #     summaries = json.load(f)
+
                 # 查找重新生成的章节文件
                 new_chapter_files = [
                     f for f in os.listdir(output_dir) 

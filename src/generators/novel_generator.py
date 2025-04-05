@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, RetryError
 import dataclasses
 import math # 导入 math 模块用于 ceil
 import re # 导入 re 模块用于清理文件名
@@ -14,6 +14,7 @@ from ..models import ContentModel, OutlineModel, EmbeddingModel
 from ..knowledge_base.knowledge_base import KnowledgeBase
 from ..config.config import Config
 import time # 需要 import time
+import asyncio # 需要导入 asyncio 来处理可能的 TimeoutError
 
 @dataclass
 class ChapterOutline:
@@ -185,18 +186,18 @@ class NovelGenerator:
             # 使用角色导入提示词提取角色信息
             logging.info("使用AI从章节内容中提取角色信息...")
             prompt = prompts.get_character_import_prompt(combined_content)
-            characters_info = self.content_model.generate(prompt)
-            
-            # 解析提取的角色信息
-            self._parse_character_update(characters_info, self.current_chapter)
-            
-            # 保存提取的角色信息
-            self._save_characters()
-            
-            logging.info(f"从已生成章节成功提取了 {len(self.characters)} 个角色信息")
+            try:
+                 characters_info = self.content_model.generate(prompt)
+                 self._parse_character_update(characters_info, self.current_chapter)
+                 self._save_characters()
+                 logging.info(f"从已生成章节成功提取了 {len(self.characters)} 个角色信息")
+            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                 logging.error(f"从已生成章节提取角色信息时请求超时: {str(e)}")
+            except Exception as e:
+                 logging.error(f"解析或保存提取的角色信息时出错: {str(e)}")
+
         except Exception as e:
             logging.error(f"从已生成章节提取角色信息时发生错误: {str(e)}", exc_info=True)
-            # 异常不应终止程序流程，只记录错误
 
     def _save_progress(self):
         """保存生成进度"""
@@ -352,56 +353,60 @@ class NovelGenerator:
         return sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
     
     def _adjust_content_length(self, content: str, target_length: int) -> str:
-        """调整内容长度
-        
-        Args:
-            content: 原始内容
-            target_length: 目标字数
-            
-        Returns:
-            str: 调整后的内容
-        """
+        """调整内容长度"""
         current_length = self._count_chinese_chars(content)
         if current_length >= target_length:
             return content
-            
+
         # 如果当前字数不足目标字数的80%，需要扩充内容
         if current_length < target_length * 0.8:
             logging.info(f"当前字数({current_length})不足目标字数({target_length})的80%，开始扩充内容...")
+            
             expansion_prompt = f"""
             请扩充以下小说章节内容，要求：
             1. 保持原有情节和风格不变
-            2. 在适当位置增加细节描写和场景刻画
-            3. 扩充后的内容应该更加丰富生动
-            4. 确保扩充的内容与原文自然衔接
-            5. 扩充后的总字数应该达到{target_length}字左右
+            2. 在适当位置增加细节描写、人物心理活动或对话，使内容更丰富生动
+            3. 确保扩充的内容与原文自然衔接，保持逻辑连贯
+            4. **扩充后的总字数应尽可能接近 {target_length} 字，请避免大幅超过此目标。**
             
             原文内容：
             {content}
             """
-            logging.debug(f"Expansion prompt (first 300 chars): {expansion_prompt[:300]}") # 记录部分提示词
+            
+            logging.debug(f"Expansion prompt (first 300 chars): {expansion_prompt[:300]}")
             try:
                 logging.info("Calling content model for expansion...")
-                start_time = time.time() # 需要 import time
-                # --- 第二次调用 generate ---
+                start_time = time.time()
                 logging.debug("Calling content_model.generate for expansion...")
                 expanded_content = self.content_model.generate(expansion_prompt)
                 logging.debug("Expansion content generation finished.")
-                # --- 结束第二次调用 ---
                 end_time = time.time()
                 expanded_length = self._count_chinese_chars(expanded_content)
                 logging.info(f"Content model expansion finished in {end_time - start_time:.2f} seconds. Expanded length: {expanded_length}")
-                if expanded_length < target_length * 0.8:
+                
+                # --- 修改：移除截断逻辑，只保留警告 ---
+                max_allowed_length = target_length * 1.2 
+                if expanded_length > max_allowed_length:
+                    # 只记录警告，不再截断
+                    logging.warning(f"扩写后字数({expanded_length})显著超过目标({target_length})，超过了{max_allowed_length}字的上限。将保留扩写后的完整内容。")
+                    
+                # 检查扩写后是否仍然严重不足 (保留)
+                elif expanded_length < target_length * 0.8:
                     logging.warning(f"Expansion attempt resulted in insufficient length ({expanded_length}/{target_length}). Model might not be following instructions or hitting limits.")
+                
                 return expanded_content
-            except KeyError as e: # 添加 KeyError 捕获
+                # --- 修改结束 ---
+
+            except (TimeoutError, asyncio.TimeoutError) as e: 
+                logging.error(f"内容扩充请求超时: {str(e)}，将返回原始内容。")
+                return content
+            except KeyError as e:
                 logging.error(f"内容扩充时捕获到 KeyError: {e}", exc_info=True)
-                # 扩充失败，返回原始内容
                 return content
             except Exception as e:
                 logging.error(f"内容扩充失败：{str(e)}，返回原始内容", exc_info=True)
                 return content
-                
+        
         return content
     
     def _save_chapter(self, chapter_num: int, content: str, skip_character_update: bool = False):
@@ -481,13 +486,23 @@ class NovelGenerator:
                 json.dump(summaries, f, ensure_ascii=False, indent=2)
             logging.info(f"已更新第 {chapter_num} 章摘要")
 
+        except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+            logging.error(f"更新第 {chapter_num} 章摘要时请求超时: {str(e)}")
         except Exception as e:
             logging.error(f"更新第 {chapter_num} 章摘要时出错: {str(e)}")
     
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
-    def generate_chapter(self, chapter_idx: int, extra_prompt: str = "", original_content: str = "", prev_content: str = "", next_content: str = "") -> str:
+    def generate_chapter(self, 
+                         chapter_idx: int, 
+                         extra_prompt: str = "", 
+                         original_content: str = "", 
+                         prev_content: str = "", 
+                         next_content: str = "",
+                         prev_summaries: str = "", # 新增参数
+                         next_summaries: str = ""   # 新增参数
+                         ) -> str:
         """生成章节内容"""
-        logging.debug(f"Start generate_chapter for index {chapter_idx}. self.characters is: {type(self.characters)}") # 添加日志
+        logging.debug(f"Start generate_chapter for index {chapter_idx}. self.characters is: {type(self.characters)}") 
         outline = self.chapter_outlines[chapter_idx]
         
         logging.info(f"开始生成第 {chapter_idx + 1} 章内容")
@@ -501,33 +516,36 @@ class NovelGenerator:
         
         logging.info(f"第 {chapter_idx + 1} 章: 参考材料准备完成。开始生成章节内容...")
         
-        # 获取上一章摘要
-        prev_summary = ""
-        if chapter_idx > 0:
+        # --- 修改：优先使用传入的摘要信息 ---
+        # 获取上一章摘要 (如果未传入，尝试从文件加载)
+        if not prev_summaries and chapter_idx > 0:
             summary_file = os.path.join(self.output_dir, "summary.json")
             if os.path.exists(summary_file):
                 try:
                     with open(summary_file, 'r', encoding='utf-8') as f:
                         summaries = json.load(f)
-                        prev_chapter_num = str(chapter_idx)
-                        if prev_chapter_num in summaries:
-                            prev_summary = summaries[prev_chapter_num]
-                            logging.info(f"已获取第 {chapter_idx} 章摘要用于参考")
+                        prev_chapter_num_str = str(chapter_idx) # 上一章是 chapter_idx，因为 idx 是 0-based
+                        if prev_chapter_num_str in summaries:
+                            prev_summaries = summaries[prev_chapter_num_str] # 使用加载的摘要
+                            logging.info(f"从文件加载了第 {chapter_idx} 章摘要用于参考")
                 except Exception as e:
                     logging.error(f"读取上一章摘要失败: {str(e)}")
-        
+        elif prev_summaries:
+             logging.info(f"使用了传入的 {len(prev_summaries.splitlines())} 个前续章节摘要。")
+
+
         # 获取下一章大纲
         next_outline = None
         if chapter_idx + 1 < len(self.chapter_outlines):
             next_outline = self.chapter_outlines[chapter_idx + 1]
             logging.info(f"已获取第 {chapter_idx + 2} 章大纲用于参考")
         
-        # 构建上下文信息
+        # 构建上下文信息 (优先使用摘要)
         context_info = ""
-        if prev_summary:
+        if prev_summaries:
             context_info += f"""
-            [上一章摘要]
-            {prev_summary}
+            [前续章节摘要]
+            {prev_summaries}
             """
         elif prev_content:  # 如果没有摘要，仍然使用原始内容
             context_info += f"""
@@ -535,7 +553,12 @@ class NovelGenerator:
             {prev_content[:2000]}...（内容过长已省略）
             """
             
-        if next_outline:
+        if next_summaries:
+             context_info += f"""
+             [后续章节摘要]
+             {next_summaries}
+             """
+        elif next_outline:
             context_info += f"""
             [下一章大纲]
             标题：{next_outline.title}
@@ -544,7 +567,7 @@ class NovelGenerator:
             场景设定：{' '.join(next_outline.settings)}
             核心冲突：{' '.join(next_outline.conflicts)}
             """
-        elif next_content:  # 如果没有大纲，仍然使用原始内容
+        elif next_content:  # 如果没有后续摘要或大纲，使用后续内容
             context_info += f"""
             [下一章内容]
             {next_content[:2000]}...（内容过长已省略）
@@ -552,7 +575,7 @@ class NovelGenerator:
         
         if original_content:
             context_info += f"""
-            [原章节内容]
+            [原章节内容参考]
             {original_content[:3000]}...（内容过长已省略）
             """
         
@@ -563,21 +586,23 @@ class NovelGenerator:
             outline=outline_dict,
             references=reference_materials,
             extra_prompt=extra_prompt,
-            context_info=context_info
+            context_info=context_info # 传递更新后的上下文
         )
         
         try:
-            # --- 第一次调用 generate ---
             logging.debug("Calling content_model.generate for initial content...")
             chapter_content = self.content_model.generate(chapter_prompt)
             logging.debug("Initial content generation finished.")
-            # --- 结束第一次调用 ---
             if not chapter_content or chapter_content.strip() == "":
                 logging.error(f"第 {chapter_idx + 1} 章: 生成的内容为空")
                 raise ValueError("生成的章节内容为空")
-        except KeyError as e: # 添加 KeyError 捕获
+        except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+            logging.error(f"第 {chapter_idx + 1} 章: 初始内容生成请求超时: {str(e)}")
+            # 重试装饰器会处理重试，如果最终还是超时，错误会被重新抛出
+            raise
+        except KeyError as e:
             logging.error(f"第 {chapter_idx + 1} 章: 初始内容生成时捕获到 KeyError: {e}", exc_info=True)
-            raise # 重新抛出错误以便 retry 生效
+            raise 
         except Exception as e:
             logging.error(f"第 {chapter_idx + 1} 章: 章节内容生成失败: {str(e)}")
             raise
@@ -609,17 +634,19 @@ class NovelGenerator:
             )
             if needs_logic_revision:
                 logging.warning(f"第 {chapter_idx + 1} 章: 逻辑验证发现问题，开始修正...")
-                # 生成修正提示词
+                # 生成修正提示词 (传递正确的 prev_summary)
                 revision_prompt = prompts.get_chapter_revision_prompt(
                     original_content=chapter_content,
                     consistency_report=logic_report,
                     chapter_outline=outline_dict,
-                    previous_summary=prev_summary if prev_summary else "",
+                    previous_summary=prev_summaries.splitlines()[-1] if prev_summaries else "", # 只用最近一个摘要
                     global_summary=""  # 暂时不需要全局摘要
                 )
                 try:
                     chapter_content = self.content_model.generate(revision_prompt)
                     logging.info(f"第 {chapter_idx + 1} 章: 逻辑问题修正完成")
+                except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                    logging.error(f"第 {chapter_idx + 1} 章: 逻辑问题修正请求超时: {str(e)}，将跳过本次修正。")
                 except Exception as e:
                     logging.error(f"第 {chapter_idx + 1} 章: 逻辑问题修正失败: {str(e)}")
             
@@ -653,17 +680,19 @@ class NovelGenerator:
             )
             if needs_duplicate_revision:
                 logging.warning(f"第 {chapter_idx + 1} 章: 重复文字验证发现问题，开始修正...")
-                # 生成修正提示词
+                # 生成修正提示词 (传递正确的 prev_summary)
                 revision_prompt = prompts.get_chapter_revision_prompt(
                     original_content=chapter_content,
                     consistency_report=duplicate_report,
                     chapter_outline=outline_dict,
-                    previous_summary=prev_summary if prev_summary else "",
+                    previous_summary=prev_summaries.splitlines()[-1] if prev_summaries else "", # 只用最近一个摘要
                     global_summary=""  # 暂时不需要全局摘要
                 )
                 try:
                     chapter_content = self.content_model.generate(revision_prompt)
                     logging.info(f"第 {chapter_idx + 1} 章: 重复文字问题修正完成")
+                except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                    logging.error(f"第 {chapter_idx + 1} 章: 重复文字修正请求超时: {str(e)}，将跳过本次修正。")
                 except Exception as e:
                     logging.error(f"第 {chapter_idx + 1} 章: 重复文字问题修正失败: {str(e)}")
 
@@ -721,10 +750,17 @@ class NovelGenerator:
                         novel_config.get("type", "玄幻"),
                         novel_config.get("theme", "修真逆袭"),
                         novel_config.get("style", "热血"),
-                        continue_from_existing=True  # 设置为续写模式
+                        mode='append' # 明确指定追加模式 (虽然是默认值，但更清晰)
+                        # continue_from_existing=True 这个参数在 generate_outline 中不存在，移除
                     )
-                except Exception as e:
-                    logging.error(f"生成大纲失败: {str(e)}，将使用现有大纲继续")
+                except RetryError as retry_err: # 捕获 RetryError
+                    # 记录 RetryError 本身以及导致重试失败的根本原因 (cause)
+                    logging.error(f"生成大纲失败 (重试耗尽): {retry_err}. 根本原因: {retry_err.cause}", exc_info=True) 
+                    logging.error("将使用现有大纲或空大纲继续...")
+                except Exception as e: # 捕获其他可能的异常
+                    # 记录其他类型的异常
+                    logging.error(f"生成大纲时发生意外错误: {str(e)}", exc_info=True)
+                    logging.error("将使用现有大纲或空大纲继续...")
             
             # 记录成功和失败的章节
             success_chapters = []
@@ -1049,11 +1085,14 @@ class NovelGenerator:
             
             # 检查是否需要从内容中发现新角色
             prompt = prompts.get_character_import_prompt(content)
-            new_characters_update = self.content_model.generate(prompt)
-            
-            # 解析新发现的角色
-            self._parse_new_characters(new_characters_update)
-            
+            try:
+                new_characters_update = self.content_model.generate(prompt)
+                self._parse_new_characters(new_characters_update)
+            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                logging.error(f"第 {chapter_num} 章: 发现新角色请求超时: {str(e)}，跳过新角色发现。")
+            except Exception as e:
+                logging.error(f"第 {chapter_num} 章: 发现新角色时出错: {str(e)}")
+
             # 再次检查新发现的角色是否在内容中出现
             for name in list(self.characters.keys()):
                 if name in content and name not in current_chapter_characters:
@@ -1068,25 +1107,27 @@ class NovelGenerator:
             
             # 使用角色更新提示词
             prompt = prompts.get_character_update_prompt(content, existing_characters_text)
-            characters_update = self.content_model.generate(prompt)
-            
-            # 验证更新内容的格式和完整性
-            if not self._validate_character_update(characters_update):
-                logging.error("角色更新内容格式验证失败，保留原有角色信息")
-                return
+            try:
+                characters_update = self.content_model.generate(prompt)
+                if not self._validate_character_update(characters_update):
+                    logging.error("角色更新内容格式验证失败，保留原有角色信息")
+                    return
+                self._parse_character_update(characters_update, chapter_num, current_chapter_characters)
                 
-            # 解析更新后的角色信息，只更新当前章节出现的角色
-            self._parse_character_update(characters_update, chapter_num, current_chapter_characters)
-            
-            # 验证更新后的角色信息与章节内容的一致性
-            if not self._verify_character_consistency(content, current_chapter_characters):
-                logging.warning("角色信息与章节内容存在不一致，尝试进行修正...")
-                self._correct_character_inconsistencies(content, current_chapter_characters)
-            
-            logging.info(f"第 {chapter_num} 章角色信息更新完成，更新了 {len(current_chapter_characters)} 个角色: {', '.join(current_chapter_characters)}")
-            
+                # 验证一致性...
+                if not self._verify_character_consistency(content, current_chapter_characters):
+                     logging.warning("角色信息与章节内容存在不一致，尝试进行修正...")
+                     self._correct_character_inconsistencies(content, current_chapter_characters) # 修正函数内部也需要处理超时
+                
+                logging.info(f"第 {chapter_num} 章角色信息更新完成...")
+
+            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                logging.error(f"第 {chapter_num} 章: 角色更新请求超时: {str(e)}，跳过本次更新。")
+            except Exception as e:
+                 logging.error(f"第 {chapter_num} 章: 更新角色信息时出错（模型调用或解析阶段）: {str(e)}")
+
         except Exception as e:
-            logging.error(f"更新角色信息时发生错误: {str(e)}", exc_info=True)
+            logging.error(f"更新角色信息时发生意外错误: {str(e)}", exc_info=True)
 
     def _format_characters_for_update(self, character_names: set = None) -> str:
         """格式化现有角色信息用于更新"""
@@ -1249,15 +1290,18 @@ class NovelGenerator:
                 content,
                 self._format_characters_for_update(current_chapter_characters)
             )
-            characters_update = self.content_model.generate(prompt)
-            
-            # 验证并应用修正后的角色信息
-            if self._validate_character_update(characters_update):
-                self._parse_character_update(characters_update, 0, current_chapter_characters)  # 使用0表示修正更新
-            else:
-                logging.error("角色信息修正失败，保留原有信息")
+            try:
+                 characters_update = self.content_model.generate(prompt)
+                 if self._validate_character_update(characters_update):
+                     self._parse_character_update(characters_update, 0, current_chapter_characters) 
+                 else:
+                     logging.error("角色信息修正失败，保留原有信息")
+            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                 logging.error(f"修正角色信息时请求超时: {str(e)}，跳过修正。")
+            except Exception as e:
+                 logging.error(f"修正角色信息时模型调用或解析出错: {str(e)}")
         except Exception as e:
-            logging.error(f"修正角色信息时发生错误: {str(e)}")
+            logging.error(f"修正角色信息时发生意外错误: {str(e)}")
 
     def _validate_character_update(self, update_text: str) -> bool:
         """验证角色更新内容的格式和完整性"""
@@ -1444,15 +1488,18 @@ class NovelGenerator:
                 content,
                 self._format_characters_for_update(current_chapter_characters)
             )
-            characters_update = self.content_model.generate(prompt)
-            
-            # 验证并应用修正后的角色信息
-            if self._validate_character_update(characters_update):
-                self._parse_character_update(characters_update, 0, current_chapter_characters)  # 使用0表示修正更新
-            else:
-                logging.error("角色信息修正失败，保留原有信息")
+            try:
+                 characters_update = self.content_model.generate(prompt)
+                 if self._validate_character_update(characters_update):
+                     self._parse_character_update(characters_update, 0, current_chapter_characters) 
+                 else:
+                     logging.error("角色信息修正失败，保留原有信息")
+            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+                 logging.error(f"修正角色信息时请求超时: {str(e)}，跳过修正。")
+            except Exception as e:
+                 logging.error(f"修正角色信息时模型调用或解析出错: {str(e)}")
         except Exception as e:
-            logging.error(f"修正角色信息时发生错误: {str(e)}")
+            logging.error(f"修正角色信息时发生意外错误: {str(e)}")
 
     def _update_summary(self, chapter_num: int, content: str):
         """生成并更新指定章节的摘要"""
@@ -1490,6 +1537,8 @@ class NovelGenerator:
                 json.dump(summaries, f, ensure_ascii=False, indent=2)
             logging.info(f"已更新第 {chapter_num} 章摘要")
 
+        except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+            logging.error(f"更新第 {chapter_num} 章摘要时请求超时: {str(e)}")
         except Exception as e:
             logging.error(f"更新第 {chapter_num} 章摘要时出错: {str(e)}")
     
