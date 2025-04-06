@@ -1076,26 +1076,44 @@ class NovelGenerator:
         logging.info(f"开始从第 {chapter_num} 章内容更新角色信息...")
         
         try:
-            # 首先从章节内容中提取出现的角色名称
+            # 首先清理内容，移除可能的分析性文字
+            content_lines = content.split('\n')
+            story_content = []
+            for line in content_lines:
+                # 跳过分析性文字
+                if any(keyword in line for keyword in [
+                    "角色属性分析",
+                    "人物分析",
+                    "总结如下",
+                    "分析结果",
+                    "**"
+                ]):
+                    continue
+                story_content.append(line)
+            
+            # 使用清理后的内容
+            cleaned_content = '\n'.join(story_content)
+            
+            # 从章节内容中提取出现的角色名称
             current_chapter_characters = set()
             # 遍历现有角色名称，检查是否在章节内容中出现
             for name in self.characters.keys():
-                if name in content:
+                if name in cleaned_content:
                     current_chapter_characters.add(name)
             
             # 检查是否需要从内容中发现新角色
-            prompt = prompts.get_character_import_prompt(content)
+            prompt = prompts.get_character_import_prompt(cleaned_content)
             try:
                 new_characters_update = self.content_model.generate(prompt)
                 self._parse_new_characters(new_characters_update)
-            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+            except (TimeoutError, asyncio.TimeoutError) as e:
                 logging.error(f"第 {chapter_num} 章: 发现新角色请求超时: {str(e)}，跳过新角色发现。")
             except Exception as e:
                 logging.error(f"第 {chapter_num} 章: 发现新角色时出错: {str(e)}")
 
             # 再次检查新发现的角色是否在内容中出现
             for name in list(self.characters.keys()):
-                if name in content and name not in current_chapter_characters:
+                if name in cleaned_content and name not in current_chapter_characters:
                     current_chapter_characters.add(name)
             
             if not current_chapter_characters:
@@ -1106,7 +1124,7 @@ class NovelGenerator:
             existing_characters_text = self._format_characters_for_update(current_chapter_characters)
             
             # 使用角色更新提示词
-            prompt = prompts.get_character_update_prompt(content, existing_characters_text)
+            prompt = prompts.get_character_update_prompt(cleaned_content, existing_characters_text)
             try:
                 characters_update = self.content_model.generate(prompt)
                 if not self._validate_character_update(characters_update):
@@ -1115,13 +1133,13 @@ class NovelGenerator:
                 self._parse_character_update(characters_update, chapter_num, current_chapter_characters)
                 
                 # 验证一致性...
-                if not self._verify_character_consistency(content, current_chapter_characters):
+                if not self._verify_character_consistency(cleaned_content, current_chapter_characters):
                      logging.warning("角色信息与章节内容存在不一致，尝试进行修正...")
-                     self._correct_character_inconsistencies(content, current_chapter_characters) # 修正函数内部也需要处理超时
+                     self._correct_character_inconsistencies(cleaned_content, current_chapter_characters)
                 
                 logging.info(f"第 {chapter_num} 章角色信息更新完成...")
 
-            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
+            except (TimeoutError, asyncio.TimeoutError) as e:
                 logging.error(f"第 {chapter_num} 章: 角色更新请求超时: {str(e)}，跳过本次更新。")
             except Exception as e:
                  logging.error(f"第 {chapter_num} 章: 更新角色信息时出错（模型调用或解析阶段）: {str(e)}")
@@ -1153,6 +1171,17 @@ class NovelGenerator:
         """解析新发现的角色信息"""
         try:
             current_character = None
+            # 定义需要过滤的关键词列表
+            filter_keywords = [
+                "属性分析结果",
+                "角色分析",
+                "人物总结",
+                "人物分析",
+                "角色总结",
+                "分析结果",
+                "总结如下"
+            ]
+            
             for line in update_text.split('\n'):
                 line = line.strip()
                 if not line:
@@ -1161,6 +1190,14 @@ class NovelGenerator:
                 # 检测角色名行（以冒号结尾）
                 if ':' in line and '：' not in line and '├' not in line and '│' not in line and '└' not in line:
                     char_name = line.split(':')[0].strip()
+                    # 过滤以 ** 开头的名称
+                    if char_name.startswith('**'):
+                        logging.warning(f"跳过以'**'开头的非角色名称: {char_name}")
+                        continue
+                    # 过滤包含关键词的名称
+                    if any(keyword in char_name for keyword in filter_keywords):
+                        logging.warning(f"跳过包含过滤关键词的非角色名称: {char_name}")
+                        continue
                     current_character = char_name
                     # 只有当角色不存在时才创建
                     if char_name not in self.characters:
@@ -1168,6 +1205,14 @@ class NovelGenerator:
                         self._create_basic_character(char_name)
                 elif '：' in line and '├' not in line and '│' not in line and '└' not in line:
                     char_name = line.split('：')[0].strip()
+                    # 过滤以 ** 开头的名称
+                    if char_name.startswith('**'):
+                        logging.warning(f"跳过以'**'开头的非角色名称: {char_name}")
+                        continue
+                    # 过滤包含关键词的名称
+                    if any(keyword in char_name for keyword in filter_keywords):
+                        logging.warning(f"跳过包含过滤关键词的非角色名称: {char_name}")
+                        continue
                     current_character = char_name
                     if char_name not in self.characters:
                         logging.info(f"发现新角色: {char_name}，创建基本信息")
@@ -1326,180 +1371,6 @@ class NovelGenerator:
         except Exception as e:
             logging.error(f"验证角色更新内容时发生错误: {str(e)}")
             return False
-
-    def _format_characters_for_update(self, character_names: set = None) -> str:
-        """格式化现有角色信息用于更新"""
-        formatted_text = ""
-        for name, char in self.characters.items():
-            # 如果提供了角色名集合，只格式化这些角色的信息
-            if character_names is not None and name not in character_names:
-                continue
-                
-            formatted_text += f"{name}：\n"
-            formatted_text += f"├──物品: {', '.join(char.magic_treasure)}\n"
-            formatted_text += f"├──能力: {', '.join(char.ability)}\n"
-            formatted_text += f"├──状态\n"
-            formatted_text += f"│  ├──身体状态: {char.realm}, {char.temperament}\n"
-            formatted_text += f"│  └──心理状态: {char.development_stage}\n"
-            formatted_text += f"├──主要角色间关系网\n"
-            for rel_name, rel_type in char.relationships.items():
-                formatted_text += f"│  └──{rel_name}: {rel_type}\n"
-            formatted_text += f"└──触发或加深的事件: {', '.join(char.goals)}\n\n"
-        return formatted_text
-
-    def _parse_new_characters(self, update_text: str):
-        """解析新发现的角色信息"""
-        try:
-            current_character = None
-            for line in update_text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # 检测角色名行（以冒号结尾）
-                if ':' in line and '：' not in line and '├' not in line and '│' not in line and '└' not in line:
-                    char_name = line.split(':')[0].strip()
-                    current_character = char_name
-                    # 只有当角色不存在时才创建
-                    if char_name not in self.characters:
-                        logging.info(f"发现新角色: {char_name}，创建基本信息")
-                        self._create_basic_character(char_name)
-                elif '：' in line and '├' not in line and '│' not in line and '└' not in line:
-                    char_name = line.split('：')[0].strip()
-                    current_character = char_name
-                    if char_name not in self.characters:
-                        logging.info(f"发现新角色: {char_name}，创建基本信息")
-                        self._create_basic_character(char_name)
-        except Exception as e:
-            logging.error(f"解析新角色信息时发生错误: {str(e)}")
-
-    def _parse_character_update(self, update_text: str, chapter_num: int, current_chapter_characters: set = None):
-        """解析角色更新信息，更新角色库"""
-        current_character = None
-        section = None
-        characters_updated = set()
-        
-        for line in update_text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            
-            # 检测角色名行
-            if ':' in line and '：' not in line and '├' not in line and '│' not in line and '└' not in line:
-                char_name = line.split(':')[0].strip()
-                # 只处理当前章节出现的角色
-                if current_chapter_characters is not None and char_name not in current_chapter_characters:
-                    current_character = None
-                    continue
-                current_character = char_name
-                characters_updated.add(char_name)
-            elif '：' in line and '├' not in line and '│' not in line and '└' not in line:
-                char_name = line.split('：')[0].strip()
-                # 只处理当前章节出现的角色
-                if current_chapter_characters is not None and char_name not in current_chapter_characters:
-                    current_character = None
-                    continue
-                current_character = char_name
-                characters_updated.add(char_name)
-                
-            # 其余的解析逻辑保持不变...
-            if current_character and current_character in self.characters:
-                # 检测部分标记
-                if line.startswith('├──物品:') or line.startswith('├──物品：'):
-                    section = "items"
-                    continue
-                elif line.startswith('├──能力:') or line.startswith('├──能力：'):
-                    section = "abilities"
-                    continue
-                elif line.startswith('├──状态'):
-                    section = "status"
-                    continue
-                elif line.startswith('├──主要角色间关系网'):
-                    section = "relationships"
-                    continue
-                elif line.startswith('├──触发或加深的事件') or line.startswith('└──触发或加深的事件'):
-                    section = "events"
-                    continue
-                
-                # 处理具体内容
-                if section and (line.startswith('│  ├') or line.startswith('│  └') or line.startswith('└')):
-                    char = self.characters[current_character]
-                    line_content = line.split(':', 1)[-1].strip() if ':' in line else line.split('：', 1)[-1].strip()
-                    
-                    if section == "items" and line_content:
-                        char.magic_treasure = [item.strip() for item in line_content.split(',')]
-                    elif section == "abilities" and line_content:
-                        char.ability = [ability.strip() for ability in line_content.split(',')]
-                    elif section == "status":
-                        if "身体状态" in line:
-                            char.realm = line_content
-                        elif "心理状态" in line:
-                            char.development_stage = line_content
-                    elif section == "relationships" and line_content:
-                        rel_parts = line_content.split(':', 1) if ':' in line_content else line_content.split('：', 1)
-                        if len(rel_parts) > 1:
-                            rel_name = rel_parts[0].strip()
-                            rel_type = rel_parts[1].strip()
-                            char.relationships[rel_name] = rel_type
-                    elif section == "events" and line_content:
-                        if not line_content in char.goals:
-                            char.goals.append(line_content)
-        
-        if characters_updated:
-            logging.info(f"角色更新完成，更新了 {len(characters_updated)} 个角色: {', '.join(characters_updated)}")
-        else:
-            logging.warning("未更新任何角色信息")
-
-    def _verify_character_consistency(self, content: str, current_chapter_characters: set = None) -> bool:
-        """验证更新后的角色信息与章节内容的一致性"""
-        try:
-            for name, char in self.characters.items():
-                # 只验证当前章节出现的角色
-                if current_chapter_characters is not None and name not in current_chapter_characters:
-                    continue
-                    
-                # 验证状态描述是否与章节内容一致
-                if char.realm not in content and char.temperament not in content:
-                    logging.warning(f"角色 {name} 的状态描述与章节内容不一致")
-                    return False
-                    
-                # 验证能力描述是否与章节内容一致
-                for ability in char.ability:
-                    if ability not in content:
-                        logging.warning(f"角色 {name} 的能力 {ability} 在章节中未体现")
-                        return False
-                        
-                # 验证关系网络是否与章节内容一致
-                for rel_name, rel_type in char.relationships.items():
-                    if rel_name not in content or rel_type not in content:
-                        logging.warning(f"角色 {name} 与 {rel_name} 的关系描述与章节内容不一致")
-                        return False
-                        
-            return True
-        except Exception as e:
-            logging.error(f"验证角色一致性时发生错误: {str(e)}")
-            return False
-
-    def _correct_character_inconsistencies(self, content: str, current_chapter_characters: set = None):
-        """修正角色信息与章节内容的不一致"""
-        try:
-            # 重新生成角色更新提示词，强调内容一致性
-            prompt = prompts.get_character_update_prompt(
-                content,
-                self._format_characters_for_update(current_chapter_characters)
-            )
-            try:
-                 characters_update = self.content_model.generate(prompt)
-                 if self._validate_character_update(characters_update):
-                     self._parse_character_update(characters_update, 0, current_chapter_characters) 
-                 else:
-                     logging.error("角色信息修正失败，保留原有信息")
-            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
-                 logging.error(f"修正角色信息时请求超时: {str(e)}，跳过修正。")
-            except Exception as e:
-                 logging.error(f"修正角色信息时模型调用或解析出错: {str(e)}")
-        except Exception as e:
-            logging.error(f"修正角色信息时发生意外错误: {str(e)}")
 
     def _update_summary(self, chapter_num: int, content: str):
         """生成并更新指定章节的摘要"""
