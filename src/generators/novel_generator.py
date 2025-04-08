@@ -94,6 +94,10 @@ class NovelGenerator:
         # 5. 设置日志 (可以在前面或后面)
         self._setup_logging()
 
+        # 加载角色库后进行清理
+        if self.characters:
+            self.clean_character_library()
+
     def _setup_logging(self):
         """设置日志"""
         log_file = os.path.join(self.output_dir, "generation.log")
@@ -1171,52 +1175,73 @@ class NovelGenerator:
         """解析新发现的角色信息"""
         try:
             current_character = None
-            # 定义需要过滤的关键词列表
+            # 扩展过滤关键词列表
             filter_keywords = [
-                "属性分析结果",
-                "角色分析",
-                "人物总结",
-                "人物分析",
-                "角色总结",
-                "分析结果",
-                "总结如下"
+                "属性分析结果", "角色分析", "人物总结", "人物分析", 
+                "角色总结", "分析结果", "总结如下", "我的分析", 
+                "步骤", "请看", "分析步骤", "好的", "总结", 
+                "通读文本", "角色识别", "属性提取", "格式化输出", 
+                "检查与校对", "整理如下", "名称：", "如下", 
+                "发现以下", "新角色", "##", "的修士", "的人",
+                "首领", "散修", "分析", "总结", "说明",
+                "介绍", "描述", "特征", "属性"
             ]
+            
+            # 正则表达式模式，用于识别可能的序号或列表标记
+            import re
+            number_pattern = re.compile(r'^\d+[\.\s、]|^第\d+步|^\d+\)|^\(\d+\)')
+            # 正则表达式模式，用于识别描述性文本
+            descriptive_pattern = re.compile(r'的$|者$|人$|修士$|首领$')
             
             for line in update_text.split('\n'):
                 line = line.strip()
                 if not line:
                     continue
-                    
+                
                 # 检测角色名行（以冒号结尾）
-                if ':' in line and '：' not in line and '├' not in line and '│' not in line and '└' not in line:
-                    char_name = line.split(':')[0].strip()
-                    # 过滤以 ** 开头的名称
-                    if char_name.startswith('**'):
-                        logging.warning(f"跳过以'**'开头的非角色名称: {char_name}")
+                if ':' in line or '：' in line:
+                    char_name = line.split(':')[0].strip() if ':' in line else line.split('：')[0].strip()
+                    
+                    # 1. 过滤以特殊字符开头的名称
+                    if char_name.startswith(('**', '##', '第')):
+                        logging.warning(f"跳过以特殊字符开头的非角色名称: {char_name}")
                         continue
-                    # 过滤包含关键词的名称
+                    
+                    # 2. 过滤包含关键词的名称
                     if any(keyword in char_name for keyword in filter_keywords):
                         logging.warning(f"跳过包含过滤关键词的非角色名称: {char_name}")
                         continue
+                    
+                    # 3. 过滤数字或序号开头的名称
+                    if number_pattern.match(char_name):
+                        logging.warning(f"跳过以数字或序号开头的非角色名称: {char_name}")
+                        continue
+                    
+                    # 4. 过滤过长的名称
+                    if len(char_name) > 15:
+                        logging.warning(f"跳过过长的非角色名称: {char_name}")
+                        continue
+                    
+                    # 5. 过滤描述性文本
+                    if descriptive_pattern.search(char_name):
+                        logging.warning(f"跳过描述性文本: {char_name}")
+                        continue
+                    
+                    # 6. 过滤包含空格或特殊字符的名称
+                    if len(char_name.split()) > 1:
+                        logging.warning(f"跳过包含空格的非角色名称: {char_name}")
+                        continue
+                    
+                    # 7. 检查是否为有效的中文名称（至少包含一个中文字符）
+                    if not any('\u4e00' <= c <= '\u9fff' for c in char_name):
+                        logging.warning(f"跳过不包含中文字符的名称: {char_name}")
+                        continue
+                    
                     current_character = char_name
-                    # 只有当角色不存在时才创建
                     if char_name not in self.characters:
                         logging.info(f"发现新角色: {char_name}，创建基本信息")
                         self._create_basic_character(char_name)
-                elif '：' in line and '├' not in line and '│' not in line and '└' not in line:
-                    char_name = line.split('：')[0].strip()
-                    # 过滤以 ** 开头的名称
-                    if char_name.startswith('**'):
-                        logging.warning(f"跳过以'**'开头的非角色名称: {char_name}")
-                        continue
-                    # 过滤包含关键词的名称
-                    if any(keyword in char_name for keyword in filter_keywords):
-                        logging.warning(f"跳过包含过滤关键词的非角色名称: {char_name}")
-                        continue
-                    current_character = char_name
-                    if char_name not in self.characters:
-                        logging.info(f"发现新角色: {char_name}，创建基本信息")
-                        self._create_basic_character(char_name)
+                    
         except Exception as e:
             logging.error(f"解析新角色信息时发生错误: {str(e)}")
 
@@ -1249,7 +1274,7 @@ class NovelGenerator:
                 current_character = char_name
                 characters_updated.add(char_name)
                 
-            # 其余的解析逻辑保持不变...
+            # 处理角色信息更新
             if current_character and current_character in self.characters:
                 # 检测部分标记
                 if line.startswith('├──物品:') or line.startswith('├──物品：'):
@@ -1274,22 +1299,52 @@ class NovelGenerator:
                     line_content = line.split(':', 1)[-1].strip() if ':' in line else line.split('：', 1)[-1].strip()
                     
                     if section == "items" and line_content:
-                        char.magic_treasure = [item.strip() for item in line_content.split(',')]
+                        # 合并物品信息，避免重复
+                        new_items = [item.strip() for item in line_content.split(',')]
+                        existing_items = set(char.magic_treasure)
+                        for item in new_items:
+                            if item and item not in existing_items:
+                                char.magic_treasure.append(item)
+                    
                     elif section == "abilities" and line_content:
-                        char.ability = [ability.strip() for ability in line_content.split(',')]
+                        # 合并能力信息，避免重复
+                        new_abilities = [ability.strip() for ability in line_content.split(',')]
+                        existing_abilities = set(char.ability)
+                        for ability in new_abilities:
+                            if ability and ability not in existing_abilities:
+                                char.ability.append(ability)
+                    
                     elif section == "status":
-                        if "身体状态" in line:
-                            char.realm = line_content
-                        elif "心理状态" in line:
-                            char.development_stage = line_content
+                        if "身体状态" in line and line_content:
+                            # 追加身体状态，用逗号分隔
+                            if not char.realm or char.realm == "凡人" or char.realm == "无":
+                                char.realm = line_content
+                            elif line_content not in char.realm:
+                                char.realm = f"{char.realm}, {line_content}"
+                        
+                        elif "心理状态" in line and line_content:
+                            # 追加心理状态，用逗号分隔
+                            if not char.development_stage or char.development_stage == "初次登场":
+                                char.development_stage = line_content
+                            elif line_content not in char.development_stage:
+                                char.development_stage = f"{char.development_stage}, {line_content}"
+                    
                     elif section == "relationships" and line_content:
                         rel_parts = line_content.split(':', 1) if ':' in line_content else line_content.split('：', 1)
                         if len(rel_parts) > 1:
                             rel_name = rel_parts[0].strip()
                             rel_type = rel_parts[1].strip()
-                            char.relationships[rel_name] = rel_type
+                            # 如果已存在关系，追加新的描述
+                            if rel_name in char.relationships:
+                                existing_relation = char.relationships[rel_name]
+                                if rel_type not in existing_relation:
+                                    char.relationships[rel_name] = f"{existing_relation}, {rel_type}"
+                            else:
+                                char.relationships[rel_name] = rel_type
+                    
                     elif section == "events" and line_content:
-                        if not line_content in char.goals:
+                        # 避免添加重复的目标/事件
+                        if line_content and line_content not in char.goals:
                             char.goals.append(line_content)
         
         if characters_updated:
