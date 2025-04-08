@@ -274,6 +274,11 @@ class NovelGenerator:
                             logging.error(f"创建角色 '{name}' 时发生未知错误: {char_e}. Data: {data}")
                     
                     characters_dict = temp_chars # 赋值给局部变量
+                    
+                    # 加载后立即清理
+                    self.characters = characters_dict
+                    self.clean_character_library()
+                    characters_dict = self.characters
 
             except json.JSONDecodeError as e:
                 logging.error(f"加载角色库文件 {self.characters_file} 时 JSON 解析失败: {e}")
@@ -1110,6 +1115,8 @@ class NovelGenerator:
             try:
                 new_characters_update = self.content_model.generate(prompt)
                 self._parse_new_characters(new_characters_update)
+                # 更新后立即清理
+                self.clean_character_library()
             except (TimeoutError, asyncio.TimeoutError) as e:
                 logging.error(f"第 {chapter_num} 章: 发现新角色请求超时: {str(e)}，跳过新角色发现。")
             except Exception as e:
@@ -1135,6 +1142,8 @@ class NovelGenerator:
                     logging.error("角色更新内容格式验证失败，保留原有角色信息")
                     return
                 self._parse_character_update(characters_update, chapter_num, current_chapter_characters)
+                # 更新后立即清理
+                self.clean_character_library()
                 
                 # 验证一致性...
                 if not self._verify_character_consistency(cleaned_content, current_chapter_characters):
@@ -1572,3 +1581,83 @@ class NovelGenerator:
         else:
             logging.info("大纲文件不存在，初始化为空大纲")
             return [] 
+
+    def clean_character_library(self):
+        """清理角色库中的非角色条目"""
+        # 需要删除的条目的关键词列表
+        non_character_keywords = [
+            "收到文本后",
+            "分析步骤",
+            "通读文本",
+            "角色识别",
+            "属性提取",
+            "格式化输出",
+            "检查与校对",
+            "好的",
+            "请看",
+            "总结",
+            "分析结果",
+            "整理如下",
+            "步骤",
+            "如下",
+            "发现以下",
+            "新角色",
+            "分析",
+            "说明",
+            "介绍",
+            "描述",
+            "特征",
+            "属性",
+            "文本",
+            "内容",
+            "情节",
+            "故事",
+            "场景"
+        ]
+        
+        # 记录要删除的角色名
+        to_delete = []
+        for name in self.characters.keys():
+            # 检查是否包含非角色关键词
+            if any(keyword in name for keyword in non_character_keywords):
+                to_delete.append(name)
+                continue
+                
+            # 检查是否以数字或特殊字符开头
+            if name[0].isdigit() or name.startswith(('##', '**', '第', '[')):
+                to_delete.append(name)
+                continue
+                
+            # 检查名称长度是否过长（正常人名一般不会超过15个字符）
+            if len(name) > 15:
+                to_delete.append(name)
+                continue
+                
+            # 检查是否为描述性文本而不是名字
+            if len(name.split()) > 3:  # 如果包含多个词，可能是描述性文本
+                to_delete.append(name)
+                continue
+                
+            # 检查是否为通用描述（如"散修"、"尖嘴猴腮的修士"等）
+            if any(desc in name for desc in ["的修士", "的人", "首领", "散修", "弟子", "修者", "者"]):
+                to_delete.append(name)
+                continue
+                
+            # 检查是否包含标点符号
+            if any(char in name for char in "，。！？；：""''【】《》（）()[]{}"):
+                to_delete.append(name)
+                continue
+                
+            # 检查是否为有效的中文名称（至少包含一个中文字符）
+            if not any('\u4e00' <= c <= '\u9fff' for c in name):
+                to_delete.append(name)
+                continue
+
+        # 删除非角色条目
+        for name in to_delete:
+            del self.characters[name]
+            logging.info(f"从角色库中删除非角色条目: {name}")
+        
+        # 保存清理后的角色库
+        self._save_characters()
+        logging.info(f"角色库清理完成，删除了 {len(to_delete)} 个非角色条目，当前剩余 {len(self.characters)} 个角色")
