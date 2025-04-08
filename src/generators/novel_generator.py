@@ -358,9 +358,9 @@ class NovelGenerator:
         if current_length >= target_length:
             return content
 
-        # 如果当前字数不足目标字数的80%，需要扩充内容
-        if current_length < target_length * 0.8:
-            logging.info(f"当前字数({current_length})不足目标字数({target_length})的80%，开始扩充内容...")
+        # 如果当前字数不足目标字数的60%，需要扩充内容
+        if current_length < target_length * 0.6:
+            logging.info(f"当前字数({current_length})不足目标字数({target_length})的60%，开始扩充内容...")
             
             expansion_prompt = f"""
             请扩充以下小说章节内容，要求：
@@ -391,7 +391,7 @@ class NovelGenerator:
                     logging.warning(f"扩写后字数({expanded_length})显著超过目标({target_length})，超过了{max_allowed_length}字的上限。将保留扩写后的完整内容。")
                     
                 # 检查扩写后是否仍然严重不足 (保留)
-                elif expanded_length < target_length * 0.8:
+                elif expanded_length < target_length * 0.6:
                     logging.warning(f"Expansion attempt resulted in insufficient length ({expanded_length}/{target_length}). Model might not be following instructions or hitting limits.")
                 
                 return expanded_content
