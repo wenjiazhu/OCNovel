@@ -127,7 +127,6 @@ def main():
                 mode='replace',
                 replace_range=(args.start, args.end),
                 extra_prompt=args.prompt
-                # batch_size 可以考虑也作为参数传入，或使用 config 中的值
             )
             # --- 结束调用 ---
             logger.info("大纲更新操作执行完毕。请查看日志了解详细结果。")

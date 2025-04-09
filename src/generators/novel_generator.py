@@ -1166,12 +1166,36 @@ class NovelGenerator:
         theme: str,
         style: str,
         current_start_chapter_num: int = 1,
-        current_batch_size: int = None
+        current_batch_size: int = None,
+        mode: str = "append",
+        replace_range: tuple = None,
+        extra_prompt: str = None
     ):
-        """生成小说大纲，支持从指定章节开始生成"""
-        if current_batch_size is None:
-            current_batch_size = self.config.novel_config["target_chapters"]
+        """
+        生成或更新小说大纲。
         
+        参数:
+            novel_type: 小说类型（如修真玄幻）。
+            theme: 主题（如天庭权谋）。
+            style: 风格（如热血悬疑）。
+            current_start_chapter_num: 起始章节号（默认1）。
+            current_batch_size: 生成章节数（默认从配置读取）。
+            mode: 模式，可选 "append"（追加）或 "replace"（替换）。
+            replace_range: 替换范围，格式为 (start_chapter, end_chapter)。
+            extra_prompt: 额外提示词。
+        """
+        target_chapters = self.config.novel_config["target_chapters"]
+        if current_batch_size is None:
+            current_batch_size = target_chapters
+
+        # 检查替换范围是否合法
+        if mode == "replace":
+            if not replace_range or len(replace_range) != 2:
+                raise ValueError("替换模式必须提供有效的 replace_range (start, end)。")
+            start, end = replace_range
+            if start <= 0 or end < start or end > len(self.chapter_outlines):
+                raise ValueError(f"替换范围 {replace_range} 无效。")
+
         logging.info(f"正在生成第 {current_start_chapter_num} 到 {current_start_chapter_num + current_batch_size - 1} 章大纲...")
         
         prompt = prompts.get_outline_prompt(
@@ -1179,14 +1203,22 @@ class NovelGenerator:
             theme,
             style,
             current_start_chapter_num=current_start_chapter_num,
-            current_batch_size=current_batch_size
+            current_batch_size=current_batch_size,
+            extra_prompt=extra_prompt
         )
         
         outline_text = self.outline_model.generate(prompt)
         batch_outlines = self._parse_outline(outline_text)
-        self.chapter_outlines.extend(batch_outlines)
+
+        # 处理生成的大纲
+        if mode == "replace":
+            # 替换指定范围的章节
+            self.chapter_outlines[start - 1 : end] = batch_outlines
+        else:
+            # 追加新章节
+            self.chapter_outlines.extend(batch_outlines)
         
-        # 保存当前进度
+        # 保存大纲
         self._save_outline()
         logging.info(f"大纲生成完成，共 {len(self.chapter_outlines)} 章")
 
