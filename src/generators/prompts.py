@@ -68,7 +68,12 @@ def get_chapter_prompt(
 
     novel_number = outline.get('chapter_number', '未知')
     chapter_title = outline.get('title', '未知')
-    key_points = ', '.join(outline.get('key_points', []))
+    
+    # 处理关键情节点 - 改为分行展示以增强可读性和重要性
+    key_points_list = outline.get('key_points', [])
+    key_points_display = '\n'.join([f"- {point}" for point in key_points_list])
+    
+    # 其他信息
     characters = ', '.join(outline.get('characters', []))
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
@@ -88,7 +93,9 @@ def get_chapter_prompt(
 悬念密度：中等
 伏笔操作：埋设初始伏笔
 认知颠覆：★☆☆☆☆
-本章简述：{key_points}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
 
 可用元素：
 - 核心人物：{characters}
@@ -149,7 +156,10 @@ def get_chapter_prompt(
 [章节大纲]
 章节号: {novel_number}
 标题: {chapter_title}
-关键剧情点: {key_points}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
+
 涉及角色: {characters}
 场景设定: {settings}
 核心冲突: {conflicts}
@@ -194,6 +204,12 @@ def get_chapter_prompt(
 3. 章节结尾应为下一章大纲中的情节埋下伏笔
 4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
 5. 时间线和场景转换要清晰流畅
+
+[重要·最终检查]
+1. 检查你的章节内容是否明确包含了所有关键情节点
+2. 检查所有指定的角色是否都出现在了章节中
+3. 检查你描述的场景是否与场景设定一致
+4. 确保核心冲突被合理地展开和刻画
 """
     return base_prompt
 

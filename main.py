@@ -101,6 +101,20 @@ def main():
                 config.knowledge_base_config,
                 embedding_model
             )
+            
+            # 确保知识库被初始化 - 加载一个示例文本
+            try:
+                knowledge_base.build("示例文本以初始化知识库", force_rebuild=False)
+            except Exception as e:
+                logging.warning(f"初始化知识库时出错: {e}，尝试读取参考文件")
+                # 尝试读取第一个参考文件来初始化知识库
+                for file_path in reference_files:
+                    if os.path.exists(file_path):
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            sample_text = f.read(1000)  # 只读取前1000个字符
+                            knowledge_base.build(sample_text, force_rebuild=False)
+                            logging.info("已使用参考文件样本初始化知识库")
+                            break
         else:
             # 创建知识库
             logging.info("正在构建知识库...")
