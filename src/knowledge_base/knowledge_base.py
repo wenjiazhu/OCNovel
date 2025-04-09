@@ -41,15 +41,23 @@ class KnowledgeBase:
         chapters = text.split("第")
         logging.info(f"文本分割为 {len(chapters)} 个章节")
         
-        for chapter_idx, chapter_content in enumerate(chapters[1:], 1):  # 跳过第一个空分片
+        # 如果没有找到章节标记，将整个文本作为一个章节处理
+        if len(chapters) <= 1:
+            chapters = [text]
+            start_idx = 0
+        else:
+            # 如果找到了章节标记，跳过第一个空分片
+            chapters = [f"第{chapter}" for chapter in chapters[1:]]
+            start_idx = 1
+            
+        for chapter_idx, chapter_content in enumerate(chapters, start_idx):
             try:
                 # 处理单个章节
-                current_chapter = f"第{chapter_content}"
-                sentences = list(jieba.cut(current_chapter, cut_all=False))
+                sentences = list(jieba.cut(chapter_content, cut_all=False))
                 
                 current_chunk = []
                 current_length = 0
-                start_idx = 0
+                chunk_start_idx = 0
                 
                 for i, sentence in enumerate(sentences):
                     current_chunk.append(sentence)
@@ -62,11 +70,11 @@ class KnowledgeBase:
                             chunk = TextChunk(
                                 content=chunk_text,
                                 chapter=chapter_idx,
-                                start_idx=start_idx,
+                                start_idx=chunk_start_idx,
                                 end_idx=i,
                                 metadata={
-                                    "chapter_content": current_chapter[:100] + "...",  # 只保存章节开头
-                                    "previous_context": "".join(sentences[max(0, start_idx-10):start_idx]),
+                                    "chapter_content": chapter_content[:100] + "...",  # 只保存章节开头
+                                    "previous_context": "".join(sentences[max(0, chunk_start_idx-10):chunk_start_idx]),
                                     "following_context": "".join(sentences[i+1:min(len(sentences), i+11)])
                                 }
                             )
@@ -77,7 +85,7 @@ class KnowledgeBase:
                         overlap_start = max(0, len(current_chunk) - overlap)
                         current_chunk = current_chunk[overlap_start:]
                         current_length = sum(len(t) for t in current_chunk)
-                        start_idx = i - len(current_chunk) + 1
+                        chunk_start_idx = i - len(current_chunk) + 1
                 
                 # 处理最后一个块
                 if current_chunk:
@@ -86,11 +94,11 @@ class KnowledgeBase:
                         chunk = TextChunk(
                             content=chunk_text,
                             chapter=chapter_idx,
-                            start_idx=start_idx,
+                            start_idx=chunk_start_idx,
                             end_idx=len(sentences)-1,
                             metadata={
-                                "chapter_content": current_chapter[:100] + "...",
-                                "previous_context": "".join(sentences[max(0, start_idx-10):start_idx]),
+                                "chapter_content": chapter_content[:100] + "...",
+                                "previous_context": "".join(sentences[max(0, chunk_start_idx-10):chunk_start_idx]),
                                 "following_context": ""
                             }
                         )

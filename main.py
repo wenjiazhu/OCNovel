@@ -1,4 +1,6 @@
+import sys
 import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import logging
 import json
@@ -132,18 +134,15 @@ def main():
                     logging.info(f"已导入参考文件: {file_path}, 长度: {len(reference_text)}")
                 imported_files.add(file_record)
             
-            if all_reference_text:
-                knowledge_base.build(
-                    all_reference_text, 
-                    force_rebuild=config.generator_config.get("force_rebuild_kb", False)
-                )
-                logging.info("知识库构建完成")
-                
-                # 保存已导入文件记录
-                os.makedirs(config.knowledge_base_config["cache_dir"], exist_ok=True)
-                with open(imported_files_record, 'w', encoding='utf-8') as f:
-                    json.dump(list(imported_files), f, ensure_ascii=False, indent=2)
-                logging.info("已更新导入文件记录")
+            # 强制重新构建知识库（如果需要）
+            knowledge_base.build(all_reference_text, force_rebuild=True)
+            logging.info("知识库构建完成")
+            
+            # 保存已导入文件记录
+            os.makedirs(config.knowledge_base_config["cache_dir"], exist_ok=True)
+            with open(imported_files_record, 'w', encoding='utf-8') as f:
+                json.dump(list(imported_files), f, ensure_ascii=False, indent=2)
+            logging.info("已更新导入文件记录")
         
         # 创建小说生成器
         generator = NovelGenerator(
@@ -175,6 +174,22 @@ def main():
                 logging.info("大纲生成完成")
             else:
                 logging.info("已加载现有大纲")
+                # 检查大纲章节数是否达到目标
+                with open(outline_file, 'r', encoding='utf-8') as f:
+                    outline_data = json.load(f)
+                    current_chapters = len(outline_data)
+                    target_chapters = config.novel_config["target_chapters"]
+                    
+                    if current_chapters < target_chapters:
+                        logging.info(f"大纲未完成（当前 {current_chapters}/{target_chapters} 章），继续生成剩余章节...")
+                        generator.generate_outline(
+                            config.novel_config["type"],
+                            config.novel_config["theme"],
+                            config.novel_config["style"],
+                            current_start_chapter_num=current_chapters + 1,
+                            current_batch_size=target_chapters - current_chapters
+                        )
+                        logging.info("剩余大纲生成完成")
         
         # 生成小说
         logging.info("开始生成小说...")

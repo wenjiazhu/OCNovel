@@ -1,6 +1,12 @@
 from typing import Dict, List, Optional
 import dataclasses # 导入 dataclasses 以便类型提示
 import json
+from src.config.config import Config  # 导入 Config 类
+import os
+import logging
+
+# 初始化 Config 实例
+config = Config()
 
 # 如果 ChapterOutline 只在此处用作类型提示，可以简化或使用 Dict
 # from .novel_generator import ChapterOutline # 或者定义一个类似的结构
@@ -28,12 +34,58 @@ def get_outline_prompt(
     """生成用于创建小说大纲的提示词。"""
     extra_requirements = f"\n[额外要求]\n{extra_prompt}\n" if extra_prompt else ""
 
+    # 从知识库中获取参考文件内容
+    reference_files = config.novel_config.get("knowledge_base_config", {}).get("reference_files", [])
+    reference_content = ""
+    for file_path in reference_files:
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                logging.warning(f"参考文件不存在: {file_path}")
+                continue
+
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                reference_content += f"\n[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...\n"
+        except UnicodeDecodeError:
+            # 尝试其他编码
+            try:
+                with open(file_path, 'r', encoding='gbk') as f:
+                    content = f.read()
+                    reference_content += f"\n[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...\n"
+            except Exception as e:
+                logging.warning(f"读取参考文件 {file_path} 时出错（尝试GBK编码后）: {str(e)}")
+        except Exception as e:
+            logging.warning(f"读取参考文件 {file_path} 时出错: {str(e)}")
+
+    # 如果参考内容为空，添加提示
+    if not reference_content:
+        reference_content = "\n[知识库参考内容]\n暂无参考内容，将仅基于设定生成大纲。\n"
+
     prompt = f"""{existing_context}
 
-你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。请严格按照要求，基于以上小说信息和已有大纲（如果是续写或替换），创作后续的小说大纲。
+你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。请严格按照要求，基于以下小说信息和已有大纲（如果是续写或替换），创作后续的小说大纲。
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
+
+[世界观设定]
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("magic_system", "")}
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("social_system", "")}
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("background", "")}
+
+[角色设定]
+主角: {config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("protagonist", {}).get("background", "")}
+配角: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("supporting_roles", [])])}
+反派: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("antagonists", [])])}
+
+[知识库参考内容]
+{reference_content}
 
 任务要求：
-1.  生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。
+1.  生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。重要：必须生成本批次要求的全部大纲，不得省略或截断。
 2.  确保情节连贯，与已有上下文自然衔接。推动主线发展，引入新的冲突和看点。{extra_requirements}
 3.  每章设计一个小高潮(如反转\打脸\冲突解决\悬念揭晓等)，每3章设计一个大高潮(达成目标\境界突破\战胜强敌等)。
 4.  模仿知识库中同类型小说的桥段/套路/剧情梗等进行剧情设计，注意保持单个事件(开始-发展-结尾)的完整性。
@@ -53,7 +105,6 @@ def get_outline_prompt(
   }},
   // ... (如果 current_batch_size > 1, 继续添加后续章节对象，确保 chapter_number 连续递增)
 ]
-```
 """
     return prompt
 

@@ -105,6 +105,9 @@ class NovelGenerator:
 
     def _setup_logging(self):
         """设置日志"""
+        # 确保输出目录存在
+        os.makedirs(self.output_dir, exist_ok=True)
+        
         log_file = os.path.join(self.output_dir, "generation.log")
         print(f"日志文件路径: {log_file}") # 打印日志文件路径
 
@@ -252,7 +255,7 @@ class NovelGenerator:
     def _load_characters(self):
         """加载角色库, 返回字典或 None"""
         logging.info("开始加载角色库...")
-        characters_dict = {} # 使用局部变量
+        characters_dict = {}
         if os.path.exists(self.characters_file):
             try:
                 with open(self.characters_file, 'r', encoding='utf-8') as f:
@@ -292,11 +295,19 @@ class NovelGenerator:
                 logging.error(f"加载角色库文件 {self.characters_file} 时发生未知错误: {e}", exc_info=True)
                 return None # 返回 None 表示加载失败
         else:
-            logging.info("角色库文件不存在，初始化为空角色库。")
-            # characters_dict 保持为空 {}
-
-        logging.info("角色库加载完成。")
-        return characters_dict # 返回加载的字典（可能为空）
+            # 初始化一些基础角色
+            characters_dict = {
+                "陆沉": Character(
+                    name="陆沉",
+                    role="主角",
+                    personality={"坚韧": 0.8, "机智": 0.7},
+                    goals=["对抗伪天庭", "收集道纹"],
+                    relationships={"机械天尊": "盟友"},
+                    development_stage="成长初期"
+                )
+            }
+            logging.info("角色库文件不存在，已初始化基础角色。")
+        return characters_dict
 
     def _save_characters(self):
         """保存角色库"""
@@ -477,7 +488,7 @@ class NovelGenerator:
     def _is_valid_character_name(self, name: str) -> bool:
         """检查是否为有效的角色名称"""
         # 常见角色名直接通过验证
-        common_characters = ["林凡", "苏清瑶", "苏瑶", "林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人", "陆沉"]
+        common_characters = ["陆沉"]
         if name in common_characters:
             return True
             
@@ -549,7 +560,7 @@ class NovelGenerator:
                     char_name = t2s.convert(char_name)
                     
                     # 检查是否是受保护的主要角色
-                    protected_characters = ["林凡", "苏清瑶", "苏瑶", "林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人", "陆沉"]
+                    protected_characters = ["陆沉"]
                     if char_name in protected_characters:
                         current_character = char_name
                         logging.info(f"开始更新角色信息: {char_name}")
@@ -1059,7 +1070,7 @@ class NovelGenerator:
         ]
         
         # 保护列表 - 这些角色不会被删除
-        protected_characters = ["林凡", "苏清瑶", "苏瑶", "林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人", "陆沉"]
+        protected_characters = ["陆沉"]
         
         # 记录要删除的角色名
         to_delete = []
@@ -1148,6 +1159,118 @@ class NovelGenerator:
         else:
             logging.info("大纲文件不存在，初始化为空大纲")
             self.chapter_outlines = []
+
+    def generate_outline(
+        self,
+        novel_type: str,
+        theme: str,
+        style: str,
+        current_start_chapter_num: int = 1,
+        current_batch_size: int = None
+    ):
+        """生成小说大纲，支持从指定章节开始生成"""
+        if current_batch_size is None:
+            current_batch_size = self.config.novel_config["target_chapters"]
+        
+        logging.info(f"正在生成第 {current_start_chapter_num} 到 {current_start_chapter_num + current_batch_size - 1} 章大纲...")
+        
+        prompt = prompts.get_outline_prompt(
+            novel_type,
+            theme,
+            style,
+            current_start_chapter_num=current_start_chapter_num,
+            current_batch_size=current_batch_size
+        )
+        
+        outline_text = self.outline_model.generate(prompt)
+        batch_outlines = self._parse_outline(outline_text)
+        self.chapter_outlines.extend(batch_outlines)
+        
+        # 保存当前进度
+        self._save_outline()
+        logging.info(f"大纲生成完成，共 {len(self.chapter_outlines)} 章")
+
+    def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
+        outlines = []
+        try:
+            outline_data = json.loads(outline_text)
+            if len(outline_data) < self.config.novel_config["target_chapters"]:
+                logging.warning(f"生成章节数不足: 预期 {self.config.novel_config['target_chapters']} 章，实际 {len(outline_data)} 章")
+        except Exception as e:
+            logging.error(f"解析大纲失败: {str(e)}")
+        return outlines
+
+    def _save_outline(self):
+        """保存大纲到文件"""
+        outline_file = os.path.join(self.output_dir, "outline.json")
+        try:
+            outline_data = [
+                {
+                    "chapter_number": outline.chapter_number,
+                    "title": outline.title,
+                    "key_points": outline.key_points,
+                    "characters": outline.characters,
+                    "settings": outline.settings,
+                    "conflicts": outline.conflicts
+                }
+                for outline in self.chapter_outlines
+            ]
+            with open(outline_file, 'w', encoding='utf-8') as f:
+                json.dump(outline_data, f, ensure_ascii=False, indent=2)
+            logging.info(f"大纲已保存到: {outline_file}")
+        except Exception as e:
+            logging.error(f"保存大纲时出错: {str(e)}")
+
+    def _format_references(self, outline_dict):
+        """格式化参考信息供章节生成使用"""
+        # 构建搜索查询
+        query = f"{outline_dict['title']} {', '.join(outline_dict['key_points'])} {', '.join(outline_dict['characters'])} {', '.join(outline_dict['settings'])} {', '.join(outline_dict['conflicts'])}"
+        
+        # 搜索相关内容
+        search_results = []
+        try:
+            search_results = self.knowledge_base.search(query, k=5)
+        except Exception as e:
+            logging.error(f"搜索参考信息时出错: {str(e)}")
+            # 提供默认参考材料，确保能包含章节大纲中的关键情节点
+            return {
+                'plot_references': [point for point in outline_dict['key_points']],
+                'character_references': [char for char in outline_dict['characters']],
+                'setting_references': [setting for setting in outline_dict['settings']]
+            }
+        
+        # 格式化参考信息
+        references = {
+            'plot_references': [],
+            'character_references': [],
+            'setting_references': []
+        }
+        
+        # 将搜索结果分类到不同的参考类别
+        for chunk, _ in search_results:
+            content = chunk.content
+            
+            # 简单的分类逻辑，根据内容特征决定分到哪个类别
+            if any(char in content for char in outline_dict['characters']):
+                references['character_references'].append(content[:200])  # 截取前200个字符
+            
+            if any(setting in content for setting in outline_dict['settings']):
+                references['setting_references'].append(content[:200])
+            
+            # 其他内容归为情节参考
+            references['plot_references'].append(content[:200])
+        
+        # 确保每个类别至少有一个项目
+        if not references['plot_references']:
+            references['plot_references'] = ["暂无相关情节参考"]
+        
+        if not references['character_references']:
+            references['character_references'] = ["暂无相关角色参考"]
+        
+        if not references['setting_references']:
+            references['setting_references'] = ["暂无相关场景参考"]
+        
+        return references
 
     def generate_novel(self):
         """生成小说内容"""
@@ -1386,177 +1509,3 @@ class NovelGenerator:
         except Exception as e:
             logging.error(f"验证章节内容时出错: {str(e)}")
             return False
-
-    def generate_outline(self, novel_type: str, theme: str, style: str):
-        """生成小说大纲"""
-        try:
-            logging.info("开始生成小说大纲...")
-            
-            # 构建大纲生成提示词
-            prompt = prompts.get_outline_prompt(novel_type, theme, style)
-            
-            try:
-                # 生成大纲
-                outline_text = self.outline_model.generate(prompt)
-                
-                # 解析大纲
-                self.chapter_outlines = self._parse_outline(outline_text)
-                
-                if not self.chapter_outlines:
-                    logging.error("大纲生成失败")
-                    return
-                    
-                # 保存大纲
-                self._save_outline()
-                logging.info(f"大纲生成完成，共 {len(self.chapter_outlines)} 章")
-                
-            except (TimeoutError, asyncio.TimeoutError) as e:
-                logging.error(f"生成大纲时请求超时: {str(e)}")
-                raise
-            except Exception as e:
-                logging.error(f"生成大纲时出错: {str(e)}")
-                raise
-                
-        except Exception as e:
-            logging.error(f"生成大纲时发生错误: {str(e)}")
-            raise
-
-    def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
-        """解析大纲文本"""
-        try:
-            outlines = []
-            current_chapter = None
-            
-            for line in outline_text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # 检查是否是新章节
-                if line.startswith('第') and '章' in line:
-                    # 如果有当前章节，保存它
-                    if current_chapter:
-                        outlines.append(current_chapter)
-                        
-                    # 提取章节号
-                    try:
-                        chapter_num = int(line[1:line.index('章')])
-                    except:
-                        chapter_num = len(outlines) + 1
-                        
-                    # 提取标题
-                    title = line[line.index('章')+1:].strip()
-                    if not title:
-                        title = f"第{chapter_num}章"
-                        
-                    # 创建新章节
-                    current_chapter = ChapterOutline(
-                        chapter_number=chapter_num,
-                        title=title,
-                        key_points=[],
-                        characters=[],
-                        settings=[],
-                        conflicts=[]
-                    )
-                    
-                elif current_chapter:
-                    # 解析章节内容
-                    if line.startswith('关键点：') or line.startswith('关键点:'):
-                        current_chapter.key_points.extend(
-                            [p.strip() for p in line[4:].split('，') if p.strip()]
-                        )
-                    elif line.startswith('人物：') or line.startswith('人物:'):
-                        current_chapter.characters.extend(
-                            [c.strip() for c in line[3:].split('，') if c.strip()]
-                        )
-                    elif line.startswith('场景：') or line.startswith('场景:'):
-                        current_chapter.settings.extend(
-                            [s.strip() for s in line[3:].split('，') if s.strip()]
-                        )
-                    elif line.startswith('冲突：') or line.startswith('冲突:'):
-                        current_chapter.conflicts.extend(
-                            [c.strip() for c in line[3:].split('，') if c.strip()]
-                        )
-                        
-            # 保存最后一章
-            if current_chapter:
-                outlines.append(current_chapter)
-                
-            return outlines
-            
-        except Exception as e:
-            logging.error(f"解析大纲时出错: {str(e)}")
-            return []
-
-    def _save_outline(self):
-        """保存大纲到文件"""
-        outline_file = os.path.join(self.output_dir, "outline.json")
-        
-        # 将大纲转换为可序列化的格式
-        outline_data = [
-            {
-                "chapter_number": outline.chapter_number,
-                "title": outline.title,
-                "key_points": outline.key_points,
-                "characters": outline.characters,
-                "settings": outline.settings,
-                "conflicts": outline.conflicts
-            }
-            for outline in self.chapter_outlines
-        ]
-        
-        # 保存到文件
-        with open(outline_file, 'w', encoding='utf-8') as f:
-            json.dump(outline_data, f, ensure_ascii=False, indent=2)
-        logging.info(f"大纲已保存到: {outline_file}")
-
-    def _format_references(self, outline_dict):
-        """格式化参考信息供章节生成使用"""
-        # 构建搜索查询
-        query = f"{outline_dict['title']} {', '.join(outline_dict['key_points'])} {', '.join(outline_dict['characters'])} {', '.join(outline_dict['settings'])} {', '.join(outline_dict['conflicts'])}"
-        
-        # 搜索相关内容
-        search_results = []
-        try:
-            search_results = self.knowledge_base.search(query, k=5)
-        except Exception as e:
-            logging.error(f"搜索参考信息时出错: {str(e)}")
-            # 提供默认参考材料，确保能包含章节大纲中的关键情节点
-            return {
-                'plot_references': [point for point in outline_dict['key_points']],
-                'character_references': [char for char in outline_dict['characters']],
-                'setting_references': [setting for setting in outline_dict['settings']]
-            }
-        
-        # 格式化参考信息
-        references = {
-            'plot_references': [],
-            'character_references': [],
-            'setting_references': []
-        }
-        
-        # 将搜索结果分类到不同的参考类别
-        for chunk, _ in search_results:
-            content = chunk.content
-            
-            # 简单的分类逻辑，根据内容特征决定分到哪个类别
-            if any(char in content for char in outline_dict['characters']):
-                references['character_references'].append(content[:200])  # 截取前200个字符
-            
-            if any(setting in content for setting in outline_dict['settings']):
-                references['setting_references'].append(content[:200])
-            
-            # 其他内容归为情节参考
-            references['plot_references'].append(content[:200])
-        
-        # 确保每个类别至少有一个项目
-        if not references['plot_references']:
-            references['plot_references'] = ["暂无相关情节参考"]
-        
-        if not references['character_references']:
-            references['character_references'] = ["暂无相关角色参考"]
-        
-        if not references['setting_references']:
-            references['setting_references'] = ["暂无相关场景参考"]
-        
-        return references

@@ -24,6 +24,7 @@ build/
 data/cache/*
 data/output/*
 data/output2/*
+data/output3/*
 data/logs/*
 data/reference/*
 !data/cache/.gitkeep
