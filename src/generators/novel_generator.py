@@ -477,7 +477,7 @@ class NovelGenerator:
     def _is_valid_character_name(self, name: str) -> bool:
         """检查是否为有效的角色名称"""
         # 常见角色名直接通过验证
-        common_characters = ["王大锤", "丹辰子", "钱小小", "拾荒道人", "林小凡", "抠门真人"]
+        common_characters = ["林凡", "苏清瑶", "苏瑶", "林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人", "陆沉"]
         if name in common_characters:
             return True
             
@@ -549,7 +549,7 @@ class NovelGenerator:
                     char_name = t2s.convert(char_name)
                     
                     # 检查是否是受保护的主要角色
-                    protected_characters = ["林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人"]
+                    protected_characters = ["林凡", "苏清瑶", "苏瑶", "林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人", "陆沉"]
                     if char_name in protected_characters:
                         current_character = char_name
                         logging.info(f"开始更新角色信息: {char_name}")
@@ -1059,7 +1059,7 @@ class NovelGenerator:
         ]
         
         # 保护列表 - 这些角色不会被删除
-        protected_characters = ["林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人"]
+        protected_characters = ["林凡", "苏清瑶", "苏瑶", "林小凡", "王大锤", "丹辰子", "钱小小", "拾荒道人", "抠门真人", "陆沉"]
         
         # 记录要删除的角色名
         to_delete = []
