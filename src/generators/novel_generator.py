@@ -1210,6 +1210,11 @@ class NovelGenerator:
         outline_text = self.outline_model.generate(prompt)
         batch_outlines = self._parse_outline(outline_text)
 
+        # 检查解析结果
+        if not batch_outlines:
+            logging.error("生成的大纲解析失败，保留原有内容")
+            return  # 直接返回，不执行后续操作
+
         # 处理生成的大纲
         if mode == "replace":
             # 替换指定范围的章节
@@ -1223,13 +1228,35 @@ class NovelGenerator:
         logging.info(f"大纲生成完成，共 {len(self.chapter_outlines)} 章")
 
     def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
+        """解析大纲文本，返回 ChapterOutline 列表"""
         outlines = []
         try:
             outline_data = json.loads(outline_text)
-            if len(outline_data) < self.config.novel_config["target_chapters"]:
-                logging.warning(f"生成章节数不足: 预期 {self.config.novel_config['target_chapters']} 章，实际 {len(outline_data)} 章")
-        except Exception as e:
+            if not isinstance(outline_data, list):
+                raise ValueError("生成的大纲不是有效的列表格式")
+
+            for chapter in outline_data:
+                outlines.append(ChapterOutline(
+                    chapter_number=chapter.get("chapter_number", 0),
+                    title=chapter.get("title", "未知标题"),
+                    key_points=chapter.get("key_points", []),
+                    characters=chapter.get("characters", []),
+                    settings=chapter.get("settings", []),
+                    conflicts=chapter.get("conflicts", [])
+                ))
+
+            # 检查章节数是否足够
+            if len(outlines) < self.config.novel_config["target_chapters"]:
+                logging.warning(f"生成章节数不足: 预期 {self.config.novel_config['target_chapters']} 章，实际 {len(outlines)} 章")
+
+        except json.JSONDecodeError as e:
             logging.error(f"解析大纲失败: {str(e)}")
+            # 返回空列表，避免覆盖原有内容
+            return []
+        except Exception as e:
+            logging.error(f"解析大纲时发生未知错误: {str(e)}")
+            return []
+
         return outlines
 
     def _save_outline(self):
