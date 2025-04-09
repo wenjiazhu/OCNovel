@@ -1160,6 +1160,105 @@ class NovelGenerator:
             logging.info("大纲文件不存在，初始化为空大纲")
             self.chapter_outlines = []
 
+    def _get_context_for_chapter(self, chapter_num: int, successful_outlines: List[ChapterOutline] = None) -> str:
+        """获取指定章节的上下文信息"""
+        context_parts = []
+        
+        # 获取已有的上下文（从原有大纲或已成功生成的大纲中）
+        prev_chapters = []
+        
+        # 首先检查已成功生成的大纲中的前文
+        if successful_outlines:
+            prev_chapters.extend([
+                o for o in successful_outlines 
+                if o.chapter_number < chapter_num
+            ])
+        
+        # 如果是替换模式，也要考虑原有大纲中的内容
+        if chapter_num > 1:
+            # 获取原有大纲中的前3章
+            start_idx = max(0, chapter_num - 4)
+            orig_prev_chapters = self.chapter_outlines[start_idx:chapter_num-1]
+            # 只添加不在 successful_outlines 中的章节
+            for chapter in orig_prev_chapters:
+                if not any(o.chapter_number == chapter.chapter_number for o in prev_chapters):
+                    prev_chapters.append(chapter)
+        
+        # 按章节号排序
+        prev_chapters.sort(key=lambda x: x.chapter_number)
+        # 只保留最近的3章
+        prev_chapters = prev_chapters[-3:]
+        
+        if prev_chapters:
+            context_parts.append("已有章节概要：")
+            for chapter in prev_chapters:
+                context_parts.extend([
+                    f"第{chapter.chapter_number}章 {chapter.title}",
+                    f"- 关键情节：{', '.join(chapter.key_points)}",
+                    f"- 涉及角色：{', '.join(chapter.characters)}",
+                    f"- 场景：{', '.join(chapter.settings)}",
+                    f"- 冲突：{', '.join(chapter.conflicts)}",
+                    ""  # 添加空行分隔
+                ])
+        
+        # 如果有后续成功生成的章节，也添加其信息
+        if successful_outlines:
+            next_chapters = [
+                o for o in successful_outlines 
+                if o.chapter_number > chapter_num
+            ][:2]  # 只取接下来的2章
+            
+            if next_chapters:
+                context_parts.append("后续章节概要：")
+                for chapter in next_chapters:
+                    context_parts.extend([
+                        f"第{chapter.chapter_number}章 {chapter.title}",
+                        f"- 关键情节：{', '.join(chapter.key_points)}",
+                        f"- 涉及角色：{', '.join(chapter.characters)}",
+                        f"- 场景：{', '.join(chapter.settings)}",
+                        f"- 冲突：{', '.join(chapter.conflicts)}",
+                        ""  # 添加空行分隔
+                    ])
+        
+        return "\n".join(context_parts)
+
+    def _validate_model_config(self) -> bool:
+        """验证模型配置是否适合生成大纲"""
+        try:
+            model_name = self.outline_model.config.get("name", "")
+            if not model_name:
+                logging.error("模型配置中缺少名称")
+                return False
+                
+            # 根据不同模型调整生成策略
+            if "flash" in model_name.lower():
+                # flash 模型适合小批量生成
+                self.max_batch_size = 3
+                logging.info(f"使用 flash 模型 {model_name}，已将批次大小限制为 {self.max_batch_size}")
+            elif "pro" in model_name.lower():
+                # pro 模型可以处理较大批次
+                self.max_batch_size = 5
+                logging.info(f"使用 pro 模型 {model_name}，已将批次大小限制为 {self.max_batch_size}")
+            else:
+                # 默认配置
+                self.max_batch_size = 3
+                logging.info(f"使用默认模型 {model_name}，已将批次大小限制为 {self.max_batch_size}")
+                
+            return True
+        except Exception as e:
+            logging.error(f"验证模型配置时出错: {str(e)}")
+            return False
+
+    def _split_into_batches(self, start: int, end: int) -> List[Tuple[int, int]]:
+        """将章节范围分割为适合的批次"""
+        batches = []
+        current_start = start
+        while current_start <= end:
+            batch_size = min(self.max_batch_size, end - current_start + 1)
+            batches.append((current_start, current_start + batch_size - 1))
+            current_start += batch_size
+        return batches
+
     def generate_outline(
         self,
         novel_type: str,
@@ -1172,9 +1271,14 @@ class NovelGenerator:
         extra_prompt: str = None
     ):
         """生成小说大纲。"""
+        # 验证模型配置
+        if not hasattr(self, 'max_batch_size'):
+            if not self._validate_model_config():
+                return False
+
         # 设置默认批次大小
         if current_batch_size is None:
-            current_batch_size = self.config.novel_config.get("batch_size", 3)
+            current_batch_size = self.config.novel_config.get("batch_size", self.max_batch_size)
 
         # 处理替换模式的参数
         if mode == "replace":
@@ -1188,81 +1292,93 @@ class NovelGenerator:
             current_start_chapter_num = start
             current_batch_size = end - start + 1
 
-        # 获取现有大纲内容作为上下文
-        existing_context = ""
-        if self.chapter_outlines:
-            # 获取最近的3章作为上下文
-            context_start = max(0, current_start_chapter_num - 4)
-            context_chapters = self.chapter_outlines[context_start:current_start_chapter_num - 1]
-            if context_chapters:
-                existing_context = "已有章节概要：\n" + "\n".join([
-                    f"第{c.chapter_number}章 {c.title}\n"
-                    f"- 关键情节：{', '.join(c.key_points)}\n"
-                    f"- 涉及角色：{', '.join(c.characters)}\n"
-                    f"- 场景：{', '.join(c.settings)}\n"
-                    f"- 冲突：{', '.join(c.conflicts)}\n"
-                    for c in context_chapters
-                ])
-
-        # 生成大纲提示词
-        prompt = prompts.get_outline_prompt(
-            novel_type=novel_type,
-            theme=theme,
-            style=style,
-            current_start_chapter_num=current_start_chapter_num,
-            current_batch_size=current_batch_size,
-            existing_context=existing_context,
-            extra_prompt=extra_prompt
-        )
-
-        try:
-            # 调用模型生成大纲
-            outline_text = self.outline_model.generate(prompt)
-            if not outline_text:
-                raise ValueError("模型返回空内容")
-
-            # 解析大纲
+        # 将大范围任务分割成小批次
+        batches = self._split_into_batches(current_start_chapter_num, 
+                                         current_start_chapter_num + current_batch_size - 1)
+        
+        all_successful_outlines = []  # 存储所有成功生成的章节大纲
+        
+        for batch_start, batch_end in batches:
+            batch_size = batch_end - batch_start + 1
+            logging.info(f"开始生成第 {batch_start} 到 {batch_end} 章大纲（批次大小：{batch_size}）...")
+            
+            # 获取当前批次的上下文（包括之前成功生成的章节）
+            batch_context = self._get_context_for_chapter(batch_start, all_successful_outlines)
+            
+            # 生成当前批次的大纲
             try:
+                prompt = prompts.get_outline_prompt(
+                    novel_type=novel_type,
+                    theme=theme,
+                    style=style,
+                    current_start_chapter_num=batch_start,
+                    current_batch_size=batch_size,
+                    existing_context=batch_context,
+                    extra_prompt=extra_prompt
+                )
+
+                outline_text = self.outline_model.generate(prompt)
+                if not outline_text:
+                    raise ValueError("模型返回空内容")
+
                 batch_outlines = self._parse_outline(outline_text)
-                if not batch_outlines:
-                    raise ValueError("解析结果为空")
                 
-                # 验证生成的章节数量
-                if len(batch_outlines) != current_batch_size:
-                    raise ValueError(f"生成的章节数量不符：期望 {current_batch_size} 章，实际生成 {len(batch_outlines)} 章")
+                # 分析大纲质量
+                is_qualified, problem_chapters, suggestions = self._validate_batch_outlines(batch_outlines)
+                if not is_qualified:
+                    logging.warning(f"批次 {batch_start}-{batch_end} 存在质量问题:")
+                    logging.warning(suggestions)
+                    
+                    # 对问题章节进行单独处理
+                    for chapter_num in problem_chapters:
+                        fixed_outline = self._retry_single_chapter(
+                            chapter_num=chapter_num,
+                            novel_type=novel_type,
+                            theme=theme,
+                            style=style,
+                            extra_prompt=extra_prompt,
+                            successful_outlines=all_successful_outlines
+                        )
+                        if fixed_outline:
+                            # 替换问题章节
+                            batch_outlines = [
+                                fixed_outline if o.chapter_number == chapter_num else o 
+                                for o in batch_outlines
+                            ]
+                        else:
+                            logging.error(f"无法修复第 {chapter_num} 章的问题")
+                            return False
                 
-                # 验证章节号的连续性和正确性
-                expected_numbers = list(range(current_start_chapter_num, current_start_chapter_num + current_batch_size))
-                actual_numbers = [o.chapter_number for o in batch_outlines]
-                if actual_numbers != expected_numbers:
-                    raise ValueError(f"章节号不连续或不正确。期望: {expected_numbers}，实际: {actual_numbers}")
-
-                # 处理生成的大纲
-                if mode == "replace":
-                    # 替换指定范围的章节
-                    self.chapter_outlines[start - 1 : end] = batch_outlines
-                    logging.info(f"已替换第 {start} 至 {end} 章的大纲")
-                else:
-                    # 追加新章节
-                    self.chapter_outlines.extend(batch_outlines)
-                    logging.info(f"已追加 {len(batch_outlines)} 章新大纲")
+                all_successful_outlines.extend(batch_outlines)
+                logging.info(f"成功生成批次 {batch_start}-{batch_end} 的大纲")
                 
-                # 保存大纲
-                self._save_outline()
-                logging.info(f"大纲更新完成，当前共有 {len(self.chapter_outlines)} 章")
-                return True
-
-            except ValueError as parse_err:
-                logging.error(f"解析大纲失败: {str(parse_err)}")
-                logging.error(f"原始大纲文本: {outline_text}")
-                # 对于解析错误，我们可以选择重试或返回失败
+            except Exception as e:
+                logging.error(f"生成批次 {batch_start}-{batch_end} 时出错: {str(e)}")
                 return False
 
-        except Exception as e:
-            logging.error(f"生成大纲时发生错误: {str(e)}")
-            logging.error(f"使用的提示词: {prompt}")
-            return False
+        # 所有批次处理完成，验证最终结果
+        all_successful_outlines.sort(key=lambda x: x.chapter_number)
+        
+        if len(all_successful_outlines) != current_batch_size:
+            raise ValueError(f"最终生成的章节数量不符：期望 {current_batch_size} 章，实际生成 {len(all_successful_outlines)} 章")
 
+        # 验证章节号的连续性
+        chapter_numbers = [o.chapter_number for o in all_successful_outlines]
+        expected_numbers = list(range(current_start_chapter_num, current_start_chapter_num + current_batch_size))
+        if chapter_numbers != expected_numbers:
+            raise ValueError(f"章节号不连续。期望: {expected_numbers}，实际: {chapter_numbers}")
+
+        # 更新大纲
+        if mode == "replace":
+            self.chapter_outlines[start - 1 : end] = all_successful_outlines
+            logging.info(f"已替换第 {start} 至 {end} 章的大纲")
+        else:
+            self.chapter_outlines.extend(all_successful_outlines)
+            logging.info(f"已追加 {len(all_successful_outlines)} 章新大纲")
+
+        # 保存大纲
+        self._save_outline()
+        logging.info(f"大纲更新完成，当前共有 {len(self.chapter_outlines)} 章")
         return True
 
     def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
@@ -1348,22 +1464,81 @@ class NovelGenerator:
         """保存大纲到文件"""
         outline_file = os.path.join(self.output_dir, "outline.json")
         try:
-            outline_data = [
-                {
-                    "chapter_number": outline.chapter_number,
-                    "title": outline.title,
-                    "key_points": outline.key_points,
-                    "characters": outline.characters,
-                    "settings": outline.settings,
-                    "conflicts": outline.conflicts
-                }
-                for outline in self.chapter_outlines
-            ]
-            with open(outline_file, 'w', encoding='utf-8') as f:
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(outline_file), exist_ok=True)
+            
+            # 准备大纲数据
+            outline_data = []
+            for outline in self.chapter_outlines:
+                try:
+                    chapter_data = {
+                        "chapter_number": outline.chapter_number,
+                        "title": outline.title,
+                        "key_points": outline.key_points,
+                        "characters": outline.characters,
+                        "settings": outline.settings,
+                        "conflicts": outline.conflicts
+                    }
+                    outline_data.append(chapter_data)
+                except AttributeError as ae:
+                    logging.error(f"处理章节数据时出错: {str(ae)}")
+                    logging.error(f"问题章节数据: {outline}")
+                    continue
+            
+            # 在写入前验证数据
+            if not outline_data:
+                raise ValueError("没有有效的大纲数据可保存")
+            
+            # 验证章节号的连续性
+            chapter_numbers = [chapter["chapter_number"] for chapter in outline_data]
+            expected_numbers = list(range(min(chapter_numbers), max(chapter_numbers) + 1))
+            if chapter_numbers != expected_numbers:
+                logging.warning(f"章节号不连续。期望: {expected_numbers}，实际: {chapter_numbers}")
+            
+            # 先写入临时文件
+            temp_file = outline_file + ".tmp"
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(outline_data, f, ensure_ascii=False, indent=2)
-            logging.info(f"大纲已保存到: {outline_file}")
+            
+            # 验证临时文件是否可以正确读取
+            try:
+                with open(temp_file, 'r', encoding='utf-8') as f:
+                    test_load = json.load(f)
+                if not isinstance(test_load, list):
+                    raise ValueError("保存的数据格式不正确")
+            except Exception as e:
+                os.remove(temp_file)
+                raise ValueError(f"验证临时文件失败: {str(e)}")
+            
+            # 如果验证成功，替换原文件
+            if os.path.exists(outline_file):
+                backup_file = outline_file + ".bak"
+                os.replace(outline_file, backup_file)
+                logging.info(f"已创建大纲文件备份: {backup_file}")
+            
+            os.replace(temp_file, outline_file)
+            logging.info(f"大纲已成功保存到: {outline_file}")
+            logging.info(f"保存了 {len(outline_data)} 章大纲")
+            
+            # 输出一些大纲统计信息
+            total_key_points = sum(len(chapter["key_points"]) for chapter in outline_data)
+            total_characters = sum(len(chapter["characters"]) for chapter in outline_data)
+            logging.info(f"大纲统计: {total_key_points} 个关键情节点, {total_characters} 个角色出场")
+            
+        except json.JSONEncodeError as je:
+            logging.error(f"JSON编码错误: {str(je)}")
+            logging.error("尝试保存的大纲数据:")
+            for i, outline in enumerate(self.chapter_outlines):
+                logging.error(f"Chapter {i+1}: {vars(outline)}")
+            raise
+        except (IOError, OSError) as e:
+            logging.error(f"文件操作错误: {str(e)}")
+            logging.error(f"文件路径: {outline_file}")
+            raise
         except Exception as e:
-            logging.error(f"保存大纲时出错: {str(e)}")
+            logging.error(f"保存大纲时发生未预期的错误: {str(e)}")
+            logging.error(f"大纲数据示例（前3章）: {self.chapter_outlines[:3]}")
+            raise
 
     def _format_references(self, outline_dict):
         """格式化参考信息供章节生成使用"""
@@ -1653,3 +1828,205 @@ class NovelGenerator:
         except Exception as e:
             logging.error(f"验证章节内容时出错: {str(e)}")
             return False
+
+    def _analyze_outline_quality(self, outline: ChapterOutline, prev_chapters: List[ChapterOutline] = None) -> Tuple[bool, List[str]]:
+        """分析大纲质量并返回是否合格及具体问题"""
+        issues = []
+        
+        # 1. 检查角色连贯性
+        if prev_chapters:
+            prev_characters = set()
+            for prev in prev_chapters[-3:]:  # 只看最近的3章
+                prev_characters.update(prev.characters)
+            
+            # 检查是否延续了之前的重要角色
+            continuing_characters = set(outline.characters) & prev_characters
+            if not continuing_characters:
+                issues.append("未延续任何已有角色，可能影响故事连贯性")
+            
+            # 检查新角色引入是否过多
+            new_characters = set(outline.characters) - prev_characters
+            if len(new_characters) > 2:  # 每章最多引入2个新角色
+                issues.append(f"引入了过多新角色: {', '.join(new_characters)}")
+        
+        # 2. 检查情节要素完整性
+        if len(outline.key_points) < 3:
+            issues.append("关键情节点数量不足3个")
+        if len(outline.characters) < 2:
+            issues.append("角色数量不足2个")
+        if len(outline.settings) < 1:
+            issues.append("场景描述不足1个")
+        if len(outline.conflicts) < 1:
+            issues.append("冲突描述不足1个")
+        
+        # 3. 检查情节逻辑性
+        if prev_chapters:
+            last_chapter = prev_chapters[-1]
+            # 检查是否有未解决的冲突延续
+            last_conflicts = set(last_chapter.conflicts)
+            current_conflicts = set(outline.conflicts)
+            if not (last_conflicts & current_conflicts) and not any("解决" in point for point in outline.key_points):
+                issues.append("前章冲突未得到延续或解决")
+        
+        # 4. 检查场景合理性
+        if prev_chapters:
+            last_chapter = prev_chapters[-1]
+            last_settings = set(last_chapter.settings)
+            current_settings = set(outline.settings)
+            
+            # 如果场景完全不同，检查是否有场景转换的说明
+            if not (last_settings & current_settings):
+                has_transition = any("前往" in point or "到达" in point or "离开" in point or "移动" in point 
+                                   for point in outline.key_points)
+                if not has_transition:
+                    issues.append("场景转换缺乏过渡说明")
+        
+        # 5. 检查高潮设置
+        if outline.chapter_number % 3 == 0:  # 每3章应该有一个大高潮
+            has_major_climax = any("（大高潮）" in point or "突破" in point or "战胜" in point 
+                                 or "获得" in point or "实现" in point for point in outline.key_points)
+            if not has_major_climax:
+                issues.append("作为第3章节点，缺少重要转折或高潮")
+        else:
+            has_minor_climax = any("（小高潮）" in point or "冲突" in point or "转折" in point 
+                                 for point in outline.key_points)
+            if not has_minor_climax:
+                issues.append("缺少小型转折或高潮")
+        
+        return len(issues) == 0, issues
+
+    def _optimize_outline(self, outline: ChapterOutline, prev_chapters: List[ChapterOutline] = None) -> str:
+        """根据分析结果生成优化建议"""
+        is_qualified, issues = self._analyze_outline_quality(outline, prev_chapters)
+        if is_qualified:
+            return ""
+            
+        suggestions = []
+        for issue in issues:
+            if "角色数量不足" in issue:
+                suggestions.append("建议添加更多角色互动，确保至少包含2个以上的角色")
+            elif "未延续任何已有角色" in issue:
+                if prev_chapters:
+                    recent_chars = set()
+                    for prev in prev_chapters[-3:]:
+                        recent_chars.update(prev.characters)
+                    suggestions.append(f"建议延续使用以下角色中的部分: {', '.join(recent_chars)}")
+            elif "引入了过多新角色" in issue:
+                suggestions.append("建议减少新角色引入数量，优先使用已有角色")
+            elif "前章冲突未得到延续或解决" in issue:
+                if prev_chapters:
+                    last_conflicts = prev_chapters[-1].conflicts
+                    suggestions.append(f"建议处理前章遗留的冲突: {', '.join(last_conflicts)}")
+            elif "场景转换缺乏过渡" in issue:
+                suggestions.append("建议添加场景转换的过渡描写，说明角色如何到达新场景")
+            elif "缺少重要转折或高潮" in issue:
+                suggestions.append("建议增加重大转折或突破性事件，如境界突破、重要发现等")
+            elif "缺少小型转折或高潮" in issue:
+                suggestions.append("建议添加小型冲突或转折，如矛盾激化、线索发现等")
+        
+        return "\n".join(suggestions)
+
+    def _validate_batch_outlines(self, outlines: List[ChapterOutline]) -> Tuple[bool, List[int], str]:
+        """验证一批大纲的质量，返回是否通过、问题章节列表和优化建议"""
+        if not outlines:
+            return False, [], "大纲列表为空"
+            
+        problem_chapters = []
+        all_suggestions = []
+        
+        for i, outline in enumerate(outlines):
+            # 获取前文章节
+            prev_start = max(0, i - 3)
+            prev_chapters = outlines[prev_start:i]
+            
+            # 分析当前章节
+            is_qualified, issues = self._analyze_outline_quality(outline, prev_chapters)
+            if not is_qualified:
+                problem_chapters.append(outline.chapter_number)
+                suggestions = self._optimize_outline(outline, prev_chapters)
+                all_suggestions.append(f"第{outline.chapter_number}章优化建议：\n{suggestions}")
+        
+        return len(problem_chapters) == 0, problem_chapters, "\n\n".join(all_suggestions)
+
+    def _retry_single_chapter(
+        self,
+        chapter_num: int,
+        novel_type: str,
+        theme: str,
+        style: str,
+        extra_prompt: str = None,
+        successful_outlines: List[ChapterOutline] = None
+    ) -> Optional[ChapterOutline]:
+        """重试生成单个章节的大纲"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                logging.info(f"尝试重新生成第 {chapter_num} 章大纲（第 {retry_count + 1} 次尝试）...")
+                
+                # 获取最新的上下文
+                chapter_context = self._get_context_for_chapter(chapter_num, successful_outlines)
+                
+                # 获取优化建议
+                prev_chapters = [o for o in successful_outlines if o.chapter_number < chapter_num]
+                optimization_prompt = ""
+                if prev_chapters:
+                    # 创建一个临时的空大纲用于获取建议
+                    temp_outline = ChapterOutline(
+                        chapter_number=chapter_num,
+                        title="",
+                        key_points=[],
+                        characters=[],
+                        settings=[],
+                        conflicts=[]
+                    )
+                    optimization_prompt = self._optimize_outline(temp_outline, prev_chapters)
+                
+                # 构建增强的提示词
+                enhanced_prompt = f"{extra_prompt if extra_prompt else ''}\n"
+                if optimization_prompt:
+                    enhanced_prompt += f"{optimization_prompt}\n"
+                enhanced_prompt += (
+                    "注意：\n"
+                    "1. 确保本章至少包含2个以上的角色，并详细描述其互动\n"
+                    "2. 保持与前文的连贯性\n"
+                    "3. 每个关键情节点要详细具体\n"
+                    "4. 明确说明场景转换\n"
+                    "5. 设置合适的冲突和高潮"
+                )
+                
+                # 生成大纲
+                single_chapter_prompt = prompts.get_outline_prompt(
+                    novel_type=novel_type,
+                    theme=theme,
+                    style=style,
+                    current_start_chapter_num=chapter_num,
+                    current_batch_size=1,
+                    existing_context=chapter_context,
+                    extra_prompt=enhanced_prompt
+                )
+                
+                chapter_text = self.outline_model.generate(single_chapter_prompt)
+                if not chapter_text:
+                    raise ValueError(f"生成第 {chapter_num} 章大纲时返回空内容")
+                
+                chapter_outline = self._parse_outline(chapter_text)
+                if chapter_outline and len(chapter_outline) == 1:
+                    # 验证新生成的章节质量
+                    is_qualified, issues = self._analyze_outline_quality(chapter_outline[0], prev_chapters)
+                    if is_qualified:
+                        logging.info(f"成功重新生成第 {chapter_num} 章大纲")
+                        return chapter_outline[0]
+                    else:
+                        logging.warning(f"重新生成的第 {chapter_num} 章存在问题: {', '.join(issues)}")
+                
+            except Exception as e:
+                logging.error(f"重新生成第 {chapter_num} 章大纲时出错: {str(e)}")
+            
+            retry_count += 1
+            if retry_count < max_retries:
+                time.sleep(10)  # 短暂等待后重试
+        
+        logging.error(f"第 {chapter_num} 章大纲生成失败，已达到最大重试次数")
+        return None
