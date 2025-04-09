@@ -1171,93 +1171,178 @@ class NovelGenerator:
         replace_range: tuple = None,
         extra_prompt: str = None
     ):
-        """
-        生成或更新小说大纲。
-        
-        参数:
-            novel_type: 小说类型（如修真玄幻）。
-            theme: 主题（如天庭权谋）。
-            style: 风格（如热血悬疑）。
-            current_start_chapter_num: 起始章节号（默认1）。
-            current_batch_size: 生成章节数（默认从配置读取）。
-            mode: 模式，可选 "append"（追加）或 "replace"（替换）。
-            replace_range: 替换范围，格式为 (start_chapter, end_chapter)。
-            extra_prompt: 额外提示词。
-        """
-        target_chapters = self.config.novel_config["target_chapters"]
+        """生成小说大纲。"""
+        # 设置默认批次大小
         if current_batch_size is None:
-            current_batch_size = target_chapters
+            current_batch_size = self.config.novel_config.get("batch_size", 3)
 
-        # 检查替换范围是否合法
+        # 处理替换模式的参数
         if mode == "replace":
             if not replace_range or len(replace_range) != 2:
-                raise ValueError("替换模式必须提供有效的 replace_range (start, end)。")
+                raise ValueError("替换模式需要提供有效的替换范围 (start, end)")
             start, end = replace_range
-            if start <= 0 or end < start or end > len(self.chapter_outlines):
-                raise ValueError(f"替换范围 {replace_range} 无效。")
+            if start < 1 or end < start:
+                raise ValueError(f"无效的替换范围: ({start}, {end})")
+            if end > len(self.chapter_outlines):
+                raise ValueError(f"替换范围超出现有大纲长度: {len(self.chapter_outlines)}")
+            current_start_chapter_num = start
+            current_batch_size = end - start + 1
 
-        logging.info(f"正在生成第 {current_start_chapter_num} 到 {current_start_chapter_num + current_batch_size - 1} 章大纲...")
-        
+        # 获取现有大纲内容作为上下文
+        existing_context = ""
+        if self.chapter_outlines:
+            # 获取最近的3章作为上下文
+            context_start = max(0, current_start_chapter_num - 4)
+            context_chapters = self.chapter_outlines[context_start:current_start_chapter_num - 1]
+            if context_chapters:
+                existing_context = "已有章节概要：\n" + "\n".join([
+                    f"第{c.chapter_number}章 {c.title}\n"
+                    f"- 关键情节：{', '.join(c.key_points)}\n"
+                    f"- 涉及角色：{', '.join(c.characters)}\n"
+                    f"- 场景：{', '.join(c.settings)}\n"
+                    f"- 冲突：{', '.join(c.conflicts)}\n"
+                    for c in context_chapters
+                ])
+
+        # 生成大纲提示词
         prompt = prompts.get_outline_prompt(
-            novel_type,
-            theme,
-            style,
+            novel_type=novel_type,
+            theme=theme,
+            style=style,
             current_start_chapter_num=current_start_chapter_num,
             current_batch_size=current_batch_size,
+            existing_context=existing_context,
             extra_prompt=extra_prompt
         )
-        
-        outline_text = self.outline_model.generate(prompt)
-        batch_outlines = self._parse_outline(outline_text)
 
-        # 检查解析结果
-        if not batch_outlines:
-            logging.error("生成的大纲解析失败，保留原有内容")
-            return  # 直接返回，不执行后续操作
+        try:
+            # 调用模型生成大纲
+            outline_text = self.outline_model.generate(prompt)
+            if not outline_text:
+                raise ValueError("模型返回空内容")
 
-        # 处理生成的大纲
-        if mode == "replace":
-            # 替换指定范围的章节
-            self.chapter_outlines[start - 1 : end] = batch_outlines
-        else:
-            # 追加新章节
-            self.chapter_outlines.extend(batch_outlines)
-        
-        # 保存大纲
-        self._save_outline()
-        logging.info(f"大纲生成完成，共 {len(self.chapter_outlines)} 章")
+            # 解析大纲
+            try:
+                batch_outlines = self._parse_outline(outline_text)
+                if not batch_outlines:
+                    raise ValueError("解析结果为空")
+                
+                # 验证生成的章节数量
+                if len(batch_outlines) != current_batch_size:
+                    raise ValueError(f"生成的章节数量不符：期望 {current_batch_size} 章，实际生成 {len(batch_outlines)} 章")
+                
+                # 验证章节号的连续性和正确性
+                expected_numbers = list(range(current_start_chapter_num, current_start_chapter_num + current_batch_size))
+                actual_numbers = [o.chapter_number for o in batch_outlines]
+                if actual_numbers != expected_numbers:
+                    raise ValueError(f"章节号不连续或不正确。期望: {expected_numbers}，实际: {actual_numbers}")
+
+                # 处理生成的大纲
+                if mode == "replace":
+                    # 替换指定范围的章节
+                    self.chapter_outlines[start - 1 : end] = batch_outlines
+                    logging.info(f"已替换第 {start} 至 {end} 章的大纲")
+                else:
+                    # 追加新章节
+                    self.chapter_outlines.extend(batch_outlines)
+                    logging.info(f"已追加 {len(batch_outlines)} 章新大纲")
+                
+                # 保存大纲
+                self._save_outline()
+                logging.info(f"大纲更新完成，当前共有 {len(self.chapter_outlines)} 章")
+                return True
+
+            except ValueError as parse_err:
+                logging.error(f"解析大纲失败: {str(parse_err)}")
+                logging.error(f"原始大纲文本: {outline_text}")
+                # 对于解析错误，我们可以选择重试或返回失败
+                return False
+
+        except Exception as e:
+            logging.error(f"生成大纲时发生错误: {str(e)}")
+            logging.error(f"使用的提示词: {prompt}")
+            return False
+
+        return True
 
     def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
-        """解析大纲文本，返回 ChapterOutline 列表"""
-        outlines = []
+        """解析生成的大纲文本。"""
         try:
-            outline_data = json.loads(outline_text)
-            if not isinstance(outline_data, list):
-                raise ValueError("生成的大纲不是有效的列表格式")
-
-            for chapter in outline_data:
-                outlines.append(ChapterOutline(
-                    chapter_number=chapter.get("chapter_number", 0),
-                    title=chapter.get("title", "未知标题"),
-                    key_points=chapter.get("key_points", []),
-                    characters=chapter.get("characters", []),
-                    settings=chapter.get("settings", []),
-                    conflicts=chapter.get("conflicts", [])
-                ))
-
-            # 检查章节数是否足够
-            if len(outlines) < self.config.novel_config["target_chapters"]:
-                logging.warning(f"生成章节数不足: 预期 {self.config.novel_config['target_chapters']} 章，实际 {len(outlines)} 章")
-
+            # 尝试清理可能的前后缀文本
+            outline_text = outline_text.strip()
+            # 找到第一个 '[' 和最后一个 ']'
+            start_idx = outline_text.find('[')
+            end_idx = outline_text.rfind(']')
+            
+            if start_idx == -1 or end_idx == -1:
+                raise ValueError(f"无法找到有效的JSON数组标记。start_idx={start_idx}, end_idx={end_idx}")
+            
+            # 提取JSON数组部分
+            outline_text = outline_text[start_idx:end_idx + 1]
+            
+            # 尝试解析JSON
+            data = json.loads(outline_text)
+            
+            if not isinstance(data, list):
+                raise ValueError(f"解析结果不是列表类型: {type(data)}")
+            
+            outlines = []
+            for item in data:
+                # 验证必需字段
+                required_fields = ['chapter_number', 'title', 'key_points', 'characters', 'settings', 'conflicts']
+                missing_fields = [field for field in required_fields if field not in item]
+                if missing_fields:
+                    raise ValueError(f"章节 {item.get('chapter_number', '未知')} 缺少必需字段: {', '.join(missing_fields)}")
+                
+                # 验证字段类型
+                if not isinstance(item['chapter_number'], int):
+                    raise ValueError(f"章节号必须是整数: {item['chapter_number']}")
+                if not isinstance(item['title'], str):
+                    raise ValueError(f"标题必须是字符串: {item['title']}")
+                if not isinstance(item['key_points'], list) or not all(isinstance(x, str) for x in item['key_points']):
+                    raise ValueError(f"key_points 必须是字符串列表: {item['key_points']}")
+                if not isinstance(item['characters'], list) or not all(isinstance(x, str) for x in item['characters']):
+                    raise ValueError(f"characters 必须是字符串列表: {item['characters']}")
+                if not isinstance(item['settings'], list) or not all(isinstance(x, str) for x in item['settings']):
+                    raise ValueError(f"settings 必须是字符串列表: {item['settings']}")
+                if not isinstance(item['conflicts'], list) or not all(isinstance(x, str) for x in item['conflicts']):
+                    raise ValueError(f"conflicts 必须是字符串列表: {item['conflicts']}")
+                
+                # 验证列表长度要求
+                if len(item['key_points']) < 3:
+                    raise ValueError(f"章节 {item['chapter_number']} 的 key_points 至少需要3个元素")
+                if len(item['characters']) < 2:
+                    raise ValueError(f"章节 {item['chapter_number']} 的 characters 至少需要2个元素")
+                if len(item['settings']) < 1:
+                    raise ValueError(f"章节 {item['chapter_number']} 的 settings 至少需要1个元素")
+                if len(item['conflicts']) < 1:
+                    raise ValueError(f"章节 {item['chapter_number']} 的 conflicts 至少需要1个元素")
+                
+                outline = ChapterOutline(
+                    chapter_number=item['chapter_number'],
+                    title=item['title'],
+                    key_points=item['key_points'],
+                    characters=item['characters'],
+                    settings=item['settings'],
+                    conflicts=item['conflicts']
+                )
+                outlines.append(outline)
+            
+            # 验证章节号的连续性
+            chapter_numbers = [o.chapter_number for o in outlines]
+            expected_numbers = list(range(min(chapter_numbers), max(chapter_numbers) + 1))
+            if chapter_numbers != expected_numbers:
+                raise ValueError(f"章节号不连续。期望: {expected_numbers}，实际: {chapter_numbers}")
+            
+            return outlines
         except json.JSONDecodeError as e:
-            logging.error(f"解析大纲失败: {str(e)}")
-            # 返回空列表，避免覆盖原有内容
-            return []
+            logging.error(f"JSON解析错误: {str(e)}")
+            logging.error(f"原始文本: {outline_text}")
+            raise ValueError(f"无法解析大纲JSON: {str(e)}")
         except Exception as e:
-            logging.error(f"解析大纲时发生未知错误: {str(e)}")
-            return []
-
-        return outlines
+            logging.error(f"解析大纲时出错: {str(e)}")
+            logging.error(f"原始文本: {outline_text}")
+            raise
 
     def _save_outline(self):
         """保存大纲到文件"""
