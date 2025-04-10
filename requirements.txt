@@ -17,4 +17,5 @@ autogen>=0.2.0
 markdown>=3.4.0
 faiss-cpu>=1.7.4
 jieba>=0.42.1
-tenacity>=8.2.0 
+tenacity>=8.2.0
+opencc 

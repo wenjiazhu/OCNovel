@@ -32,7 +32,7 @@ def get_outline_prompt(
     extra_prompt: Optional[str] = None
 ) -> str:
     """生成用于创建小说大纲的提示词。"""
-    extra_requirements = f"\n[额外要求]\n{extra_prompt}\n" if extra_prompt else ""
+    extra_requirements = f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}{chr(10)}" if extra_prompt else ""
 
     # 获取额外指导内容
     extra_guidance = config.novel_config.get("extra_guidance", {})
@@ -63,7 +63,7 @@ def get_outline_prompt(
 结尾处理：{chapter_structure.get('ending', '')}
 
 [剧情修正要求]
-{chr(10).join([f"【{correction['title']}】\n{correction['description']}" for correction in plot_corrections.values()])}
+{chr(10).join([f"【{correction['title']}】{chr(10)}{correction['description']}" for correction in plot_corrections.values()])}
 """
 
     # 从知识库中获取参考文件内容
@@ -78,13 +78,13 @@ def get_outline_prompt(
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                reference_content += f"\n[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...\n"
+                reference_content += f"{chr(10)}[参考文件: {os.path.basename(file_path)}]{chr(10)}{content[:1000]}...{chr(10)}"
         except UnicodeDecodeError:
             # 尝试其他编码
             try:
                 with open(file_path, 'r', encoding='gbk') as f:
                     content = f.read()
-                    reference_content += f"\n[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...\n"
+                    reference_content += f"{chr(10)}[参考文件: {os.path.basename(file_path)}]{chr(10)}{content[:1000]}...{chr(10)}"
             except Exception as e:
                 logging.warning(f"读取参考文件 {file_path} 时出错（尝试GBK编码后）: {str(e)}")
         except Exception as e:
@@ -92,7 +92,7 @@ def get_outline_prompt(
 
     # 如果参考内容为空，添加提示
     if not reference_content:
-        reference_content = "\n[知识库参考内容]\n暂无参考内容，将仅基于设定生成大纲。\n"
+        reference_content = f"{chr(10)}[知识库参考内容]{chr(10)}暂无参考内容，将仅基于设定生成大纲。{chr(10)}"
 
     prompt = f"""{existing_context}
 
@@ -197,7 +197,7 @@ def get_chapter_prompt(
     
     # 处理关键情节点 - 改为分行展示以增强可读性和重要性
     key_points_list = outline.get('key_points', [])
-    key_points_display = '\n'.join([f"- {point}" for point in key_points_list])
+    key_points_display = chr(10).join([f"- {point}" for point in key_points_list])
     
     # 其他信息
     characters = ', '.join(outline.get('characters', []))
@@ -294,7 +294,6 @@ def get_chapter_prompt(
 步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
 简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
 
-
 [格式要求]
 1.仅返回章节正文文本；
 2.不使用分章节小标题；
@@ -348,11 +347,11 @@ def get_chapter_prompt(
 
     # 添加额外要求
     if extra_prompt:
-        base_prompt += f"\n\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
     # 添加上下文信息
     if context_info:
-        base_prompt += f"\n\n[上下文信息]\n{context_info}"
+        base_prompt += f"{chr(10)}{chr(10)}[上下文信息]{chr(10)}{context_info}"
 
     # 添加连贯性要求
     base_prompt += f"""
@@ -512,7 +511,6 @@ def get_character_import_prompt(content: str) -> str:
 <<要求>>
 仅返回编写好的角色状态文本，不要解释任何内容。
 
-
 请严格按上述规则和格式分析以下内容：
 <<待分析小说文本开始>>
 {content}
@@ -612,7 +610,7 @@ def get_recent_chapters_summary_prompt(
 ├── 认知颠覆：{next_chapter_plot_twist_level}
 └── 本章简述：{next_chapter_summary}
 
-**上下文分析阶段**：
+[上下文分析阶段]：
 1. 回顾前三章核心内容：
    - 第一章核心要素：[章节标题]→[核心冲突/理论]→[关键人物/概念]
    - 第二章发展路径：[已建立的人物关系]→[技术/情节进展]→[遗留伏笔]
@@ -621,7 +619,7 @@ def get_recent_chapters_summary_prompt(
    - 必继承要素：列出前3章中必须延续的3个核心设定
    - 可调整要素：识别2个允许适度变化的辅助设定
 
-**当前章节摘要生成规则**：
+[当前章节摘要生成规则]：
 1. 内容架构：
    - 继承权重：70%内容需与前3章形成逻辑递进
    - 创新空间：30%内容可引入新要素，但需标注创新类型（如：技术突破/人物黑化）
@@ -792,7 +790,6 @@ def get_knowledge_search_prompt(
     
 生成规则：
     
-    
 1.关键词组合逻辑：
 -类型1：[实体]+[属性]（如"量子计算机 故障日志"）
 -类型2：[事件]+[后果]（如"实验室爆炸 辐射泄漏"）
@@ -831,7 +828,6 @@ def get_knowledge_filter_prompt(
 {json.dumps(chapter_info, ensure_ascii=False, indent=2)}
     
 过滤流程：
-    
     
 冲突检测：
     
@@ -992,31 +988,31 @@ def get_character_dynamics_prompt(
 
 请为每个角色设计以下要素：
 
-1. 【基础特征】
+1. [基础特征]
    ├──外在特征：性别、年龄、外貌、气质等
    ├──身份背景：出身、职业、地位等
    ├──特殊标识：独特能力、标志性物品等
    └──隐藏特质：暗藏的秘密或潜在弱点
 
-2. 【核心驱动力三角】
+2. [核心驱动力三角]
    ├──表层追求：物质层面的具体目标
    ├──深层渴望：情感层面的内在需求
    └──灵魂诉求：哲学层面的终极追寻
 
-3. 【成长弧线】
+3. [成长弧线]
    ├──初始状态：性格特征与行为模式
    ├──触发事件：改变的关键转折点
    ├──认知失调：内外冲突与价值观碰撞
    ├──蜕变过程：性格与行为的渐变轨迹
    └──最终状态：成长后的新平衡
 
-4. 【关系网络】
+4. [关系网络]
    ├──核心关系：与主角的直接联系
    ├──对立点：价值观或利益冲突
    ├──合作面：共同目标或互补性
    └──隐藏关联：潜在的背叛或反转可能
 
-5. 【互动潜力】
+5. [互动潜力]
    ├──与主角：对主角成长的影响
    ├──与配角：次要情节线的发展
    ├──与世界：对整体剧情的推动
@@ -1072,4 +1068,247 @@ def get_character_dynamics_prompt(
 
 仅返回角色设定文本，不要添加任何解释或说明。"""
 
-    return prompt 
+    return prompt
+
+def get_character_prompt(novel_config: Dict, character_name: str = "", reference_content: str = "") -> str:
+    """生成用于创建角色设定的提示词。
+    
+    Args:
+        novel_config: 小说配置信息
+        character_name: 角色名称
+        reference_content: 参考内容
+        
+    Returns:
+        str: 生成的提示词
+    """
+    # 获取基本设定
+    basic_settings = novel_config.get("basic_settings", {})
+    title = basic_settings.get("title", "")
+    genre = basic_settings.get("genre", "")
+    theme = basic_settings.get("theme", "")
+    
+    # 获取世界观设定
+    world_building = novel_config.get("world_building", {})
+    background = world_building.get("background", "")
+    rules = world_building.get("rules", "")
+    culture = world_building.get("culture", "")
+    
+    # 构建提示词
+    prompt = f"""请基于以下信息创建一个详细的角色设定：
+
+[基本信息]
+小说标题：{title}
+小说类型：{genre}
+小说主题：{theme}
+角色名称：{character_name}
+
+[世界观设定]
+背景：{background}
+规则：{rules}
+文化：{culture}
+
+[参考内容]
+{reference_content}
+
+[角色设定要求]
+1. 基础属性
+   ├──姓名由来
+   ├──年龄性别
+   ├──外貌特征
+   └──性格特点
+
+2. 背景设定
+   ├──家庭背景
+   ├──成长经历
+   ├──重要事件
+   └──人际关系
+
+3. 能力特点
+   ├──专业技能
+   ├──特殊能力
+   ├──兴趣爱好
+   └──行为习惯
+
+4. 故事定位
+   ├──角色身份
+   ├──剧情作用
+   ├──成长轨迹
+   └──情感线索
+
+请按照以下格式输出角色设定：
+[角色简介]
+简要概述角色的核心特点和在故事中的定位。
+
+[详细设定]
+基础属性：...
+背景设定：...
+能力特点：...
+故事定位：...
+
+直接返回创作的角色设定内容，不要添加任何解释或说明。"""
+
+    return prompt
+
+def get_style_check_prompt(
+    chapter_content: str,
+    novel_config: Dict
+) -> str:
+    """生成用于检查章节写作风格的提示词"""
+    writing_guide = novel_config.get("writing_guide", {})
+    style_guide = writing_guide.get("style_guide", {})
+    
+    # 获取风格指南
+    tone = style_guide.get("tone", "")
+    pov = style_guide.get("pov", "")
+    narrative_style = style_guide.get("narrative_style", "")
+    language_style = style_guide.get("language_style", "")
+    
+    return f"""请检查以下章节内容的写作风格：
+
+[风格指南]
+语气基调：{tone}
+叙述视角：{pov}
+叙事风格：{narrative_style}
+语言风格：{language_style}
+
+[章节内容]
+{chapter_content}
+
+===== 风格检查维度 =====
+
+1. 语气一致性
+   - 是否保持指定的语气基调
+   - 情感表达是否恰当
+   - 是否存在语气突兀转变
+
+2. 视角把控
+   - 是否严格遵守视角限制
+   - 视角切换是否自然
+   - 是否出现视角混乱
+
+3. 叙事手法
+   - 是否符合指定的叙事风格
+   - 叙事节奏是否合适
+   - 场景描写是否生动
+
+4. 语言特色
+   - 是否符合指定的语言风格
+   - 用词是否准确规范
+   - 句式是否多样流畅
+
+5. 细节处理
+   - 环境描写是否细致
+   - 人物刻画是否生动
+   - 情节铺陈是否到位
+
+===== 输出格式 =====
+[总体评分]: <0-100分>
+
+[语气一致性评分]: <0-20分>
+[语气分析]:
+<分析内容>
+
+[视角把控评分]: <0-20分>
+[视角分析]:
+<分析内容>
+
+[叙事手法评分]: <0-20分>
+[叙事分析]:
+<分析内容>
+
+[语言特色评分]: <0-20分>
+[语言分析]:
+<分析内容>
+
+[细节处理评分]: <0-20分>
+[细节分析]:
+<分析内容>
+
+[风格问题列表]:
+1. <问题描述>
+2. <问题描述>
+...
+
+[修改建议]:
+<针对每个风格问题的具体修改建议>
+
+[修改必要性]: <"需要修改"或"无需修改">
+"""
+
+def get_emotion_check_prompt(
+    chapter_content: str,
+    chapter_outline: Dict
+) -> str:
+    """生成用于检查章节情感表达的提示词"""
+    return f"""请检查以下章节内容的情感表达：
+
+[章节大纲]
+章节号：{chapter_outline.get('chapter_number', '未知')}
+标题：{chapter_outline.get('title', '未知')}
+情感基调：{chapter_outline.get('emotion', '未知')}
+关键剧情点：{', '.join(chapter_outline.get('key_points', []))}
+涉及角色：{', '.join(chapter_outline.get('characters', []))}
+
+[章节内容]
+{chapter_content}
+
+===== 情感检查维度 =====
+
+1. 情感基调
+   - 是否符合章节预设基调
+   - 情感变化是否自然
+   - 是否有突兀的情绪波动
+
+2. 人物情感
+   - 情感表达是否符合人物性格
+   - 情感反应是否合理
+   - 内心活动描写是否到位
+
+3. 情感互动
+   - 人物间情感交流是否自然
+   - 情感冲突是否鲜明
+   - 群体情绪是否传染
+
+4. 场景情感
+   - 环境氛围营造是否到位
+   - 场景与情感是否呼应
+   - 是否有画面感
+
+5. 读者共鸣
+   - 是否容易引起情感共鸣
+   - 是否有感情真实性
+   - 是否有情感升华
+
+===== 输出格式 =====
+[总体评分]: <0-100分>
+
+[情感基调评分]: <0-20分>
+[基调分析]:
+<分析内容>
+
+[人物情感评分]: <0-20分>
+[人物情感分析]:
+<分析内容>
+
+[情感互动评分]: <0-20分>
+[互动分析]:
+<分析内容>
+
+[场景情感评分]: <0-20分>
+[场景分析]:
+<分析内容>
+
+[读者共鸣评分]: <0-20分>
+[共鸣分析]:
+<分析内容>
+
+[情感问题列表]:
+1. <问题描述>
+2. <问题描述>
+...
+
+[修改建议]:
+<针对每个情感问题的具体修改建议>
+
+[修改必要性]: <"需要修改"或"无需修改">
+""" 

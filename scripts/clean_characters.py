@@ -214,5 +214,5 @@ def main():
     save_characters(cleaned_characters, output_file)
     print(f'已完成角色库清理，结果保存至：{output_file}')
 
-if __name__ == '__main__':
-    main()
+# if __name__ == '__main__':
+#     main()

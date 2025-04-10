@@ -351,6 +351,8 @@ class NovelGenerator:
             json.dump(characters_data, f, ensure_ascii=False, indent=2)
         logging.info("角色库保存完成") # 添加日志：角色库保存完成 
         
+        # 注释掉自动运行清理脚本的部分
+        """
         # 运行清理脚本
         try:
             import subprocess
@@ -375,6 +377,7 @@ class NovelGenerator:
                 logging.info("已更新原始角色库文件")
         except Exception as e:
             logging.error(f"运行角色库清理脚本时出错: {str(e)}")
+        """
 
     def _create_basic_character(self, name: str) -> Character:
         """创建基本角色信息"""
@@ -1455,9 +1458,9 @@ class NovelGenerator:
             chapter_numbers = [chapter["chapter_number"] for chapter in outline_data]
             expected_numbers = list(range(min(chapter_numbers), max(chapter_numbers) + 1))
             if chapter_numbers != expected_numbers:
-                logging.warning(f"章节号不连续。期�? {expected_numbers}，实�? {chapter_numbers}")
+                logging.warning(f"章节号不连续。期望 {expected_numbers}，实际 {chapter_numbers}")
             
-            # 先写入临时文�?
+            # 先写入临时文件
             temp_file = outline_file + ".tmp"
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(outline_data, f, ensure_ascii=False, indent=2)
@@ -1489,7 +1492,7 @@ class NovelGenerator:
             
         except json.JSONEncodeError as je:
             logging.error(f"JSON编码错误: {str(je)}")
-            logging.error("尝试保存的大纲数�?")
+            logging.error("尝试保存的大纲数量")
             for i, outline in enumerate(self.chapter_outlines):
                 logging.error(f"Chapter {i+1}: {vars(outline)}")
             raise
@@ -1498,7 +1501,7 @@ class NovelGenerator:
             logging.error(f"文件路径: {outline_file}")
             raise
         except Exception as e:
-            logging.error(f"保存大纲时发生未预期的错�? {str(e)}")
+            logging.error(f"保存大纲时发生未预期的错误 {str(e)}")
             logging.error(f"大纲数据示例（前3章）: {self.chapter_outlines[:3]}")
             raise
 

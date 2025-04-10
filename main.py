@@ -164,7 +164,7 @@ def main():
             
             # 生成新的大纲
             logging.info("正在生成小说大纲...")
-            generator.generate_outline(
+            generator.generate_outline_chapters(
                 config.novel_config["type"],
                 config.novel_config["theme"],
                 config.novel_config["style"]
@@ -184,7 +184,7 @@ def main():
                 generator.save_novel_architecture(characters_data)
                 logging.info("小说架构信息已保存")
                 
-                generator.generate_outline(
+                generator.generate_outline_chapters(
                     config.novel_config["type"],
                     config.novel_config["theme"],
                     config.novel_config["style"]
@@ -200,12 +200,12 @@ def main():
                     
                     if current_chapters < target_chapters:
                         logging.info(f"大纲未完成（当前 {current_chapters}/{target_chapters} 章），继续生成剩余章节...")
-                        generator.generate_outline(
+                        generator.generate_outline_chapters(
                             config.novel_config["type"],
                             config.novel_config["theme"],
                             config.novel_config["style"],
-                            current_start_chapter_num=current_chapters + 1,
-                            current_batch_size=target_chapters - current_chapters
+                            mode='replace',
+                            replace_range=(current_chapters + 1, target_chapters)
                         )
                         logging.info("剩余大纲生成完成")
         
