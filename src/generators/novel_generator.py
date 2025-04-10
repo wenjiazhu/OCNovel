@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import logging
@@ -13,10 +14,13 @@ from .validators import LogicValidator, DuplicateValidator
 from ..models import ContentModel, OutlineModel, EmbeddingModel
 from ..knowledge_base.knowledge_base import KnowledgeBase
 from ..config.config import Config
-import time # 需要 import time
-import asyncio # 需要导入 asyncio 来处理可能的 TimeoutError
+import time # 需要import time
+# import asyncio # 需要导入 asyncio 来处理可能的 TimeoutError
 import string # 导入 string 模块用于字符串处理
 from opencc import OpenCC
+
+# 配置日志记录器
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ChapterOutline:
@@ -29,6 +33,12 @@ class ChapterOutline:
     conflicts: List[str]
 
 @dataclass
+class NovelOutline:
+    """小说大纲数据结构"""
+    title: str
+    chapters: List[ChapterOutline]
+
+@dataclass
 class Character:
     """角色数据结构"""
     name: str
@@ -39,24 +49,27 @@ class Character:
     development_stage: str  # 当前发展阶段
     alignment: str = "中立"  # 阵营：正派、反派、中立等，默认为中立
     realm: str = "凡人"      # 境界，例如：凡人、炼气、筑基、金丹等，默认为凡人
-    level: int = 1          # 等级，默认为1级
+    level: int = 1          # 等级，默认为1
     cultivation_method: str = "无" # 功法，默认为无
-    magic_treasure: List[str] = dataclasses.field(default_factory=list) # 法宝列表，默认为空列表
+    magic_treasure: List[str] = dataclasses.field(default_factory=list) # 法宝列表，默认为空列
     temperament: str = "平和"    # 性情，默认为平和
-    ability: List[str] = dataclasses.field(default_factory=list)      # 能力列表，默认为空列表
+    ability: List[str] = dataclasses.field(default_factory=list)      # 能力列表，默认为空列
     stamina: int = 100        # 体力值，默认为100
     sect: str = "无门无派"      # 门派，默认为无门无派
     position: str = "普通弟子"    # 职务，默认为普通弟子
     emotions_history: List[str] = dataclasses.field(default_factory=list)  # 情绪历史记录
     states_history: List[str] = dataclasses.field(default_factory=list)    # 状态历史记录
     descriptions_history: List[str] = dataclasses.field(default_factory=list)  # 描述历史记录
-    
 class NovelGenerator:
     def __init__(self, config, outline_model, content_model, knowledge_base):
         self.config = config
         self.outline_model = outline_model
         self.content_model = content_model
         self.knowledge_base = knowledge_base
+        
+        # 验证模型配置
+        if not self._validate_model_config():
+            raise ValueError("模型配置验证失败")
         
         # 初始化一致性检查器
         self.consistency_checker = ConsistencyChecker(self.content_model, config.output_config["output_dir"])
@@ -76,14 +89,14 @@ class NovelGenerator:
         # 1. 初始化默认值
         self.characters = {} 
         self.chapter_outlines = []
-        self.current_chapter = 0 # 默认从 0 开始
+        self.current_chapter = 0 # 默认为0 开始
         logging.debug("Initialized defaults before loading.")
 
         # 2. 加载大纲 (如果存在)
         self._load_outline_file()
         logging.info(f"Loaded {len(self.chapter_outlines)} outlines initially.")
 
-        # 3. 加载角色库 (如果存在)
+        # 3. 加载角色库(如果存在)
         loaded_chars = self._load_characters() 
         if isinstance(loaded_chars, dict):
              self.characters = loaded_chars
@@ -114,18 +127,18 @@ class NovelGenerator:
         try:
             # 使用 FileHandler 并指定 UTF-8 编码
             handler = logging.FileHandler(log_file, encoding='utf-8')
-            print("FileHandler 创建成功。") # 确认 FileHandler 创建
+            print("FileHandler 创建成功") # 确认 FileHandler 创建
 
             handler.setLevel(logging.INFO) # 设置 handler 的日志级别
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
 
             logger = logging.getLogger() # 获取 root logger
-            logger.addHandler(handler) # 将 handler 添加到 root logger
+            logger.addHandler(handler) # 添加 handler 到 root logger
             logger.setLevel(logging.INFO) # 设置 root logger 的日志级别
 
-            print("日志 Handler 添加到 Logger。") # 确认 Handler 添加成功
-            logging.info("日志系统初始化完成。") # 添加一条日志，确认日志系统工作
+            print("日志 Handler 添加到 Logger") # 确认 Handler 添加成功
+            logging.info("日志系统初始化完成") # 添加一条日志，确认日志系统工作
 
         except Exception as e:
             print(f"日志系统初始化失败: {e}") # 捕获并打印初始化异常
@@ -168,7 +181,7 @@ class NovelGenerator:
             # 查找已生成的章节文件
             chapter_files = []
             for filename in os.listdir(self.output_dir):
-                if filename.startswith("第") and filename.endswith(".txt"):
+                if filename.startswith("已生成") and filename.endswith(".txt"):
                     chapter_files.append(os.path.join(self.output_dir, filename))
             
             chapter_files.sort()  # 按文件名排序
@@ -190,7 +203,6 @@ class NovelGenerator:
                         logging.info(f"已读取章节文件: {chapter_file}")
                 except Exception as e:
                     logging.error(f"读取章节文件 {chapter_file} 时出错: {str(e)}")
-            
             if not combined_content:
                 logging.warning("未能读取任何章节内容，无法提取角色信息")
                 return
@@ -203,10 +215,8 @@ class NovelGenerator:
                  self._parse_character_update(characters_info, self.current_chapter)
                  self._save_characters()
                  logging.info(f"从已生成章节成功提取了 {len(self.characters)} 个角色信息")
-            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
-                 logging.error(f"从已生成章节提取角色信息时请求超时: {str(e)}")
             except Exception as e:
-                 logging.error(f"解析或保存提取的角色信息时出错: {str(e)}")
+                 logging.error(f"从已生成章节提取角色信息时出错: {str(e)}")
 
         except Exception as e:
             logging.error(f"从已生成章节提取角色信息时发生错误: {str(e)}", exc_info=True)
@@ -228,7 +238,7 @@ class NovelGenerator:
                     "relationships": char.relationships,
                     "development_stage": char.development_stage
                 }
-                # 使用 (self.characters or {}) 确保即使 self.characters 是 None 也不会出错
+                # 使用 (self.characters or {}) 确保即使 self.characters 为None 也不会出错
                 for name, char in (self.characters or {}).items()
             }
         }
@@ -253,7 +263,7 @@ class NovelGenerator:
             json.dump(outline_data, f, ensure_ascii=False, indent=2)
     
     def _load_characters(self):
-        """加载角色库, 返回字典或 None"""
+        """加载角色库 返回字典或None"""
         logging.info("开始加载角色库...")
         characters_dict = {}
         if os.path.exists(self.characters_file):
@@ -262,10 +272,10 @@ class NovelGenerator:
                     characters_data = json.load(f)
                     # 检查加载的数据是否为字典
                     if not isinstance(characters_data, dict):
-                        logging.error(f"角色库文件 {self.characters_file} 包含无效数据 (不是字典): {type(characters_data)}")
+                        logging.error(f"角色库文件{self.characters_file} 包含无效数据 (不是字典): {type(characters_data)}")
                         return None # 返回 None 表示加载失败
 
-                    logging.info(f"从文件中加载到角色数据 (前 500 字符): {str(characters_data)[:500]}") # 记录加载内容（部分）
+                    logging.info(f"从文件中加载到角色数量(前500 字符): {str(characters_data)[:500]}") # 记录加载内容（部分）
                     
                     # 尝试构建 Character 对象
                     temp_chars = {}
@@ -277,9 +287,9 @@ class NovelGenerator:
                             if not hasattr(char, 'position'): char.position = "普通弟子"
                             temp_chars[name] = char
                         except TypeError as te:
-                            logging.warning(f"创建角色 '{name}' 时数据字段不匹配或缺失: {te}. Data: {data}")
+                            logging.warning(f"创建角色 '{name}' 时数据字段不匹配或缺失 {te}. Data: {data}")
                         except Exception as char_e:
-                            logging.error(f"创建角色 '{name}' 时发生未知错误: {char_e}. Data: {data}")
+                            logging.error(f"创建角色 '{name}' 时发生未知错误 {char_e}. Data: {data}")
                     
                     characters_dict = temp_chars # 赋值给局部变量
                     
@@ -289,10 +299,10 @@ class NovelGenerator:
                     characters_dict = self.characters
 
             except json.JSONDecodeError as e:
-                logging.error(f"加载角色库文件 {self.characters_file} 时 JSON 解析失败: {e}")
+                logging.error(f"加载角色库文件{self.characters_file} 从JSON 解析失败: {e}")
                 return None # 返回 None 表示加载失败
             except Exception as e:
-                logging.error(f"加载角色库文件 {self.characters_file} 时发生未知错误: {e}", exc_info=True)
+                logging.error(f"加载角色库文件{self.characters_file} 时发生未知错误 {e}", exc_info=True)
                 return None # 返回 None 表示加载失败
         else:
             # 初始化一些基础角色
@@ -301,19 +311,19 @@ class NovelGenerator:
                     name="陆沉",
                     role="主角",
                     personality={"坚韧": 0.8, "机智": 0.7},
-                    goals=["对抗伪天庭", "收集道纹"],
+                    goals=["对抗伪天尊", "收集道纹"],
                     relationships={"机械天尊": "盟友"},
                     development_stage="成长初期"
                 )
             }
-            logging.info("角色库文件不存在，已初始化基础角色。")
+            logging.info("角色库文件不存在，已初始化基础角色")
         return characters_dict
 
     def _save_characters(self):
         """保存角色库"""
         logging.info("开始保存角色库...") # 添加日志：开始保存角色库
-        logging.info(f"当前角色库数据: {self.characters}") # 添加日志：打印当前角色库数据
-        print(f"正在保存角色库到文件: {self.characters_file}") # 打印文件路径，**新增日志**
+        logging.info(f"当前角色库数量 {self.characters}") # 添加日志：打印当前角色库数据
+        print(f"正在保存角色库到文件: {self.characters_file}") # 打印文件路径**新增日志**
         characters_data = {
             name: {
                 "name": char.name,
@@ -333,22 +343,22 @@ class NovelGenerator:
                 "sect": char.sect,
                 "position": char.position
             }
-            # 使用 (self.characters or {}) 确保即使 self.characters 是 None 也不会出错
+            # 使用 (self.characters or {}) 确保即使 self.characters 为None 也不会出错
             for name, char in (self.characters or {}).items()
         }
         logging.debug(f"即将保存的角色库 JSON 数据: {characters_data}") # 打印 JSON 数据 **新增日志**
         with open(self.characters_file, 'w', encoding='utf-8') as f:
             json.dump(characters_data, f, ensure_ascii=False, indent=2)
-        logging.info("角色库保存完成。") # 添加日志：角色库保存完成 
+        logging.info("角色库保存完成") # 添加日志：角色库保存完成 
         
         # 运行清理脚本
         try:
             import subprocess
             logging.info("开始运行角色库清理脚本...")
             subprocess.run(['python', 'scripts/clean_characters.py'], check=True)
-            logging.info("角色库清理脚本运行完成。")
+            logging.info("角色库清理脚本运行完成")
             
-            # 重新加载清理后的角色库
+            # 重新加载清理后的角色
             cleaned_file = os.path.join(self.output_dir, "characters_cleaned.json")
             if os.path.exists(cleaned_file):
                 with open(cleaned_file, 'r', encoding='utf-8') as f:
@@ -357,12 +367,12 @@ class NovelGenerator:
                         name: Character(**data)
                         for name, data in cleaned_data.items()
                     }
-                logging.info("已加载清理后的角色库。")
+                logging.info("已加载清理后的角色库")
                 
                 # 将清理后的文件复制回原始文件
                 import shutil
                 shutil.copy2(cleaned_file, self.characters_file)
-                logging.info("已更新原始角色库文件。")
+                logging.info("已更新原始角色库文件")
         except Exception as e:
             logging.error(f"运行角色库清理脚本时出错: {str(e)}")
 
@@ -397,13 +407,12 @@ class NovelGenerator:
         # 预处理：移除可能导致解析错误的内容
         lines = update_text.split('\n')
         valid_lines = []
-        
         # 需要过滤的关键词
         filter_keywords = [
             "分析", "总结", "说明", "介绍", "描述", "特征", "属性",
             "物品", "能力", "状态", "关系", "事件", "技能", "装备",
             "道具", "功法", "法宝", "境界", "实力", "修为", "天赋",
-            "├", "│", "└", "─", "主要角色", "次要角色", "配角"
+            "？", "？", "？", "─", "主要角色", "次要角色", "配角"
         ]
         
         for line in lines:
@@ -414,48 +423,48 @@ class NovelGenerator:
             # 跳过包含过滤关键词的行
             if any(keyword in line for keyword in filter_keywords):
                 continue
-                
             # 跳过以特殊字符开头的行
-            if line.strip().startswith(('##', '**', '第', '[', '├', '│', '└', '─')):
+            if line.strip().startswith(('##', '**', '？', '[', '？', '？', '？', '─')):
                 continue
-                
             valid_lines.append(line)
-        
         # 使用处理后的文本进行解析
         cleaned_text = '\n'.join(valid_lines)
         
         try:
             # 定义不同的括号对
             brackets = [
-                ('【', '】'),
+                ('？', '？'),
                 ('[', ']'),
                 ('"', '"'),
-                (''', '''),
+                ("'", "'"),
+                ('？', '？'),
                 ('「', '」'),
                 ('『', '』'),
-                ('（', '）'),
                 ('(', ')')
             ]
             
             # 从文本中提取可能的角色名
-            for left, right in brackets:
-                pattern = f'{left}([^{right}]+){right}'
-                try:
-                    matches = re.finditer(pattern, cleaned_text)
-                    for match in matches:
-                        name = match.group(1).strip()
-                        if name and self._is_valid_character_name(name):
-                            # 转换为简体
-                            simplified_name = t2s.convert(name)
-                            # 使用简体名称作为键
-                            if simplified_name not in self.characters:
-                                self.characters[simplified_name] = self._create_basic_character(simplified_name)
-                                logging.info(f"添加新角色: {simplified_name}")
-                except re.error:
-                    continue
-                    
+            try:
+                for left, right in brackets:
+                    pattern = f'{left}([^{right}]+){right}'
+                    try:
+                        matches = re.finditer(pattern, cleaned_text)
+                        for match in matches:
+                            name = match.group(1).strip()
+                            if name and self._is_valid_character_name(name):
+                                # 转换为简体
+                                simplified_name = t2s.convert(name)
+                                # 使用简体名称作为键
+                                if simplified_name not in self.characters:
+                                    self.characters[simplified_name] = self._create_basic_character(simplified_name)
+                                    logging.info(f"添加新角色: {simplified_name}")
+                    except Exception as e:
+                        logging.error(f"正则表达式匹配时出错: {e}")
+            except Exception as e:
+                logging.error(f"处理括号对时出错: {e}")
+                
             # 显式检查常见角色名 - 针对当前小说内容
-            common_characters = ["王大锤", "丹辰子", "钱小小", "拾荒道人"]
+            common_characters = ["陆沉"]
             for name in common_characters:
                 # 检查这些角色名是否出现在文本中
                 if name in cleaned_text:
@@ -465,9 +474,9 @@ class NovelGenerator:
                         logging.info(f"显式添加常见角色: {name}")
                         
             # 直接在文本中搜索可能的角色名（根据语境）
-            # 查找"XX说道"、"XX道"等模式来识别角色
+            # 查找"XX说道"、XX等模式来识别角色
             patterns = [
-                r'([^，。？！；、\s]{2,4})(?:说道|道|喊道|叫道|回答道|问道|怒道|笑道|低声道)',
+                r'([^，。？！；、\s]{2,4})(?:说道|道|喊道|叫道|回答道|问道|怒道|笑道|低声道',
                 r'([^，。？！；、\s]{2,4})(?:的声音)'
             ]
             
@@ -486,13 +495,13 @@ class NovelGenerator:
         self._save_characters()
 
     def _is_valid_character_name(self, name: str) -> bool:
-        """检查是否为有效的角色名称"""
+        """检查是否为有效的角色名"""
         # 常见角色名直接通过验证
         common_characters = ["陆沉"]
         if name in common_characters:
             return True
             
-        # 如果名称过长，可能是描述性文本
+        # 如果名称过长，可能是描述性文字
         if len(name) > 12:
             return False
             
@@ -502,14 +511,14 @@ class NovelGenerator:
             "道具", "功法", "法宝", "境界", "实力", "修为", "天赋",
             "资质", "性格", "性情", "特点", "背景", "经历", "职业",
             "职责", "身份", "地位", "关系网", "势力", "组织", "门派",
-            "宗门", "家族", "├", "│", "└", "─", "装备", "状态"
+            "宗门", "家族", "？", "？", "？", "─", "装备", "状态"
         ]
         
         if any(keyword in name for keyword in invalid_keywords):
             return False
             
         # 如果包含标点符号或特殊字符，可能不是名称
-        if any(char in name for char in "，。！？；：""''【】《》（）()[]{}├│└─"):
+        if any(char in name for char in "，。！？；？''【】《》（）[]{}├│└─"):
             return False
             
         # 如果不包含中文字符，可能不是角色名
@@ -546,7 +555,7 @@ class NovelGenerator:
                     continue
                 
                 # 跳过格式符号行
-                if any(symbol in line for symbol in ["├──", "│", "└──"]):
+                if any(symbol in line for symbol in ["├──", "？└──"]):
                     in_format_block = True
                     continue
                     
@@ -554,7 +563,7 @@ class NovelGenerator:
                 if (':' in line or '：' in line) and not in_format_block:
                     char_part = line.split(':')[0].strip() if ':' in line else line.split('：')[0].strip()
                     # 清理可能的格式符号
-                    char_name = char_part.replace('├──', '').replace('│  ├──', '').replace('│  └──', '').replace('└──', '').strip()
+                    char_name = char_part.replace('├──', '').replace('？ ├──', '').replace('？ └──', '').replace('└──', '').strip()
                     
                     # 转换为简体
                     char_name = t2s.convert(char_name)
@@ -563,14 +572,14 @@ class NovelGenerator:
                     protected_characters = ["陆沉"]
                     if char_name in protected_characters:
                         current_character = char_name
-                        logging.info(f"开始更新角色信息: {char_name}")
+                        logging.info(f"开始更新角色信息 {char_name}")
                         in_format_block = False
                         continue
                     
                     # 检查是否在角色库中
                     if char_name in self.characters:
                         current_character = char_name
-                        logging.info(f"开始更新角色信息: {char_name}")
+                        logging.info(f"开始更新角色信息 {char_name}")
                         in_format_block = False
                     else:
                         # 检查是否是当前章节中的角色
@@ -582,35 +591,35 @@ class NovelGenerator:
                             in_format_block = False
                         else:
                             current_character = None
-                            logging.warning(f"未找到角色: {char_name}，跳过相关更新")
+                            logging.warning(f"未找到角色 {char_name}，跳过相关更新")
                     continue
                 
                 # 如果有当前角色且该行包含更新信息
-                if current_character and (':' in line or '：' in line) and not line.startswith(('├', '│', '└')):
+                if current_character and (':' in line or '：' in line) and not line.startswith(('？', '？', '？')):
                     key = line.split(':')[0].strip() if ':' in line else line.split('：')[0].strip()
                     value = line.split(':')[1].strip() if ':' in line else line.split('：')[1].strip()
                     
                     # 清理可能的格式符号
-                    key = key.replace('├──', '').replace('│  ├──', '').replace('│  └──', '').replace('└──', '').strip()
+                    key = key.replace('├──', '').replace('？ ├──', '').replace('？ └──', '').replace('└──', '').strip()
                     
                     # 跳过无效的键
-                    if key in ["├──", "│", "└──", "物品", "能力", "状态", "主要角色间关系网", "触发或加深的事件"]:
+                    if key in ["├──", "？└──", "物品", "能力", "状态", "主要角色间关系网", "触发或加深的事件"]:
                         continue
                     
-                    # 转换value为简体（如果包含人名）
+                    # 转换value为简体（如果包含人名等）
                     if key in ['关系', '目标']:
                         value = t2s.convert(value)
                     
                     try:
                         self._update_character_attribute(current_character, key, value, chapter_num)
                     except Exception as e:
-                        logging.error(f"更新角色 {current_character} 的属性 {key} 时出错: {str(e)}")
+                        logging.error(f"更新角色 {current_character} 的属性{key} 时出错 {str(e)}")
             
             # 结束后重置格式块标记
             in_format_block = False
         
         except Exception as e:
-            logging.error(f"解析角色更新信息时出错: {str(e)}")
+            logging.error(f"解析角色更新信息时出错 {str(e)}")
         
         # 保存更新后的角色库
         self._save_characters()
@@ -632,6 +641,9 @@ class NovelGenerator:
                 if ':' in relation:
                     target, rel_type = relation.split(':')
                     char.relationships[target.strip()] = rel_type.strip()
+                elif '：' in relation:
+                    target, rel_type = relation.split('：')
+                    char.relationships[target.strip()] = rel_type.strip()
                     
         elif key == '目标' or key == 'goals':
             # 更新角色目标
@@ -646,6 +658,9 @@ class NovelGenerator:
             for trait in traits:
                 if ':' in trait:
                     t, weight = trait.split(':')
+                    char.personality[t.strip()] = float(weight)
+                elif '：' in trait:
+                    t, weight = trait.split('：')
                     char.personality[t.strip()] = float(weight)
                 else:
                     char.personality[trait.strip()] = 1.0
@@ -700,12 +715,10 @@ class NovelGenerator:
                      self._parse_character_update(characters_update, 0, current_chapter_characters) 
                  else:
                      logging.error("角色信息修正失败，保留原有信息")
-            except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
-                 logging.error(f"修正角色信息时请求超时: {str(e)}，跳过修正。")
             except Exception as e:
                  logging.error(f"修正角色信息时模型调用或解析出错: {str(e)}")
         except Exception as e:
-            logging.error(f"修正角色信息时发生意外错误: {str(e)}")
+            logging.error(f"修正角色信息时发生意外错误 {str(e)}")
 
     def _validate_character_update(self, update_text: str) -> bool:
         """验证角色更新内容的格式和完整性"""
@@ -722,7 +735,7 @@ class NovelGenerator:
                     return False
                     
             # 检查状态字段是否包含身体和心理两个维度
-            if "身体状态:" not in update_text or "心理状态:" not in update_text:
+            if "身体状态" not in update_text or "心理状态" not in update_text:
                 logging.error("角色状态缺少必要的维度信息")
                 return False
                 
@@ -749,10 +762,10 @@ class NovelGenerator:
             new_summary = new_summary.strip()
             # 移除常见的描述性开头
             descriptive_starts = [
-                "本章讲述了", "本章主要讲述了", "本章描述了", "本章主要描述了",
-                "本章叙述了", "本章主要叙述了", "本章介绍了", "本章主要介绍了",
-                "本章", "这一章", "这一章节", "这一回", "这一章节主要",
-                "本章节", "本章节主要", "这一章节主要", "这一回主要"
+                "本章讲述", "本章主要讲述", "本章描述", "本章主要描述",
+                "本章叙述", "本章主要叙述", "本章介绍", "本章主要介绍",
+                "本章", "这一章", "这一章节", "这一章节主要",
+                "本章？", "本章节主要？", "这一章节主要", "这一回主要？"
             ]
             
             for start in descriptive_starts:
@@ -768,9 +781,9 @@ class NovelGenerator:
             logging.info(f"已更新第 {chapter_num} 章摘要")
 
         except (TimeoutError, asyncio.TimeoutError) as e: # 捕获超时错误
-            logging.error(f"更新第 {chapter_num} 章摘要时请求超时: {str(e)}")
+            logging.error(f"更新第{chapter_num} 章摘要时请求超时: {str(e)}")
         except Exception as e:
-            logging.error(f"更新第 {chapter_num} 章摘要时出错: {str(e)}")
+            logging.error(f"更新第{chapter_num} 章摘要时出错: {str(e)}")
     
     def _save_chapter(self, chapter_num: int, content: str, skip_character_update: bool = False):
         """保存章节文件，并可选择更新摘要和角色信息"""
@@ -778,14 +791,14 @@ class NovelGenerator:
             # 从大纲中获取章节标题 (注意 chapter_num 是从1开始的，列表索引需要减1)
             chapter_idx = chapter_num - 1
             if chapter_idx < 0 or chapter_idx >= len(self.chapter_outlines):
-                logging.error(f"尝试保存章节 {chapter_num} 时发生错误：无效的章节索引 {chapter_idx}")
+                logging.error(f"尝试保存章节 {chapter_num} 时发生错误：无效的章节索引{chapter_idx}")
                 # 使用默认标题或抛出错误
                 title = f"未知标题_{chapter_num}"
             else:
                 title = self.chapter_outlines[chapter_idx].title
 
             # 清理标题以创建安全的文件名
-            # 移除或替换可能导致问题的字符：/ \ : * ? " < > | 以及控制字符
+            # 移除或替换可能导致问题的字符： \ : * ? " < > | 以及控制字符
             safe_title = re.sub(r'[\\/*?:"<>|\x00-\x1f]', '', title)
             safe_title = safe_title.replace(" ", "_") # 可选：用下划线替换空格
             if not safe_title: # 如果清理后标题为空，使用默认名称
@@ -809,13 +822,13 @@ class NovelGenerator:
                 self._update_characters_from_content(chapter_num, content)
 
         except Exception as e:
-            logging.error(f"保存章节 {chapter_num} 时发生错误: {str(e)}")
+            logging.error(f"保存章节 {chapter_num} 时发生错误 {str(e)}")
             # 可以选择在这里重新抛出异常，或者仅记录错误
             # raise
 
     def _update_characters_from_content(self, chapter_num: int, content: str):
         """分析章节内容并更新角色信息"""
-        logging.info(f"开始从第 {chapter_num} 章内容更新角色信息...")
+        logging.info(f"开始从第{chapter_num} 章内容更新角色信息..")
         
         try:
             # 首先清理内容，移除可能的分析性文字
@@ -836,7 +849,7 @@ class NovelGenerator:
             # 使用清理后的内容
             cleaned_content = '\n'.join(story_content)
             
-            # 从章节内容中提取出现的角色名称
+            # 从章节内容中提取出现的角色名字
             current_chapter_characters = set()
             # 遍历现有角色名称，检查是否在章节内容中出现
             for name in self.characters.keys():
@@ -851,9 +864,9 @@ class NovelGenerator:
                 # 更新后立即清理
                 self.clean_character_library()
             except (TimeoutError, asyncio.TimeoutError) as e:
-                logging.error(f"第 {chapter_num} 章: 发现新角色请求超时: {str(e)}，跳过新角色发现。")
+                logging.error(f"第{chapter_num} 章 发现新角色请求超时 {str(e)}，跳过新角色发现")
             except Exception as e:
-                logging.error(f"第 {chapter_num} 章: 发现新角色时出错: {str(e)}")
+                logging.error(f"第{chapter_num} 章 发现新角色时出错: {str(e)}")
 
             # 再次检查新发现的角色是否在内容中出现
             for name in list(self.characters.keys()):
@@ -861,7 +874,7 @@ class NovelGenerator:
                     current_chapter_characters.add(name)
             
             # 手动检查常见角色名
-            common_characters = ["王大锤", "丹辰子", "钱小小", "拾荒道人"]
+            common_characters = ["陆沉"]
             for name in common_characters:
                 if name in cleaned_content:
                     # 如果角色不在角色库中，添加它
@@ -873,13 +886,13 @@ class NovelGenerator:
                     current_chapter_characters.add(name)
             
             if not current_chapter_characters:
-                logging.warning(f"第 {chapter_num} 章未发现任何角色，跳过角色更新")
+                logging.warning(f"第{chapter_num} 章未发现任何角色，跳过角色更新")
                 return
                 
-            # 只获取当前章节出现的角色的状态文本
+            # 只获取当前章节出现的角色的状态文字
             existing_characters_text = self._format_characters_for_update(current_chapter_characters)
             
-            # 使用角色更新提示词
+            # 使用角色更新提示
             prompt = prompts.get_character_update_prompt(cleaned_content, existing_characters_text)
             try:
                 characters_update = self.content_model.generate(prompt)
@@ -890,30 +903,30 @@ class NovelGenerator:
                 # 更新后立即清理
                 self.clean_character_library()
                 
-                # 验证一致性...
+                # 验证一致性..
                 if not self._verify_character_consistency(cleaned_content, current_chapter_characters):
                      logging.warning("角色信息与章节内容存在不一致，尝试进行修正...")
                      self._correct_character_inconsistencies(cleaned_content, current_chapter_characters)
                 
-                logging.info(f"第 {chapter_num} 章角色信息更新完成...")
+                logging.info(f"第{chapter_num} 章角色信息更新完成..")
                 
                 # 确保常见角色信息得到保留
                 for name in common_characters:
                     if name in cleaned_content and name not in self.characters:
                         # 如果清理过程中删除了这些角色，重新添加它们
                         self.characters[name] = self._create_basic_character(name)
-                        logging.info(f"清理后恢复常见角色: {name}")
+                        logging.info(f"清理后恢复常见角色 {name}")
                 
                 # 在进行完所有更新后再次保存角色库
                 self._save_characters()
 
             except (TimeoutError, asyncio.TimeoutError) as e:
-                logging.error(f"第 {chapter_num} 章: 角色更新请求超时: {str(e)}，跳过本次更新。")
+                logging.error(f"第{chapter_num} 章 角色更新请求超时: {str(e)}，跳过本次更新")
             except Exception as e:
-                 logging.error(f"第 {chapter_num} 章: 更新角色信息时出错（模型调用或解析阶段）: {str(e)}")
+                 logging.error(f"第{chapter_num} 章 更新角色信息时出错（模型调用或解析阶段）: {str(e)}")
 
         except Exception as e:
-            logging.error(f"更新角色信息时发生意外错误: {str(e)}", exc_info=True)
+            logging.error(f"更新角色信息时发生意外错误 {str(e)}", exc_info=True)
 
     def _format_characters_for_update(self, character_names: set = None) -> str:
         """格式化现有角色信息用于更新"""
@@ -927,11 +940,11 @@ class NovelGenerator:
             formatted_text += f"├──物品: {', '.join(char.magic_treasure)}\n"
             formatted_text += f"├──能力: {', '.join(char.ability)}\n"
             formatted_text += f"├──状态\n"
-            formatted_text += f"│  ├──身体状态: {char.realm}, {char.temperament}\n"
-            formatted_text += f"│  └──心理状态: {char.development_stage}\n"
+            formatted_text += f"│ ├──身体状态 {char.realm}, {char.temperament}\n"
+            formatted_text += f"│ └──心理状态 {char.development_stage}\n"
             formatted_text += f"├──主要角色间关系网\n"
             for rel_name, rel_type in char.relationships.items():
-                formatted_text += f"│  └──{rel_name}: {rel_type}\n"
+                formatted_text += f"│ └──{rel_name}: {rel_type}\n"
             formatted_text += f"└──触发或加深的事件: {', '.join(char.goals)}\n\n"
         return formatted_text
 
@@ -941,7 +954,7 @@ class NovelGenerator:
         t2s = OpenCC('t2s')  # 繁体转简体
         
         # 用于存储需要合并的角色
-        to_merge = {}  # 格式: {简体名: [异体名1, 异体名2, ...]}
+        to_merge = {}  # 格式: {简体名: [异体名, 异体名, ...]}
         
         # 第一步：找出所有需要合并的角色
         character_names = list(self.characters.keys())
@@ -989,7 +1002,7 @@ class NovelGenerator:
                     
                     # 删除繁体变体
                     del self.characters[variant_name]
-                    logging.info(f"合并角色 '{variant_name}' 到 '{simplified_name}'")
+                    logging.info(f"合并角色 '{variant_name}' 为 '{simplified_name}'")
 
     def clean_character_library(self):
         """清理角色库中的非角色条目"""
@@ -999,7 +1012,7 @@ class NovelGenerator:
         # 需要删除的条目的关键词列表
         non_character_keywords = [
             # 分析相关词
-            "收到文本后",
+            "收到文本",
             "分析步骤",
             "通读文本",
             "角色识别",
@@ -1057,22 +1070,14 @@ class NovelGenerator:
             "门派",
             "宗门",
             "家族",
-            # 目录结构相关
-            "├",
-            "│",
-            "└",
-            "─",
-            "主要角色",
-            "次要角色",
-            "配角",
-            "反派",
-            "路人"
+            "帮派",
+            "势力"
         ]
         
         # 保护列表 - 这些角色不会被删除
         protected_characters = ["陆沉"]
         
-        # 记录要删除的角色名
+        # 记录要删除的角色
         to_delete = []
         for name in self.characters.keys():
             # 如果在保护列表中，跳过检查
@@ -1085,24 +1090,24 @@ class NovelGenerator:
                 continue
                 
             # 检查是否以数字、特殊字符或目录符号开头
-            if name[0].isdigit() or name.startswith(('##', '**', '第', '[', '├', '│', '└', '─')):
+            if name[0].isdigit() or name.startswith(('##', '**', '？', '[', '？', '？', '？', '─')):
                 to_delete.append(name)
                 continue
                 
-            # 检查名称长度是否过长（正常人名一般不会超过8个汉字）
+            # 检查名称长度是否过长（正常人名一般不会超过12个汉字）
             if len(name) > 12:
                 to_delete.append(name)
                 continue
                 
             # 检查是否为描述性文本而不是名字
-            if len(name.split()) > 2:  # 如果包含多个词，可能是描述性文本
+            if len(name.split()) > 2:  # 如果包含多个词，可能是描述性文字
                 to_delete.append(name)
                 continue
                 
             # 检查是否为通用描述
             generic_terms = [
-                "的修士", "的人", "首领", "散修", "弟子", "修者", "者",
-                "长老", "护法", "执事", "堂主", "掌门", "帮主", "门主",
+                "的修行", "的人", "首领", "散修", "弟子", "修行", "？", "？",
+                "长者", "护法", "执事", "堂主", "掌门", "帮主", "门主",
                 "势力", "组织", "门派", "宗门", "家族", "帮派", "势力"
             ]
             if any(term in name for term in generic_terms) and name not in protected_characters:
@@ -1110,7 +1115,7 @@ class NovelGenerator:
                 continue
                 
             # 检查是否包含标点符号或特殊字符
-            if any(char in name for char in "，。！？；：""''【】《》（）()[]{}├│└─") and name not in protected_characters:
+            if any(char in name for char in "，。！？；？''【】《》（）[]{}├│└─") and name not in protected_characters:
                 to_delete.append(name)
                 continue
                 
@@ -1154,7 +1159,7 @@ class NovelGenerator:
                     ]
                 logging.info(f"成功从文件加载大纲，共 {len(self.chapter_outlines)} 章")
             except Exception as e:
-                logging.error(f"加载大纲文件时出错: {str(e)}")
+                logging.error(f"加载大纲文件时出错 {str(e)}")
                 self.chapter_outlines = []
         else:
             logging.info("大纲文件不存在，初始化为空大纲")
@@ -1164,10 +1169,10 @@ class NovelGenerator:
         """获取指定章节的上下文信息"""
         context_parts = []
         
-        # 获取已有的上下文（从原有大纲或已成功生成的大纲中）
+        # 获取已有的上下文（从原有大纲或已成功生成的大纲中获取）
         prev_chapters = []
         
-        # 首先检查已成功生成的大纲中的前文
+        # 首先检查已成功生成的大纲中的前几章
         if successful_outlines:
             prev_chapters.extend([
                 o for o in successful_outlines 
@@ -1176,7 +1181,7 @@ class NovelGenerator:
         
         # 如果是替换模式，也要考虑原有大纲中的内容
         if chapter_num > 1:
-            # 获取原有大纲中的前3章
+            # 获取原有大纲中的前几章
             start_idx = max(0, chapter_num - 4)
             orig_prev_chapters = self.chapter_outlines[start_idx:chapter_num-1]
             # 只添加不在 successful_outlines 中的章节
@@ -1190,7 +1195,7 @@ class NovelGenerator:
         prev_chapters = prev_chapters[-3:]
         
         if prev_chapters:
-            context_parts.append("已有章节概要：")
+            context_parts.append("已有章节概要")
             for chapter in prev_chapters:
                 context_parts.extend([
                     f"第{chapter.chapter_number}章 {chapter.title}",
@@ -1209,7 +1214,7 @@ class NovelGenerator:
             ][:2]  # 只取接下来的2章
             
             if next_chapters:
-                context_parts.append("后续章节概要：")
+                context_parts.append("后续章节概要")
                 for chapter in next_chapters:
                     context_parts.extend([
                         f"第{chapter.chapter_number}章 {chapter.title}",
@@ -1223,30 +1228,28 @@ class NovelGenerator:
         return "\n".join(context_parts)
 
     def _validate_model_config(self) -> bool:
-        """验证模型配置是否适合生成大纲"""
+        """验证模型配置"""
         try:
-            model_name = self.outline_model.config.get("name", "")
+            model_name = self.outline_model.model_name.lower()
             if not model_name:
-                logging.error("模型配置中缺少名称")
-                return False
-                
-            # 根据不同模型调整生成策略
-            if "flash" in model_name.lower():
-                # flash 模型适合小批量生成
+                logger.error("模型名称未设置")
+                raise ValueError("模型名称不能为空")
+
+            # 根据模型类型设置最大批次大小
+            if "flash" in model_name:
                 self.max_batch_size = 3
-                logging.info(f"使用 flash 模型 {model_name}，已将批次大小限制为 {self.max_batch_size}")
-            elif "pro" in model_name.lower():
-                # pro 模型可以处理较大批次
+                logger.info(f"使用 Flash 模型，设置最大批次大小为 {self.max_batch_size}")
+            elif "pro" in model_name:
                 self.max_batch_size = 5
-                logging.info(f"使用 pro 模型 {model_name}，已将批次大小限制为 {self.max_batch_size}")
+                logger.info(f"使用 Pro 模型，设置最大批次大小为 {self.max_batch_size}")
             else:
-                # 默认配置
                 self.max_batch_size = 3
-                logging.info(f"使用默认模型 {model_name}，已将批次大小限制为 {self.max_batch_size}")
-                
+                logger.info(f"使用默认模型，设置最大批次大小为 {self.max_batch_size}")
+
             return True
+
         except Exception as e:
-            logging.error(f"验证模型配置时出错: {str(e)}")
+            logger.error(f"验证模型配置时发生错误 {str(e)}")
             return False
 
     def _split_into_batches(self, start: int, end: int) -> List[Tuple[int, int]]:
@@ -1259,206 +1262,165 @@ class NovelGenerator:
             current_start += batch_size
         return batches
 
-    def generate_outline(
-        self,
-        novel_type: str,
-        theme: str,
-        style: str,
-        current_start_chapter_num: int = 1,
-        current_batch_size: int = None,
-        mode: str = "append",
-        replace_range: tuple = None,
-        extra_prompt: str = None
-    ):
-        """生成小说大纲。"""
-        # 验证模型配置
-        if not hasattr(self, 'max_batch_size'):
-            if not self._validate_model_config():
-                return False
+    def generate_outline(self, prompt: str, retry_count: int = 3) -> Optional[NovelOutline]:
+        """生成小说大纲
 
-        # 设置默认批次大小
-        if current_batch_size is None:
-            current_batch_size = self.config.novel_config.get("batch_size", self.max_batch_size)
+        Args:
+            prompt: 生成提示
+            retry_count: 重试次数，默认为3
 
-        # 处理替换模式的参数
-        if mode == "replace":
-            if not replace_range or len(replace_range) != 2:
-                raise ValueError("替换模式需要提供有效的替换范围 (start, end)")
-            start, end = replace_range
-            if start < 1 or end < start:
-                raise ValueError(f"无效的替换范围: ({start}, {end})")
-            if end > len(self.chapter_outlines):
-                raise ValueError(f"替换范围超出现有大纲长度: {len(self.chapter_outlines)}")
-            current_start_chapter_num = start
-            current_batch_size = end - start + 1
-
-        # 将大范围任务分割成小批次
-        batches = self._split_into_batches(current_start_chapter_num, 
-                                         current_start_chapter_num + current_batch_size - 1)
-        
-        all_successful_outlines = []  # 存储所有成功生成的章节大纲
-        
-        for batch_start, batch_end in batches:
-            batch_size = batch_end - batch_start + 1
-            logging.info(f"开始生成第 {batch_start} 到 {batch_end} 章大纲（批次大小：{batch_size}）...")
-            
-            # 获取当前批次的上下文（包括之前成功生成的章节）
-            batch_context = self._get_context_for_chapter(batch_start, all_successful_outlines)
-            
-            # 生成当前批次的大纲
-            try:
-                prompt = prompts.get_outline_prompt(
-                    novel_type=novel_type,
-                    theme=theme,
-                    style=style,
-                    current_start_chapter_num=batch_start,
-                    current_batch_size=batch_size,
-                    existing_context=batch_context,
-                    extra_prompt=extra_prompt
-                )
-
-                outline_text = self.outline_model.generate(prompt)
-                if not outline_text:
-                    raise ValueError("模型返回空内容")
-
-                batch_outlines = self._parse_outline(outline_text)
-                
-                # 分析大纲质量
-                is_qualified, problem_chapters, suggestions = self._validate_batch_outlines(batch_outlines)
-                if not is_qualified:
-                    logging.warning(f"批次 {batch_start}-{batch_end} 存在质量问题:")
-                    logging.warning(suggestions)
-                    
-                    # 对问题章节进行单独处理
-                    for chapter_num in problem_chapters:
-                        fixed_outline = self._retry_single_chapter(
-                            chapter_num=chapter_num,
-                            novel_type=novel_type,
-                            theme=theme,
-                            style=style,
-                            extra_prompt=extra_prompt,
-                            successful_outlines=all_successful_outlines
-                        )
-                        if fixed_outline:
-                            # 替换问题章节
-                            batch_outlines = [
-                                fixed_outline if o.chapter_number == chapter_num else o 
-                                for o in batch_outlines
-                            ]
-                        else:
-                            logging.error(f"无法修复第 {chapter_num} 章的问题")
-                            return False
-                
-                all_successful_outlines.extend(batch_outlines)
-                logging.info(f"成功生成批次 {batch_start}-{batch_end} 的大纲")
-                
-            except Exception as e:
-                logging.error(f"生成批次 {batch_start}-{batch_end} 时出错: {str(e)}")
-                return False
-
-        # 所有批次处理完成，验证最终结果
-        all_successful_outlines.sort(key=lambda x: x.chapter_number)
-        
-        if len(all_successful_outlines) != current_batch_size:
-            raise ValueError(f"最终生成的章节数量不符：期望 {current_batch_size} 章，实际生成 {len(all_successful_outlines)} 章")
-
-        # 验证章节号的连续性
-        chapter_numbers = [o.chapter_number for o in all_successful_outlines]
-        expected_numbers = list(range(current_start_chapter_num, current_start_chapter_num + current_batch_size))
-        if chapter_numbers != expected_numbers:
-            raise ValueError(f"章节号不连续。期望: {expected_numbers}，实际: {chapter_numbers}")
-
-        # 更新大纲
-        if mode == "replace":
-            self.chapter_outlines[start - 1 : end] = all_successful_outlines
-            logging.info(f"已替换第 {start} 至 {end} 章的大纲")
-        else:
-            self.chapter_outlines.extend(all_successful_outlines)
-            logging.info(f"已追加 {len(all_successful_outlines)} 章新大纲")
-
-        # 保存大纲
-        self._save_outline()
-        logging.info(f"大纲更新完成，当前共有 {len(self.chapter_outlines)} 章")
-        return True
-
-    def _parse_outline(self, outline_text: str) -> List[ChapterOutline]:
-        """解析生成的大纲文本。"""
+        Returns:
+            NovelOutline: 生成的小说大纲对象，失败返回 None
+        """
         try:
-            # 尝试清理可能的前后缀文本
-            outline_text = outline_text.strip()
-            # 找到第一个 '[' 和最后一个 ']'
-            start_idx = outline_text.find('[')
-            end_idx = outline_text.rfind(']')
+            if not prompt:
+                logger.error("生成大纲的提示词不能为空")
+                raise ValueError("提示词不能为空")
+
+            logger.info(f"开始生成大纲，提示词 {prompt[:50]}...")
             
-            if start_idx == -1 or end_idx == -1:
-                raise ValueError(f"无法找到有效的JSON数组标记。start_idx={start_idx}, end_idx={end_idx}")
-            
-            # 提取JSON数组部分
-            outline_text = outline_text[start_idx:end_idx + 1]
-            
-            # 尝试解析JSON
-            data = json.loads(outline_text)
-            
-            if not isinstance(data, list):
-                raise ValueError(f"解析结果不是列表类型: {type(data)}")
-            
-            outlines = []
-            for item in data:
-                # 验证必需字段
-                required_fields = ['chapter_number', 'title', 'key_points', 'characters', 'settings', 'conflicts']
-                missing_fields = [field for field in required_fields if field not in item]
-                if missing_fields:
-                    raise ValueError(f"章节 {item.get('chapter_number', '未知')} 缺少必需字段: {', '.join(missing_fields)}")
-                
-                # 验证字段类型
-                if not isinstance(item['chapter_number'], int):
-                    raise ValueError(f"章节号必须是整数: {item['chapter_number']}")
-                if not isinstance(item['title'], str):
-                    raise ValueError(f"标题必须是字符串: {item['title']}")
-                if not isinstance(item['key_points'], list) or not all(isinstance(x, str) for x in item['key_points']):
-                    raise ValueError(f"key_points 必须是字符串列表: {item['key_points']}")
-                if not isinstance(item['characters'], list) or not all(isinstance(x, str) for x in item['characters']):
-                    raise ValueError(f"characters 必须是字符串列表: {item['characters']}")
-                if not isinstance(item['settings'], list) or not all(isinstance(x, str) for x in item['settings']):
-                    raise ValueError(f"settings 必须是字符串列表: {item['settings']}")
-                if not isinstance(item['conflicts'], list) or not all(isinstance(x, str) for x in item['conflicts']):
-                    raise ValueError(f"conflicts 必须是字符串列表: {item['conflicts']}")
-                
-                # 验证列表长度要求
-                if len(item['key_points']) < 3:
-                    raise ValueError(f"章节 {item['chapter_number']} 的 key_points 至少需要3个元素")
-                if len(item['characters']) < 2:
-                    raise ValueError(f"章节 {item['chapter_number']} 的 characters 至少需要2个元素")
-                if len(item['settings']) < 1:
-                    raise ValueError(f"章节 {item['chapter_number']} 的 settings 至少需要1个元素")
-                if len(item['conflicts']) < 1:
-                    raise ValueError(f"章节 {item['chapter_number']} 的 conflicts 至少需要1个元素")
-                
-                outline = ChapterOutline(
-                    chapter_number=item['chapter_number'],
-                    title=item['title'],
-                    key_points=item['key_points'],
-                    characters=item['characters'],
-                    settings=item['settings'],
-                    conflicts=item['conflicts']
-                )
-                outlines.append(outline)
-            
-            # 验证章节号的连续性
-            chapter_numbers = [o.chapter_number for o in outlines]
-            expected_numbers = list(range(min(chapter_numbers), max(chapter_numbers) + 1))
-            if chapter_numbers != expected_numbers:
-                raise ValueError(f"章节号不连续。期望: {expected_numbers}，实际: {chapter_numbers}")
-            
-            return outlines
-        except json.JSONDecodeError as e:
-            logging.error(f"JSON解析错误: {str(e)}")
-            logging.error(f"原始文本: {outline_text}")
-            raise ValueError(f"无法解析大纲JSON: {str(e)}")
+            for attempt in range(retry_count):
+                try:
+                    # 生成大纲文本
+                    outline_text = self.outline_model.generate(prompt)
+                    if not outline_text:
+                        logger.warning(f"第{attempt + 1}次尝试生成大纲失败，返回空文本")
+                        continue
+
+                    # 解析大纲
+                    outline = self._parse_outline(outline_text)
+                    if not outline:
+                        logger.warning(f"第{attempt + 1}次尝试解析大纲失败")
+                        continue
+
+                    # 验证大纲质量
+                    if not self._validate_outline_quality(outline):
+                        logger.warning(f"第{attempt + 1}次生成的大纲质量不合格")
+                        continue
+
+                    logger.info("成功生成高质量大纲")
+                    return outline
+
+                except Exception as e:
+                    logger.error(f"第{attempt + 1}次生成大纲时发生错误: {str(e)}")
+                    if attempt == retry_count - 1:
+                        raise
+
+            logger.error(f"经过{retry_count}次尝试后仍未能生成合格的大纲")
+            return None
+
         except Exception as e:
-            logging.error(f"解析大纲时出错: {str(e)}")
-            logging.error(f"原始文本: {outline_text}")
-            raise
+            logger.error(f"生成大纲过程中发生致命错误 {str(e)}")
+            return None
+
+    def _parse_outline(self, outline_text: str) -> Optional[NovelOutline]:
+        """解析大纲文本
+
+        Args:
+            outline_text: 待解析的大纲文本
+
+        Returns:
+            NovelOutline: 解析后的大纲对象，解析失败返回None
+        """
+        try:
+            if not outline_text or not outline_text.strip():
+                logger.error("大纲文本为空，无法解析")
+                return None
+
+            logger.debug("开始解析大纲文本..")
+            
+            # 尝试解析 JSON 格式
+            try:
+                outline_data = json.loads(outline_text)
+                logger.debug("成功解析 JSON 格式的大纲")
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON 解析失败: {str(e)}，尝试使用正则表达式解析")
+                outline_data = self._parse_text_with_regex(outline_text)
+                if not outline_data:
+                    logger.error("正则表达式解析也失败")
+                    return None
+            
+            # 验证必要字段
+            required_fields = ['title', 'chapters']
+            missing_fields = [field for field in required_fields if field not in outline_data]
+            if missing_fields:
+                logger.error(f"大纲缺少必要字段: {', '.join(missing_fields)}")
+                return None
+
+            # 验证章节数据
+            chapters = outline_data.get('chapters', [])
+            if not chapters:
+                logger.error("大纲中没有任何章节")
+                return None
+
+            # 构建大纲对象
+            outline = NovelOutline(
+                title=outline_data['title'],
+                chapters=[
+                    ChapterOutline(
+                        chapter_number=i + 1,
+                        title=chapter.get('title', f'第{i+1}章'),
+                        key_points=chapter.get('key_points', []),
+                        characters=chapter.get('characters', []),
+                        settings=chapter.get('settings', []),
+                        conflicts=chapter.get('conflicts', [])
+                    )
+                    for i, chapter in enumerate(chapters)
+                ]
+            )
+
+            logger.info(f"成功解析大纲，包含 {len(outline.chapters)} 个章节")
+            return outline
+
+        except Exception as e:
+            logger.error(f"解析大纲时发生未预期的错误 {str(e)}")
+            return None
+
+    def _parse_text_with_regex(self, text: str) -> Optional[dict]:
+        """使用正则表达式解析非 JSON 格式的大纲文本
+
+        Args:
+            text: 待解析的文本
+
+        Returns:
+            dict: 解析后的大纲数据字典，解析失败返回None
+        """
+        try:
+            # 提取标题
+            title_match = re.search(r'标题：\s*(.+)', text)
+            if not title_match:
+                logger.warning("未找到大纲标题")
+                title = "未命名"
+            else:
+                title = title_match.group(1).strip()
+
+            # 提取章节
+            chapter_pattern = r'第\d+章\s*(.+?)\n内容\s*(.+?)(?=\n第\d+章|$)'
+            chapters = []
+            
+            for match in re.finditer(chapter_pattern, text, re.DOTALL):
+                chapter_num = int(match.group(1))
+                chapter_title = match.group(2).strip()
+                chapter_content = match.group(3).strip()
+                
+                chapters.append({
+                    'title': chapter_title,
+                    'content': chapter_content
+                })
+
+            if not chapters:
+                logger.error("未能从文本中提取出任何章节信息")
+                return None
+
+            logger.debug(f"使用正则表达式成功解析出 {len(chapters)} 个章节")
+            return {
+                'title': title,
+                'chapters': chapters
+            }
+
+        except Exception as e:
+            logger.error(f"正则表达式解析失败 {str(e)}")
+            return None
 
     def _save_outline(self):
         """保存大纲到文件"""
@@ -1481,7 +1443,7 @@ class NovelGenerator:
                     }
                     outline_data.append(chapter_data)
                 except AttributeError as ae:
-                    logging.error(f"处理章节数据时出错: {str(ae)}")
+                    logging.error(f"处理章节数据时出错 {str(ae)}")
                     logging.error(f"问题章节数据: {outline}")
                     continue
             
@@ -1493,9 +1455,9 @@ class NovelGenerator:
             chapter_numbers = [chapter["chapter_number"] for chapter in outline_data]
             expected_numbers = list(range(min(chapter_numbers), max(chapter_numbers) + 1))
             if chapter_numbers != expected_numbers:
-                logging.warning(f"章节号不连续。期望: {expected_numbers}，实际: {chapter_numbers}")
+                logging.warning(f"章节号不连续。期�? {expected_numbers}，实�? {chapter_numbers}")
             
-            # 先写入临时文件
+            # 先写入临时文�?
             temp_file = outline_file + ".tmp"
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(outline_data, f, ensure_ascii=False, indent=2)
@@ -1518,16 +1480,16 @@ class NovelGenerator:
             
             os.replace(temp_file, outline_file)
             logging.info(f"大纲已成功保存到: {outline_file}")
-            logging.info(f"保存了 {len(outline_data)} 章大纲")
+            logging.info(f"保存了{len(outline_data)} 章大纲")
             
             # 输出一些大纲统计信息
             total_key_points = sum(len(chapter["key_points"]) for chapter in outline_data)
             total_characters = sum(len(chapter["characters"]) for chapter in outline_data)
-            logging.info(f"大纲统计: {total_key_points} 个关键情节点, {total_characters} 个角色出场")
+            logging.info(f"大纲统计: {total_key_points} 个关键情节点, {total_characters} 个角色出现")
             
         except json.JSONEncodeError as je:
             logging.error(f"JSON编码错误: {str(je)}")
-            logging.error("尝试保存的大纲数据:")
+            logging.error("尝试保存的大纲数�?")
             for i, outline in enumerate(self.chapter_outlines):
                 logging.error(f"Chapter {i+1}: {vars(outline)}")
             raise
@@ -1536,60 +1498,9 @@ class NovelGenerator:
             logging.error(f"文件路径: {outline_file}")
             raise
         except Exception as e:
-            logging.error(f"保存大纲时发生未预期的错误: {str(e)}")
+            logging.error(f"保存大纲时发生未预期的错�? {str(e)}")
             logging.error(f"大纲数据示例（前3章）: {self.chapter_outlines[:3]}")
             raise
-
-    def _format_references(self, outline_dict):
-        """格式化参考信息供章节生成使用"""
-        # 构建搜索查询
-        query = f"{outline_dict['title']} {', '.join(outline_dict['key_points'])} {', '.join(outline_dict['characters'])} {', '.join(outline_dict['settings'])} {', '.join(outline_dict['conflicts'])}"
-        
-        # 搜索相关内容
-        search_results = []
-        try:
-            search_results = self.knowledge_base.search(query, k=5)
-        except Exception as e:
-            logging.error(f"搜索参考信息时出错: {str(e)}")
-            # 提供默认参考材料，确保能包含章节大纲中的关键情节点
-            return {
-                'plot_references': [point for point in outline_dict['key_points']],
-                'character_references': [char for char in outline_dict['characters']],
-                'setting_references': [setting for setting in outline_dict['settings']]
-            }
-        
-        # 格式化参考信息
-        references = {
-            'plot_references': [],
-            'character_references': [],
-            'setting_references': []
-        }
-        
-        # 将搜索结果分类到不同的参考类别
-        for chunk, _ in search_results:
-            content = chunk.content
-            
-            # 简单的分类逻辑，根据内容特征决定分到哪个类别
-            if any(char in content for char in outline_dict['characters']):
-                references['character_references'].append(content[:200])  # 截取前200个字符
-            
-            if any(setting in content for setting in outline_dict['settings']):
-                references['setting_references'].append(content[:200])
-            
-            # 其他内容归为情节参考
-            references['plot_references'].append(content[:200])
-        
-        # 确保每个类别至少有一个项目
-        if not references['plot_references']:
-            references['plot_references'] = ["暂无相关情节参考"]
-        
-        if not references['character_references']:
-            references['character_references'] = ["暂无相关角色参考"]
-        
-        if not references['setting_references']:
-            references['setting_references'] = ["暂无相关场景参考"]
-        
-        return references
 
     def generate_novel(self):
         """生成小说内容"""
@@ -1601,7 +1512,7 @@ class NovelGenerator:
             
             # 从当前章节开始生成
             total_chapters = len(self.chapter_outlines)
-            max_retries = 3  # 每章最多重试3次
+            max_retries = 3  # 每章最多重试次数
             
             while self.current_chapter < total_chapters:
                 chapter_retries = 0
@@ -1611,7 +1522,7 @@ class NovelGenerator:
                         chapter_outline = self.chapter_outlines[self.current_chapter]
                         logging.info(f"开始生成第 {self.current_chapter + 1} 章: {chapter_outline.title}")
                         
-                        # 将 ChapterOutline 对象转换为字典
+                        # 将ChapterOutline对象转换为字典
                         outline_dict = {
                             "chapter_number": chapter_outline.chapter_number,
                             "title": chapter_outline.title,
@@ -1666,28 +1577,28 @@ class NovelGenerator:
                         
                         # 生成章节内容
                         try:
-                            logging.info(f"正在生成第 {self.current_chapter + 1} 章内容...")
+                            logging.info(f"正在生成第{self.current_chapter + 1} 章内容...")
                             content = self.content_model.generate(prompt)
                             
                             # 验证章节内容
                             if self._validate_chapter_content(content, chapter_outline):
                                 # 保存章节
                                 self._save_chapter(self.current_chapter + 1, content)
-                                logging.info(f"第 {self.current_chapter + 1} 章生成完成")
+                                logging.info(f"第{self.current_chapter + 1} 章生成完成")
                                 
                                 # 更新进度
                                 self.current_chapter += 1
                                 self._save_progress()
                                 break  # 跳出重试循环，继续下一章
                             else:
-                                logging.error(f"第 {self.current_chapter + 1} 章内容验证失败，这是第 {chapter_retries + 1} 次尝试")
+                                logging.error(f"第{self.current_chapter + 1} 章内容验证失败，这是第{chapter_retries + 1} 次尝试")
                                 chapter_retries += 1
                                 
                                 # 如果所有重试都失败，尝试放宽验证标准
                                 if chapter_retries >= max_retries:
                                     logging.warning(f"已达到最大重试次数，使用最后一次生成的内容并继续...")
                                     self._save_chapter(self.current_chapter + 1, content)
-                                    logging.info(f"第 {self.current_chapter + 1} 章已保存（警告：内容可能不完全符合要求）")
+                                    logging.info(f"第{self.current_chapter + 1} 章已保存（警告：内容可能不完全符合要求）")
                                     self.current_chapter += 1
                                     self._save_progress()
                                     break
@@ -1698,20 +1609,20 @@ class NovelGenerator:
                                 time.sleep(wait_time)
                                 
                         except (TimeoutError, asyncio.TimeoutError) as e:
-                            logging.error(f"生成第 {self.current_chapter + 1} 章时请求超时: {str(e)}")
+                            logging.error(f"生成第{self.current_chapter + 1} 章时请求超时: {str(e)}")
                             chapter_retries += 1
                             wait_time = 30 * (chapter_retries + 1)
                             logging.info(f"等待 {wait_time} 秒后重试...")
                             time.sleep(wait_time)
                         except Exception as e:
-                            logging.error(f"生成第 {self.current_chapter + 1} 章时出错: {str(e)}")
+                            logging.error(f"生成第{self.current_chapter + 1} 章时出错: {str(e)}")
                             chapter_retries += 1
                             wait_time = 30 * (chapter_retries + 1)
                             logging.info(f"等待 {wait_time} 秒后重试...")
                             time.sleep(wait_time)
                             
                     except Exception as e:
-                        logging.error(f"处理第 {self.current_chapter + 1} 章时出错: {str(e)}")
+                        logging.error(f"处理第{self.current_chapter + 1} 章时出错: {str(e)}")
                         chapter_retries += 1
                         wait_time = 30 * (chapter_retries + 1)
                         logging.info(f"等待 {wait_time} 秒后重试...")
@@ -1719,7 +1630,7 @@ class NovelGenerator:
                 
                 # 检查是否因为重试次数用尽而没有成功生成当前章节
                 if chapter_retries >= max_retries:
-                    logging.error(f"在 {max_retries} 次尝试后未能成功生成第 {self.current_chapter + 1} 章，但仍将继续下一章")
+                    logging.error(f"在{max_retries} 次尝试后未能成功生成第{self.current_chapter + 1} 章，但仍将继续下一章")
                     # 在这种情况下，我们已经在内部循环中处理了进度更新，所以这里不需要额外处理
                     
             logging.info("小说生成完成！")
@@ -1732,28 +1643,28 @@ class NovelGenerator:
         """验证章节内容是否符合要求"""
         try:
             # 检查内容长度
-            if len(content) < 1000:  # 假设最小1000字
+            if len(content) < 1000:  # 假设最少1000字
                 logging.error("章节内容过短")
                 return False
                 
             # 检查是否包含关键情节点（改为更灵活的检查）
             missing_points = []
             for point in outline.key_points:
-                # 提取关键词（去除常见连接词和标点）
-                keywords = re.sub(r'[，。！？；：""''【】《》（）()[\]{}、]', ' ', point)
+                # 提取关键词（去除常见连接词和标点符号）
+                keywords = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、]', ' ', point)
                 keywords = re.sub(r'\s+', ' ', keywords).strip()
-                keywords = [k for k in keywords.split() if len(k) > 1 and k not in ['的', '了', '和', '与', '在', '对', '是']]
+                keywords = [k for k in keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
                 
                 # 只要包含一半以上的关键词就算通过
                 matches = sum(1 for k in keywords if k in content)
                 if matches < len(keywords) / 2:
                     missing_points.append(point)
-                    logging.warning(f"可能缺少关键情节点: {point}，只匹配到 {matches}/{len(keywords)} 个关键词")
+                    logging.warning(f"可能缺少关键情节点 {point}，只匹配?{matches}/{len(keywords)} 个关键词")
             
             if missing_points:
                 logging.error(f"缺少 {len(missing_points)}/{len(outline.key_points)} 个关键情节点")
                 for point in missing_points[:3]:  # 只显示前三个，避免日志过长
-                    logging.error(f"缺少关键情节点: {point}")
+                    logging.error(f"缺少关键情节点 {point}")
                 
                 # 如果缺失太多关键情节点，验证失败
                 if len(missing_points) > len(outline.key_points) // 2:
@@ -1781,252 +1692,56 @@ class NovelGenerator:
             missing_settings = []
             for setting in outline.settings:
                 # 提取关键词
-                setting_keywords = re.sub(r'[，。！？；：""''【】《》（）()[\]{}、]', ' ', setting)
+                setting_keywords = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、]', ' ', setting)
                 setting_keywords = re.sub(r'\s+', ' ', setting_keywords).strip()
-                setting_keywords = [k for k in setting_keywords.split() if len(k) > 1 and k not in ['的', '了', '和', '与', '在', '对', '是']]
+                setting_keywords = [k for k in setting_keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
                 
-                matches = sum(1 for k in setting_keywords if k in content)
-                if matches < len(setting_keywords) / 2:
+                # 检查场景关键词匹配情况
+                setting_matches = sum(1 for k in setting_keywords if k in content)
+                if setting_matches < len(setting_keywords) / 2:
                     missing_settings.append(setting)
             
-            if missing_settings and len(missing_settings) > len(outline.settings) // 2:
-                logging.error(f"缺少场景描写: {missing_settings}")
-                return False
+            if missing_settings:
+                logging.error(f"缺少 {len(missing_settings)}/{len(outline.settings)} 个场景描写")
+                for setting in missing_settings[:3]:  # 只显示前三个
+                    logging.error(f"缺少场景描写: {setting}")
+                
+                # 如果缺失太多场景，验证失败
+                if len(missing_settings) > len(outline.settings) // 2:
+                    return False
             
+            # 检查冲突描写
             missing_conflicts = []
             for conflict in outline.conflicts:
                 # 提取关键词
-                conflict_keywords = re.sub(r'[，。！？；：""''【】《》（）()[\]{}、]', ' ', conflict)
+                conflict_keywords = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、]', ' ', conflict)
                 conflict_keywords = re.sub(r'\s+', ' ', conflict_keywords).strip()
-                conflict_keywords = [k for k in conflict_keywords.split() if len(k) > 1 and k not in ['的', '了', '和', '与', '在', '对', '是']]
+                conflict_keywords = [k for k in conflict_keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
                 
-                matches = sum(1 for k in conflict_keywords if k in content)
-                if matches < len(conflict_keywords) / 2:
+                # 检查冲突关键词匹配情况
+                conflict_matches = sum(1 for k in conflict_keywords if k in content)
+                if conflict_matches < len(conflict_keywords) / 2:
                     missing_conflicts.append(conflict)
             
-            if missing_conflicts and len(missing_conflicts) > len(outline.conflicts) // 2:
-                logging.error(f"缺少冲突: {missing_conflicts}")
-                return False
-                    
-            # 使用一致性检查器验证
-            if not self.consistency_checker.check(content):
-                logging.error("一致性检查失败")
-                return False
+            if missing_conflicts:
+                logging.error(f"缺少 {len(missing_conflicts)}/{len(outline.conflicts)} 个冲突描写")
+                for conflict in missing_conflicts[:3]:  # 只显示前三个
+                    logging.error(f"缺少冲突描写: {conflict}")
                 
-            # 使用逻辑验证器验证
-            if not self.logic_validator.validate(content):
-                logging.error("逻辑验证失败")
-                return False
-                
-            # 使用重复内容验证器验证
-            if not self.duplicate_validator.validate(content):
-                logging.error("发现重复内容")
-                return False
-                
+                # 如果缺失太多冲突，验证失败
+                if len(missing_conflicts) > len(outline.conflicts) // 2:
+                    return False
+            
+            # 所有检查都通过
             return True
             
         except Exception as e:
-            logging.error(f"验证章节内容时出错: {str(e)}")
+            logging.error(f"验证章节内容时发生错误: {str(e)}")
             return False
 
-    def _analyze_outline_quality(self, outline: ChapterOutline, prev_chapters: List[ChapterOutline] = None) -> Tuple[bool, List[str]]:
-        """分析大纲质量并返回是否合格及具体问题"""
-        issues = []
-        
-        # 1. 检查角色连贯性
-        if prev_chapters:
-            prev_characters = set()
-            for prev in prev_chapters[-3:]:  # 只看最近的3章
-                prev_characters.update(prev.characters)
-            
-            # 检查是否延续了之前的重要角色
-            continuing_characters = set(outline.characters) & prev_characters
-            if not continuing_characters:
-                issues.append("未延续任何已有角色，可能影响故事连贯性")
-            
-            # 检查新角色引入是否过多
-            new_characters = set(outline.characters) - prev_characters
-            if len(new_characters) > 2:  # 每章最多引入2个新角色
-                issues.append(f"引入了过多新角色: {', '.join(new_characters)}")
-        
-        # 2. 检查情节要素完整性
-        if len(outline.key_points) < 3:
-            issues.append("关键情节点数量不足3个")
-        if len(outline.characters) < 2:
-            issues.append("角色数量不足2个")
-        if len(outline.settings) < 1:
-            issues.append("场景描述不足1个")
-        if len(outline.conflicts) < 1:
-            issues.append("冲突描述不足1个")
-        
-        # 3. 检查情节逻辑性
-        if prev_chapters:
-            last_chapter = prev_chapters[-1]
-            # 检查是否有未解决的冲突延续
-            last_conflicts = set(last_chapter.conflicts)
-            current_conflicts = set(outline.conflicts)
-            if not (last_conflicts & current_conflicts) and not any("解决" in point for point in outline.key_points):
-                issues.append("前章冲突未得到延续或解决")
-        
-        # 4. 检查场景合理性
-        if prev_chapters:
-            last_chapter = prev_chapters[-1]
-            last_settings = set(last_chapter.settings)
-            current_settings = set(outline.settings)
-            
-            # 如果场景完全不同，检查是否有场景转换的说明
-            if not (last_settings & current_settings):
-                has_transition = any("前往" in point or "到达" in point or "离开" in point or "移动" in point 
-                                   for point in outline.key_points)
-                if not has_transition:
-                    issues.append("场景转换缺乏过渡说明")
-        
-        # 5. 检查高潮设置
-        if outline.chapter_number % 3 == 0:  # 每3章应该有一个大高潮
-            has_major_climax = any("（大高潮）" in point or "突破" in point or "战胜" in point 
-                                 or "获得" in point or "实现" in point for point in outline.key_points)
-            if not has_major_climax:
-                issues.append("作为第3章节点，缺少重要转折或高潮")
-        else:
-            has_minor_climax = any("（小高潮）" in point or "冲突" in point or "转折" in point 
-                                 for point in outline.key_points)
-            if not has_minor_climax:
-                issues.append("缺少小型转折或高潮")
-        
-        return len(issues) == 0, issues
-
-    def _optimize_outline(self, outline: ChapterOutline, prev_chapters: List[ChapterOutline] = None) -> str:
-        """根据分析结果生成优化建议"""
-        is_qualified, issues = self._analyze_outline_quality(outline, prev_chapters)
-        if is_qualified:
-            return ""
-            
-        suggestions = []
-        for issue in issues:
-            if "角色数量不足" in issue:
-                suggestions.append("建议添加更多角色互动，确保至少包含2个以上的角色")
-            elif "未延续任何已有角色" in issue:
-                if prev_chapters:
-                    recent_chars = set()
-                    for prev in prev_chapters[-3:]:
-                        recent_chars.update(prev.characters)
-                    suggestions.append(f"建议延续使用以下角色中的部分: {', '.join(recent_chars)}")
-            elif "引入了过多新角色" in issue:
-                suggestions.append("建议减少新角色引入数量，优先使用已有角色")
-            elif "前章冲突未得到延续或解决" in issue:
-                if prev_chapters:
-                    last_conflicts = prev_chapters[-1].conflicts
-                    suggestions.append(f"建议处理前章遗留的冲突: {', '.join(last_conflicts)}")
-            elif "场景转换缺乏过渡" in issue:
-                suggestions.append("建议添加场景转换的过渡描写，说明角色如何到达新场景")
-            elif "缺少重要转折或高潮" in issue:
-                suggestions.append("建议增加重大转折或突破性事件，如境界突破、重要发现等")
-            elif "缺少小型转折或高潮" in issue:
-                suggestions.append("建议添加小型冲突或转折，如矛盾激化、线索发现等")
-        
-        return "\n".join(suggestions)
-
-    def _validate_batch_outlines(self, outlines: List[ChapterOutline]) -> Tuple[bool, List[int], str]:
-        """验证一批大纲的质量，返回是否通过、问题章节列表和优化建议"""
-        if not outlines:
-            return False, [], "大纲列表为空"
-            
-        problem_chapters = []
-        all_suggestions = []
-        
-        for i, outline in enumerate(outlines):
-            # 获取前文章节
-            prev_start = max(0, i - 3)
-            prev_chapters = outlines[prev_start:i]
-            
-            # 分析当前章节
-            is_qualified, issues = self._analyze_outline_quality(outline, prev_chapters)
-            if not is_qualified:
-                problem_chapters.append(outline.chapter_number)
-                suggestions = self._optimize_outline(outline, prev_chapters)
-                all_suggestions.append(f"第{outline.chapter_number}章优化建议：\n{suggestions}")
-        
-        return len(problem_chapters) == 0, problem_chapters, "\n\n".join(all_suggestions)
-
-    def _retry_single_chapter(
-        self,
-        chapter_num: int,
-        novel_type: str,
-        theme: str,
-        style: str,
-        extra_prompt: str = None,
-        successful_outlines: List[ChapterOutline] = None
-    ) -> Optional[ChapterOutline]:
-        """重试生成单个章节的大纲"""
-        max_retries = 3
-        retry_count = 0
-        
-        while retry_count < max_retries:
-            try:
-                logging.info(f"尝试重新生成第 {chapter_num} 章大纲（第 {retry_count + 1} 次尝试）...")
-                
-                # 获取最新的上下文
-                chapter_context = self._get_context_for_chapter(chapter_num, successful_outlines)
-                
-                # 获取优化建议
-                prev_chapters = [o for o in successful_outlines if o.chapter_number < chapter_num]
-                optimization_prompt = ""
-                if prev_chapters:
-                    # 创建一个临时的空大纲用于获取建议
-                    temp_outline = ChapterOutline(
-                        chapter_number=chapter_num,
-                        title="",
-                        key_points=[],
-                        characters=[],
-                        settings=[],
-                        conflicts=[]
-                    )
-                    optimization_prompt = self._optimize_outline(temp_outline, prev_chapters)
-                
-                # 构建增强的提示词
-                enhanced_prompt = f"{extra_prompt if extra_prompt else ''}\n"
-                if optimization_prompt:
-                    enhanced_prompt += f"{optimization_prompt}\n"
-                enhanced_prompt += (
-                    "注意：\n"
-                    "1. 确保本章至少包含2个以上的角色，并详细描述其互动\n"
-                    "2. 保持与前文的连贯性\n"
-                    "3. 每个关键情节点要详细具体\n"
-                    "4. 明确说明场景转换\n"
-                    "5. 设置合适的冲突和高潮"
-                )
-                
-                # 生成大纲
-                single_chapter_prompt = prompts.get_outline_prompt(
-                    novel_type=novel_type,
-                    theme=theme,
-                    style=style,
-                    current_start_chapter_num=chapter_num,
-                    current_batch_size=1,
-                    existing_context=chapter_context,
-                    extra_prompt=enhanced_prompt
-                )
-                
-                chapter_text = self.outline_model.generate(single_chapter_prompt)
-                if not chapter_text:
-                    raise ValueError(f"生成第 {chapter_num} 章大纲时返回空内容")
-                
-                chapter_outline = self._parse_outline(chapter_text)
-                if chapter_outline and len(chapter_outline) == 1:
-                    # 验证新生成的章节质量
-                    is_qualified, issues = self._analyze_outline_quality(chapter_outline[0], prev_chapters)
-                    if is_qualified:
-                        logging.info(f"成功重新生成第 {chapter_num} 章大纲")
-                        return chapter_outline[0]
-                    else:
-                        logging.warning(f"重新生成的第 {chapter_num} 章存在问题: {', '.join(issues)}")
-                
-            except Exception as e:
-                logging.error(f"重新生成第 {chapter_num} 章大纲时出错: {str(e)}")
-            
-            retry_count += 1
-            if retry_count < max_retries:
-                time.sleep(10)  # 短暂等待后重试
-        
-        logging.error(f"第 {chapter_num} 章大纲生成失败，已达到最大重试次数")
-        return None
+    def _format_references(self, outline: dict) -> str:
+        """格式化引用信息"""
+        references = []
+        for chapter in outline['chapters']:
+            references.append(f"第{chapter['chapter_number']}章 {chapter['title']}")
+        return "\n".join(references)

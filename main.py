@@ -153,6 +153,15 @@ def main():
         )
         
         if not continue_generation:
+            # 生成角色动力学设定
+            logging.info("正在生成角色动力学设定...")
+            characters_data = generator.generate_character_dynamics()
+            logging.info(f"已生成 {len(characters_data)} 个角色的设定")
+            
+            # 保存小说架构信息
+            generator.save_novel_architecture(characters_data)
+            logging.info("小说架构信息已保存")
+            
             # 生成新的大纲
             logging.info("正在生成小说大纲...")
             generator.generate_outline(
@@ -166,6 +175,15 @@ def main():
             outline_file = os.path.join(config.generator_config["output_dir"], "outline.json")
             if not os.path.exists(outline_file):
                 logging.info("未找到已有大纲，正在生成新大纲...")
+                # 生成角色动力学设定
+                logging.info("正在生成角色动力学设定...")
+                characters_data = generator.generate_character_dynamics()
+                logging.info(f"已生成 {len(characters_data)} 个角色的设定")
+                
+                # 保存小说架构信息
+                generator.save_novel_architecture(characters_data)
+                logging.info("小说架构信息已保存")
+                
                 generator.generate_outline(
                     config.novel_config["type"],
                     config.novel_config["theme"],

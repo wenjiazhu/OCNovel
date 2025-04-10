@@ -126,8 +126,8 @@ def main():
                 if args.prompt:
                     logger.info(f"使用额外提示词: '{args.prompt[:100]}{'...' if len(args.prompt)>100 else ''}'")
 
-                # 调用 generate_outline
-                success = novel_generator.generate_outline(
+                # 调用 generate_outline_chapters
+                success = novel_generator.generate_outline_chapters(
                     novel_type=novel_type,
                     theme=theme,
                     style=style,
