@@ -1,6 +1,12 @@
 from typing import Dict, List, Optional
 import dataclasses # 导入 dataclasses 以便类型提示
 import json
+from src.config.config import Config  # 导入 Config 类
+import os
+import logging
+
+# 初始化 Config 实例
+config = Config()
 
 # 如果 ChapterOutline 只在此处用作类型提示，可以简化或使用 Dict
 # from .novel_generator import ChapterOutline # 或者定义一个类似的结构
@@ -28,33 +34,121 @@ def get_outline_prompt(
     """生成用于创建小说大纲的提示词。"""
     extra_requirements = f"\n[额外要求]\n{extra_prompt}\n" if extra_prompt else ""
 
+    # 从知识库中获取参考文件内容
+    reference_files = config.novel_config.get("knowledge_base_config", {}).get("reference_files", [])
+    reference_content = ""
+    for file_path in reference_files:
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                logging.warning(f"参考文件不存在: {file_path}")
+                continue
+
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                reference_content += f"\n[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...\n"
+        except UnicodeDecodeError:
+            # 尝试其他编码
+            try:
+                with open(file_path, 'r', encoding='gbk') as f:
+                    content = f.read()
+                    reference_content += f"\n[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...\n"
+            except Exception as e:
+                logging.warning(f"读取参考文件 {file_path} 时出错（尝试GBK编码后）: {str(e)}")
+        except Exception as e:
+            logging.warning(f"读取参考文件 {file_path} 时出错: {str(e)}")
+
+    # 如果参考内容为空，添加提示
+    if not reference_content:
+        reference_content = "\n[知识库参考内容]\n暂无参考内容，将仅基于设定生成大纲。\n"
+
     prompt = f"""{existing_context}
 
-你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。请严格按照要求，基于以上小说信息和已有大纲（如果是续写或替换），创作后续的小说大纲。
+你是一个专业的小说大纲生成助手。你的任务是生成符合JSON格式的小说大纲。你必须严格按照要求的格式输出，不能添加任何额外的文字或解释。
 
-任务要求：
-1.  生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。
-2.  确保情节连贯，与已有上下文自然衔接。推动主线发展，引入新的冲突和看点。{extra_requirements}
-3.  每章设计一个小高潮(如反转\打脸\冲突解决\悬念揭晓等)，每3章设计一个大高潮(达成目标\境界突破\战胜强敌等)。
-4.  模仿知识库中同类型小说的桥段/套路/剧情梗等进行剧情设计，注意保持单个事件(开始-发展-结尾)的完整性。
-5.  基于人物设定塑造人物成长经历，剧情发展不得偏离主题和设定。
-6.  每章大纲必须包含以下字段：章节号 (chapter_number, 整数，必须与请求的章节号对应)，标题 (title, 字符串)，关键剧情点列表 (key_points, 字符串列表)，涉及角色列表 (characters, 字符串列表)，场景列表 (settings, 字符串列表)，核心冲突列表 (conflicts, 字符串列表)。
-7.  严格按照以下 JSON 格式返回一个包含 {current_batch_size} 个章节大纲对象的列表。不要在 JSON 列表前后添加任何其他文字、解释或代码标记 (如 ```json ... ```)。JSON 列表必须直接开始于 '[' 结束于 ']'。
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
 
-```json
+[世界观设定]
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("magic_system", "")}
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("social_system", "")}
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("background", "")}
+
+[角色设定]
+主角: {config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("protagonist", {}).get("background", "")}
+配角: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("supporting_roles", [])])}
+反派: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("antagonists", [])])}
+
+[知识库参考内容]
+{reference_content}
+
+[任务要求]
+1. 生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。重要：必须生成本批次要求的全部大纲，不得省略或截断。
+2. 确保情节连贯，与已有上下文自然衔接。推动主线发展，引入新的冲突和看点。{extra_requirements}
+3. 每章设计一个小高潮(如反转\打脸\冲突解决\悬念揭晓等)，每3章设计一个大高潮(达成目标\境界突破\战胜强敌等)。
+4. 模仿知识库中同类型小说的桥段/套路/剧情梗等进行剧情设计，注意保持单个事件(开始-发展-结尾)的完整性。
+5. 基于人物设定塑造人物成长经历，剧情发展不得偏离主题和设定。
+
+[输出格式要求]
+1. 你必须直接输出一个JSON数组，数组中包含 {current_batch_size} 个章节对象
+2. 不要添加任何其他文字说明、注释或代码标记
+3. 每个章节对象必须包含以下字段：
+   - chapter_number (整数): 章节号，从 {current_start_chapter_num} 开始递增
+   - title (字符串): 章节标题
+   - key_points (字符串数组): 关键剧情点列表，至少3个
+   - characters (字符串数组): 涉及角色列表，至少2个
+   - settings (字符串数组): 场景列表，至少1个
+   - conflicts (字符串数组): 核心冲突列表，至少1个
+4. 所有字符串必须使用双引号，不能使用单引号
+5. 数组和对象的最后一个元素后不要加逗号
+6. 确保生成的是有效的JSON格式，可以被 JSON.parse() 解析
+
+示例格式：
 [
   {{
     "chapter_number": {current_start_chapter_num},
-    "title": "...",
-    "key_points": ["...", "..."],
-    "characters": ["...", "..."],
-    "settings": ["...", "..."],
-    "conflicts": ["...", "..."]
+    "title": "第一个高潮",
+    "key_points": [
+      "主角发现神秘法宝",
+      "与反派首次交手",
+      "觉醒特殊能力"
+    ],
+    "characters": [
+      "陆沉",
+      "神秘老者"
+    ],
+    "settings": [
+      "荒古遗迹"
+    ],
+    "conflicts": [
+      "争夺法宝"
+    ]
   }},
-  // ... (如果 current_batch_size > 1, 继续添加后续章节对象，确保 chapter_number 连续递增)
+  {{
+    "chapter_number": {current_start_chapter_num + 1},
+    "title": "逃亡之路",
+    "key_points": [
+      "被追杀",
+      "寻找庇护",
+      "结识盟友"
+    ],
+    "characters": [
+      "陆沉",
+      "神秘老者",
+      "盟友"
+    ],
+    "settings": [
+      "深山老林"
+    ],
+    "conflicts": [
+      "躲避追杀"
+    ]
+  }}
 ]
-```
-"""
+
+请直接生成符合上述格式的JSON数组，不要添加任何其他内容。确保输出的是有效的JSON格式。"""
     return prompt
 
 
@@ -68,7 +162,12 @@ def get_chapter_prompt(
 
     novel_number = outline.get('chapter_number', '未知')
     chapter_title = outline.get('title', '未知')
-    key_points = ', '.join(outline.get('key_points', []))
+    
+    # 处理关键情节点 - 改为分行展示以增强可读性和重要性
+    key_points_list = outline.get('key_points', [])
+    key_points_display = '\n'.join([f"- {point}" for point in key_points_list])
+    
+    # 其他信息
     characters = ', '.join(outline.get('characters', []))
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
@@ -88,7 +187,9 @@ def get_chapter_prompt(
 悬念密度：中等
 伏笔操作：埋设初始伏笔
 认知颠覆：★☆☆☆☆
-本章简述：{key_points}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
 
 可用元素：
 - 核心人物：{characters}
@@ -128,16 +229,16 @@ def get_chapter_prompt(
 [写作风格]
 请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
 尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
-步步为营的成长线、伏笔与填坑（如"神秘小瓶的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
+步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
 简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
 
 
 [格式要求]
 1.仅返回章节正文文本；
 2.不使用分章节小标题；
-3.长短句交错，一句一段；
+3.长短句交错，多分段，长句一句一段，短句两到三句一段；
 4.不要使用markdown格式;
-5.仅输出中文和中文标点符号，过滤*号、#号、空格等非常规文本字符。
+5.仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符。
 """
     else:
         # 后续章节使用标准提示词
@@ -149,7 +250,10 @@ def get_chapter_prompt(
 [章节大纲]
 章节号: {novel_number}
 标题: {chapter_title}
-关键剧情点: {key_points}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
+
 涉及角色: {characters}
 场景设定: {settings}
 核心冲突: {conflicts}
@@ -167,14 +271,15 @@ def get_chapter_prompt(
 [写作风格]
 请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
 尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
-步步为营的成长线、伏笔与填坑（如"神秘小瓶的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
-简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）
+步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
+简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
 
 [格式要求]
 1.仅返回章节正文文本；
 2.不使用分章节小标题；
-3.长短句交错，一句一段；
-4.不要使用markdown格式。
+3.长短句交错，多分段，长句一句一段，短句两到三句一段；
+4.不要使用markdown格式;
+5.仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符。
 """
 
     # 添加额外要求
@@ -194,6 +299,12 @@ def get_chapter_prompt(
 3. 章节结尾应为下一章大纲中的情节埋下伏笔
 4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
 5. 时间线和场景转换要清晰流畅
+
+[重要·最终检查]
+1. 检查你的章节内容是否明确包含了所有关键情节点
+2. 检查所有指定的角色是否都出现在了章节中
+3. 检查你描述的场景是否与场景设定一致
+4. 确保核心冲突被合理地展开和刻画
 """
     return base_prompt
 
@@ -264,9 +375,20 @@ def get_character_update_prompt(
 def get_character_import_prompt(content: str) -> str:
     """生成用于导入角色信息的提示词。"""
     return f"""
-根据以下文本内容，分析出所有角色及其属性信息，严格按照以下格式要求：
+根据以下文本内容，分析并提取所有真实角色的属性信息。请注意：
 
-<<角色状态格式要求>>
+<<角色识别规则>>
+1. 只提取真实的人物角色，不要提取：
+   - 以"**"开头的标题或分析结果
+   - 包含"属性分析"、"角色分析"等分析性文字
+   - 系统提示、总结性文字或其他非角色内容
+2. 角色必须满足以下条件：
+   - 在文本中有具体的行为、对话或描写
+   - 具有明确的身份和特征
+   - 与故事情节有实际互动
+3. 对于每个识别出的角色，必须提供文本中的依据
+
+<<角色属性格式要求>>
 1. 必须包含以下五个分类（按顺序）：
    ● 物品 ● 能力 ● 状态 ● 主要角色间关系网 ● 触发或加深的事件
 2. 每个属性条目必须用【名称: 描述】格式
@@ -280,7 +402,7 @@ def get_character_import_prompt(content: str) -> str:
    ● [事件名称]: [简要描述及影响]
 
 <<示例>>
-李员外:
+林七夜:
 ├──物品:
 │  ├──青衫: 一件破损的青色长袍，带有暗红色污渍
 │  └──寒铁长剑: 剑身有裂痕，刻有「青云」符文
@@ -298,7 +420,7 @@ def get_character_import_prompt(content: str) -> str:
 │  └──匿名威胁信: 信纸带有檀香味，暗示内部泄密
 │
 
-请严格按上述格式分析以下内容：
+请严格按上述规则和格式分析以下内容：
 <<待分析小说文本开始>>
 {content}
 <<待分析小说文本结束>>

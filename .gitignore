@@ -24,6 +24,7 @@ build/
 data/cache/*
 data/output/*
 data/output2/*
+data/output3/*
 data/logs/*
 data/reference/*
 !data/cache/.gitkeep
@@ -32,6 +33,7 @@ data/reference/*
 !data/logs/.gitkeep
 data/marketing/*
 config.json
+config2.json
 .cursor/rules/*
 
 # 环境变量
