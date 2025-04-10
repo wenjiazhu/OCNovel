@@ -1745,3 +1745,97 @@ class NovelGenerator:
         for chapter in outline['chapters']:
             references.append(f"第{chapter['chapter_number']}章 {chapter['title']}")
         return "\n".join(references)
+
+    def generate_outline_chapters(self, novel_type: str, theme: str, style: str, mode: str = 'replace', replace_range: Tuple[int, int] = None, extra_prompt: str = None) -> bool:
+        """生成指定范围的章节大纲
+
+        Args:
+            novel_type: 小说类型
+            theme: 小说主题
+            style: 写作风格
+            mode: 生成模式，'replace' 表示替换指定范围的章节
+            replace_range: 要替换的章节范围，格式为 (start, end)，章节号从 1 开始
+            extra_prompt: 额外的提示词
+
+        Returns:
+            bool: 是否成功生成大纲
+        """
+        try:
+            if mode == 'replace' and replace_range:
+                start_chapter, end_chapter = replace_range
+                if start_chapter < 1 or end_chapter < start_chapter:
+                    logging.error("无效的章节范围")
+                    return False
+
+                # 获取现有章节的上下文
+                existing_context = self._get_context_for_chapter(start_chapter)
+                
+                # 计算需要生成的章节数
+                batch_size = end_chapter - start_chapter + 1
+                
+                # 生成大纲
+                prompt = prompts.get_outline_prompt(
+                    novel_type=novel_type,
+                    theme=theme,
+                    style=style,
+                    current_start_chapter_num=start_chapter,
+                    current_batch_size=batch_size,
+                    existing_context=existing_context,
+                    extra_prompt=extra_prompt
+                )
+                
+                # 调用模型生成大纲
+                outline_text = self.outline_model.generate(prompt)
+                if not outline_text:
+                    logging.error("生成大纲失败：模型返回空内容")
+                    return False
+                
+                try:
+                    # 解析大纲文本
+                    outline_data = json.loads(outline_text)
+                    
+                    # 验证大纲数据
+                    if not isinstance(outline_data, list):
+                        logging.error("生成的大纲格式不正确：不是数组")
+                        return False
+                    
+                    if len(outline_data) != batch_size:
+                        logging.error(f"生成的章节数量不正确：期望 {batch_size}，实际 {len(outline_data)}")
+                        return False
+                    
+                    # 创建新的章节大纲对象
+                    new_outlines = []
+                    for i, chapter in enumerate(outline_data):
+                        chapter_num = start_chapter + i
+                        new_outline = ChapterOutline(
+                            chapter_number=chapter_num,
+                            title=chapter.get('title', f'第{chapter_num}章'),
+                            key_points=chapter.get('key_points', []),
+                            characters=chapter.get('characters', []),
+                            settings=chapter.get('settings', []),
+                            conflicts=chapter.get('conflicts', [])
+                        )
+                        new_outlines.append(new_outline)
+                    
+                    # 替换指定范围的章节
+                    self.chapter_outlines[start_chapter-1:end_chapter] = new_outlines
+                    
+                    # 保存更新后的大纲
+                    self._save_outline()
+                    
+                    logging.info(f"成功生成并更新了第 {start_chapter} 到 {end_chapter} 章的大纲")
+                    return True
+                    
+                except json.JSONDecodeError as e:
+                    logging.error(f"解析大纲JSON时出错：{str(e)}")
+                    return False
+                except Exception as e:
+                    logging.error(f"处理大纲数据时出错：{str(e)}")
+                    return False
+            else:
+                logging.error("不支持的生成模式或缺少必要参数")
+                return False
+                
+        except Exception as e:
+            logging.error(f"生成大纲时发生错误：{str(e)}")
+            return False

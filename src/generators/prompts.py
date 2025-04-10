@@ -34,6 +34,38 @@ def get_outline_prompt(
     """生成用于创建小说大纲的提示词。"""
     extra_requirements = f"\n[额外要求]\n{extra_prompt}\n" if extra_prompt else ""
 
+    # 获取额外指导内容
+    extra_guidance = config.novel_config.get("extra_guidance", {})
+    writing_style = extra_guidance.get("writing_style", {})
+    content_rules = extra_guidance.get("content_rules", {})
+    chapter_structure = extra_guidance.get("chapter_structure", {})
+    plot_corrections = extra_guidance.get("plot_corrections", {})
+
+    # 格式化额外指导内容
+    extra_guidance_text = f"""
+[写作风格指导]
+节奏控制：{writing_style.get('pacing', '')}
+描写要求：{writing_style.get('description', '')}
+对话设计：{writing_style.get('dialogue', '')}
+动作描写：{writing_style.get('action', '')}
+
+[内容规则]
+必须包含：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_include', [])])}
+
+必须避免：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_avoid', [])])}
+
+[章节结构]
+开篇方式：{chapter_structure.get('opening', '')}
+发展过程：{chapter_structure.get('development', '')}
+高潮设计：{chapter_structure.get('climax', '')}
+结尾处理：{chapter_structure.get('ending', '')}
+
+[剧情修正要求]
+{chr(10).join([f"【{correction['title']}】\n{correction['description']}" for correction in plot_corrections.values()])}
+"""
+
     # 从知识库中获取参考文件内容
     reference_files = config.novel_config.get("knowledge_base_config", {}).get("reference_files", [])
     reference_content = ""
@@ -172,6 +204,34 @@ def get_chapter_prompt(
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
     
+    # 获取额外指导内容
+    extra_guidance = config.novel_config.get("extra_guidance", {})
+    writing_style = extra_guidance.get("writing_style", {})
+    content_rules = extra_guidance.get("content_rules", {})
+    chapter_structure = extra_guidance.get("chapter_structure", {})
+
+    # 格式化额外指导内容
+    extra_guidance_text = f"""
+[写作风格指导]
+节奏控制：{writing_style.get('pacing', '')}
+描写要求：{writing_style.get('description', '')}
+对话设计：{writing_style.get('dialogue', '')}
+动作描写：{writing_style.get('action', '')}
+
+[内容规则]
+必须包含：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_include', [])])}
+
+必须避免：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_avoid', [])])}
+
+[章节结构]
+开篇方式：{chapter_structure.get('opening', '')}
+发展过程：{chapter_structure.get('development', '')}
+高潮设计：{chapter_structure.get('climax', '')}
+结尾处理：{chapter_structure.get('ending', '')}
+"""
+    
     # 添加系统角色设定
     system_prompt = """你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。"""
     
@@ -187,6 +247,8 @@ def get_chapter_prompt(
 悬念密度：中等
 伏笔操作：埋设初始伏笔
 认知颠覆：★☆☆☆☆
+
+{extra_guidance_text}
 
 【重要】本章必须包含的关键情节点：
 {key_points_display}
@@ -250,6 +312,8 @@ def get_chapter_prompt(
 [章节大纲]
 章节号: {novel_number}
 标题: {chapter_title}
+
+{extra_guidance_text}
 
 【重要】本章必须包含的关键情节点：
 {key_points_display}
