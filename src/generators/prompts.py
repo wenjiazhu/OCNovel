@@ -210,6 +210,11 @@ def get_chapter_prompt(
     content_rules = extra_guidance.get("content_rules", {})
     chapter_structure = extra_guidance.get("chapter_structure", {})
 
+    # 从 config.json 中获取 novel_config 的内容
+    novel_type = config.novel_config.get("type", "玄幻")
+    theme = config.novel_config.get("theme", "逆袭")
+    style = config.novel_config.get("style", "严肃")
+
     # 格式化额外指导内容
     extra_guidance_text = f"""
 [写作风格指导]
@@ -247,6 +252,11 @@ def get_chapter_prompt(
 悬念密度：中等
 伏笔操作：埋设初始伏笔
 认知颠覆：★☆☆☆☆
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
 
 {extra_guidance_text}
 
@@ -311,6 +321,11 @@ def get_chapter_prompt(
 [章节大纲]
 章节号: {novel_number}
 标题: {chapter_title}
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
 
 {extra_guidance_text}
 
