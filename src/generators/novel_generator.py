@@ -1426,71 +1426,43 @@ class NovelGenerator:
             return None
 
     def _save_outline(self):
-        """保存大纲到文件"""
+        """直接保存大纲到 outline.json 文件"""
         outline_file = os.path.join(self.output_dir, "outline.json")
+        
+        # 准备大纲数据
+        outline_data = {
+            "version": int(time.time()),  # 使用时间戳作为版本号
+            "last_modified": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "chapters": [
+                {
+                    "chapter_number": outline.chapter_number,
+                    "title": outline.title,
+                    "key_points": outline.key_points,
+                    "characters": outline.characters,
+                    "settings": outline.settings,
+                    "conflicts": outline.conflicts
+                }
+                for outline in self.chapter_outlines
+            ]
+        }
+        
         try:
             # 确保输出目录存在
             os.makedirs(os.path.dirname(outline_file), exist_ok=True)
             
-            # 准备大纲数据
-            outline_data = []
-            for outline in self.chapter_outlines:
-                try:
-                    chapter_data = {
-                        "chapter_number": outline.chapter_number,
-                        "title": outline.title,
-                        "key_points": outline.key_points,
-                        "characters": outline.characters,
-                        "settings": outline.settings,
-                        "conflicts": outline.conflicts
-                    }
-                    outline_data.append(chapter_data)
-                except AttributeError as ae:
-                    logging.error(f"处理章节数据时出错 {str(ae)}")
-                    logging.error(f"问题章节数据: {outline}")
-                    continue
-            
-            # 在写入前验证数据
-            if not outline_data:
-                raise ValueError("没有有效的大纲数据可保存")
-            
-            # 验证章节号的连续性
-            chapter_numbers = [chapter["chapter_number"] for chapter in outline_data]
-            expected_numbers = list(range(min(chapter_numbers), max(chapter_numbers) + 1))
-            if chapter_numbers != expected_numbers:
-                logging.warning(f"章节号不连续。期望 {expected_numbers}，实际 {chapter_numbers}")
-            
-            # 先写入临时文件
-            temp_file = outline_file + ".tmp"
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            # 直接写入文件
+            with open(outline_file, 'w', encoding='utf-8') as f:
                 json.dump(outline_data, f, ensure_ascii=False, indent=2)
             
-            # 验证临时文件是否可以正确读取
-            try:
-                with open(temp_file, 'r', encoding='utf-8') as f:
-                    test_load = json.load(f)
-                if not isinstance(test_load, list):
-                    raise ValueError("保存的数据格式不正确")
-            except Exception as e:
-                os.remove(temp_file)
-                raise ValueError(f"验证临时文件失败: {str(e)}")
-            
-            # 如果验证成功，替换原文件
-            if os.path.exists(outline_file):
-                backup_file = outline_file + ".bak"
-                os.replace(outline_file, backup_file)
-                logging.info(f"已创建大纲文件备份: {backup_file}")
-            
-            os.replace(temp_file, outline_file)
             logging.info(f"大纲已成功保存到: {outline_file}")
-            logging.info(f"保存了{len(outline_data)} 章大纲")
+            logging.info(f"保存了{len(self.chapter_outlines)} 章大纲")
             
             # 输出一些大纲统计信息
-            total_key_points = sum(len(chapter["key_points"]) for chapter in outline_data)
-            total_characters = sum(len(chapter["characters"]) for chapter in outline_data)
+            total_key_points = sum(len(chapter["key_points"]) for chapter in outline_data["chapters"])
+            total_characters = sum(len(chapter["characters"]) for chapter in outline_data["chapters"])
             logging.info(f"大纲统计: {total_key_points} 个关键情节点, {total_characters} 个角色出现")
             
-        except TypeError as je: # <-- 修改这里
+        except TypeError as je:
             logging.error(f"JSON编码错误: {str(je)}")
             logging.error("尝试保存的大纲数量")
             for i, outline in enumerate(self.chapter_outlines):
@@ -1757,19 +1729,7 @@ class NovelGenerator:
         return "\n".join(references)
 
     def generate_outline_chapters(self, novel_type: str, theme: str, style: str, mode: str = 'replace', replace_range: Tuple[int, int] = None, extra_prompt: str = None) -> bool:
-        """生成指定范围的章节大纲
-
-        Args:
-            novel_type: 小说类型
-            theme: 小说主题
-            style: 写作风格
-            mode: 生成模式，'replace' 表示替换指定范围的章节
-            replace_range: 要替换的章节范围，格式为 (start, end)，章节号从 1 开始
-            extra_prompt: 额外的提示词
-
-        Returns:
-            bool: 是否成功生成大纲
-        """
+        """生成指定范围的章节大纲"""
         try:
             if mode == 'replace' and replace_range:
                 start_chapter, end_chapter = replace_range
@@ -1780,10 +1740,11 @@ class NovelGenerator:
                 # 计算总共需要生成的章节数
                 total_chapters = end_chapter - start_chapter + 1
                 batch_size = 50  # 每批次生成50章
-                successful_outlines = []  # 用于存储成功生成的大纲
+                successful_outlines = []  # 用于存储所有成功生成的大纲
 
                 # 分批次生成大纲
                 num_batches = (total_chapters + batch_size - 1) // batch_size
+                
                 for batch_idx in range(num_batches):
                     batch_start = start_chapter + (batch_idx * batch_size)
                     batch_end = min(batch_start + batch_size - 1, end_chapter)
@@ -1791,7 +1752,7 @@ class NovelGenerator:
 
                     logging.info(f"开始生成第 {batch_start} 到 {batch_end} 章的大纲（共 {current_batch_size} 章）")
 
-                    # 获取当前批次的上下文（包括之前成功生成的大纲）
+                    # 获取当前批次的上下文
                     existing_context = self._get_context_for_chapter(batch_start, successful_outlines)
                     
                     # 生成大纲
@@ -1805,7 +1766,10 @@ class NovelGenerator:
                         extra_prompt=extra_prompt
                     )
                     
+                    # 当前批次的重试逻辑
                     max_retries = 3
+                    batch_success = False
+                    
                     for attempt in range(max_retries):
                         try:
                             # 调用模型生成大纲
@@ -1842,28 +1806,34 @@ class NovelGenerator:
                             
                             # 替换指定范围的章节
                             self.chapter_outlines[batch_start-1:batch_end] = new_outlines
-                            successful_outlines.extend(new_outlines)
                             
-                            # 每批次完成后保存大纲
-                            self._save_outline()
-                            
-                            logging.info(f"成功生成第 {batch_start} 到 {batch_end} 章的大纲")
-                            break  # 成功生成，跳出重试循环
-                            
+                            # 保存当前批次的大纲
+                            try:
+                                self._save_outline()
+                                # 只有在成功保存后才更新 successful_outlines
+                                successful_outlines.extend(new_outlines)
+                                batch_success = True
+                                logging.info(f"成功生成并保存第 {batch_start} 到 {batch_end} 章的大纲")
+                                break  # 成功生成和保存，跳出重试循环
+                            except Exception as save_error:
+                                logging.error(f"保存大纲时发生错误：{str(save_error)}")
+                                continue
+                                
                         except json.JSONDecodeError as e:
                             logging.error(f"解析大纲JSON时出错（第 {attempt + 1} 次尝试）：{str(e)}")
-                            if attempt == max_retries - 1:
-                                return False
                         except Exception as e:
                             logging.error(f"处理大纲数据时出错（第 {attempt + 1} 次尝试）：{str(e)}")
-                            if attempt == max_retries - 1:
-                                return False
                         
                         # 重试前等待
                         if attempt < max_retries - 1:
                             wait_time = (attempt + 1) * 30
                             logging.info(f"等待 {wait_time} 秒后重试...")
                             time.sleep(wait_time)
+                    
+                    # 如果当前批次处理失败，则终止整个生成过程
+                    if not batch_success:
+                        logging.error(f"在处理第 {batch_start} 到 {batch_end} 章的大纲时失败，终止生成过程")
+                        return False
                     
                     # 每批次之间添加间隔，避免频繁请求
                     if batch_end < end_chapter:
