@@ -1124,7 +1124,7 @@ class NovelGenerator:
                 continue
                 
             # 检查是否包含标点符号或特殊字符
-            if any(char in name for char in "，。！？；？''【】《》（）[]{}├│└─") and name not in protected_characters:
+            if any(char in name for char in "，。！？；？''【】《》（）[]{}├│└─:：\n") and name not in protected_characters:
                 to_delete.append(name)
                 continue
                 
