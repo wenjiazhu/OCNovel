@@ -18,6 +18,8 @@ import time # 需要import time
 # import asyncio # 需要导入 asyncio 来处理可能的 TimeoutError
 import string # 导入 string 模块用于字符串处理
 from opencc import OpenCC
+from nltk.tokenize import word_tokenize
+from nltk.corpus import wordnet
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
@@ -1654,6 +1656,14 @@ class NovelGenerator:
                 logging.error("章节内容过短")
                 return False
                 
+            # 使用自然语言处理技术进行关键词提取与匹配
+            def get_synonyms(word):
+                synonyms = set()
+                for syn in wordnet.synsets(word):
+                    for lemma in syn.lemmas():
+                        synonyms.add(lemma.name())
+                return synonyms
+            
             # 检查是否包含关键情节点（改为更灵活的检查）
             missing_points = []
             for point in outline.key_points:
@@ -1662,11 +1672,16 @@ class NovelGenerator:
                 keywords = re.sub(r'\s+', ' ', keywords).strip()
                 keywords = [k for k in keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
                 
+                # 使用同义词扩展关键词
+                expanded_keywords = set()
+                for keyword in keywords:
+                    expanded_keywords.update(get_synonyms(keyword))
+                
                 # 只要包含一半以上的关键词就算通过
-                matches = sum(1 for k in keywords if k in content)
-                if matches < len(keywords) / 2:
+                matches = sum(1 for k in expanded_keywords if k in content)
+                if matches < len(expanded_keywords) / 2:
                     missing_points.append(point)
-                    logging.warning(f"可能缺少关键情节点 {point}，只匹配?{matches}/{len(keywords)} 个关键词")
+                    logging.warning(f"可能缺少关键情节点 {point}，只匹配?{matches}/{len(expanded_keywords)} 个关键词")
             
             if missing_points:
                 logging.error(f"缺少 {len(missing_points)}/{len(outline.key_points)} 个关键情节点")
