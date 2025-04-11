@@ -1431,8 +1431,6 @@ class NovelGenerator:
         
         # 准备大纲数据
         outline_data = {
-            "version": int(time.time()),  # 使用时间戳作为版本号
-            "last_modified": time.strftime("%Y-%m-%d %H:%M:%S"),
             "chapters": [
                 {
                     "chapter_number": outline.chapter_number,
