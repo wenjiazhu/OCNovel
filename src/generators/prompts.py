@@ -127,7 +127,7 @@ def get_outline_prompt(
 1. 你必须直接输出一个JSON数组，数组中包含 {current_batch_size} 个章节对象
 2. 不要添加任何其他文字说明、注释或代码标记
 3. 每个章节对象必须包含以下字段：
-   - chapter_number (整数): 章节号，从 {current_start_chapter_num} 开始递增
+   - chapter_number (整数): 章节号，从 {current_start_chapter_num} 开始递增，到 {current_start_chapter_num + current_batch_size - 1} 为止
    - title (字符串): 章节标题
    - key_points (字符串数组): 关键剧情点列表，至少2个
    - characters (字符串数组): 涉及角色列表，至少1个

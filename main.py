@@ -164,7 +164,7 @@ def main():
             
             # 生成新的大纲
             logging.info("正在生成小说大纲...")
-            generator.generate_outline_chapters(
+            generator.generate_outline(
                 config.novel_config["type"],
                 config.novel_config["theme"],
                 config.novel_config["style"]
@@ -183,8 +183,10 @@ def main():
                 # 保存小说架构信息
                 generator.save_novel_architecture(characters_data)
                 logging.info("小说架构信息已保存")
-                
-                generator.generate_outline_chapters(
+            
+                # 生成新的大纲                
+                logging.info("正在生成小说大纲...")                # Call the correct method to generate the initial outline chapters
+                generator.generate_outline(
                     config.novel_config["type"],
                     config.novel_config["theme"],
                     config.novel_config["style"]

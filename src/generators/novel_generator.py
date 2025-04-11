@@ -1779,11 +1779,13 @@ class NovelGenerator:
 
                 # 计算总共需要生成的章节数
                 total_chapters = end_chapter - start_chapter + 1
-                batch_size = 50  # 每批次生成75章
+                batch_size = 50  # 每批次生成50章
                 successful_outlines = []  # 用于存储成功生成的大纲
 
                 # 分批次生成大纲
-                for batch_start in range(start_chapter, end_chapter + 1, batch_size):
+                num_batches = (total_chapters + batch_size - 1) // batch_size
+                for batch_idx in range(num_batches):
+                    batch_start = start_chapter + (batch_idx * batch_size)
                     batch_end = min(batch_start + batch_size - 1, end_chapter)
                     current_batch_size = batch_end - batch_start + 1
 
