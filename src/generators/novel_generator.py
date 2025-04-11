@@ -61,11 +61,12 @@ class Character:
     states_history: List[str] = dataclasses.field(default_factory=list)    # 状态历史记录
     descriptions_history: List[str] = dataclasses.field(default_factory=list)  # 描述历史记录
 class NovelGenerator:
-    def __init__(self, config, outline_model, content_model, knowledge_base):
+    def __init__(self, config, outline_model, content_model, knowledge_base, target_chapter=None):
         self.config = config
         self.outline_model = outline_model
         self.content_model = content_model
         self.knowledge_base = knowledge_base
+        self.target_chapter = target_chapter  # 设置 target_chapter
         
         # 验证模型配置
         if not self._validate_model_config():
@@ -165,13 +166,13 @@ class NovelGenerator:
                         logging.info(f"检测到续写模式，角色库为空，但已有{self.current_chapter}章内容，尝试从已生成章节中提取角色信息...")
                         self._extract_characters_from_existing_chapters()
                 
-            if os.path.exists(outline_file):
-                with open(outline_file, 'r', encoding='utf-8') as f:
-                    outline_data = json.load(f)
-                    self.chapter_outlines = [
-                        ChapterOutline(**chapter)
-                        for chapter in outline_data
-                    ]
+        if os.path.exists(outline_file):
+            with open(outline_file, 'r', encoding='utf-8') as f:
+                outline_data = json.load(f)
+                self.chapter_outlines = [
+                    ChapterOutline(**chapter)
+                    for chapter in outline_data  # 直接迭代列表
+                ]
     
     def _extract_characters_from_existing_chapters(self):
         """从已生成的章节中提取角色信息"""
@@ -1158,7 +1159,7 @@ class NovelGenerator:
                     outline_data = json.load(f)
                     self.chapter_outlines = [
                         ChapterOutline(**chapter)
-                        for chapter in outline_data
+                        for chapter in outline_data['chapters']
                     ]
                 logging.info(f"成功从文件加载大纲，共 {len(self.chapter_outlines)} 章")
             except Exception as e:
@@ -1240,10 +1241,10 @@ class NovelGenerator:
 
             # 根据模型类型设置最大批次大小
             if "flash" in model_name:
-                self.max_batch_size = 3
+                self.max_batch_size = 50
                 logger.info(f"使用 Flash 模型，设置最大批次大小为 {self.max_batch_size}")
             elif "pro" in model_name:
-                self.max_batch_size = 5
+                self.max_batch_size = 100
                 logger.info(f"使用 Pro 模型，设置最大批次大小为 {self.max_batch_size}")
             else:
                 self.max_batch_size = 3
@@ -1488,6 +1489,10 @@ class NovelGenerator:
             max_retries = 3  # 每章最多重试次数
             
             while self.current_chapter < total_chapters:
+                if self.target_chapter is not None and self.current_chapter == self.target_chapter:
+                    logging.info(f"已生成目标章节 {self.current_chapter + 1}，停止生成后续章节。")
+                    break
+                
                 chapter_retries = 0
                 while chapter_retries < max_retries:
                     try:
@@ -1712,19 +1717,22 @@ class NovelGenerator:
             logging.error(f"验证章节内容时发生错误: {str(e)}")
             return False
 
-    def _format_references(self, chapter_outline_dict: dict) -> str:
+    def _format_references(self, chapter_outline_dict: dict) -> dict:
         """格式化当前章节大纲的关键信息作为引用"""
-        references = []
-        references.append(f"本章标题: {chapter_outline_dict.get('title', '未知')}")
+        references = {
+            'plot_references': [],
+            'character_references': [],
+            'setting_references': []
+        }
+        
         if chapter_outline_dict.get('key_points'):
-            references.append(f"关键情节: {', '.join(chapter_outline_dict['key_points'])}")
+            references['plot_references'] = chapter_outline_dict['key_points']
         if chapter_outline_dict.get('characters'):
-            references.append(f"涉及角色: {', '.join(chapter_outline_dict['characters'])}")
+            references['character_references'] = chapter_outline_dict['characters']
         if chapter_outline_dict.get('settings'):
-            references.append(f"场景: {', '.join(chapter_outline_dict['settings'])}")
-        if chapter_outline_dict.get('conflicts'):
-            references.append(f"冲突: {', '.join(chapter_outline_dict['conflicts'])}")
-        return "\n".join(references)
+            references['setting_references'] = chapter_outline_dict['settings']
+        
+        return references
 
     def generate_outline_chapters(self, novel_type: str, theme: str, style: str, mode: str = 'replace', replace_range: Tuple[int, int] = None, extra_prompt: str = None) -> bool:
         """生成指定范围的章节大纲"""
