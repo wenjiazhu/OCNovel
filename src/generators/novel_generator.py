@@ -1490,7 +1490,7 @@ class NovelGenerator:
             total_characters = sum(len(chapter["characters"]) for chapter in outline_data)
             logging.info(f"大纲统计: {total_key_points} 个关键情节点, {total_characters} 个角色出现")
             
-        except json.JSONEncodeError as je:
+        except TypeError as je: # <-- 修改这里
             logging.error(f"JSON编码错误: {str(je)}")
             logging.error("尝试保存的大纲数量")
             for i, outline in enumerate(self.chapter_outlines):
@@ -1742,11 +1742,18 @@ class NovelGenerator:
             logging.error(f"验证章节内容时发生错误: {str(e)}")
             return False
 
-    def _format_references(self, outline: dict) -> str:
-        """格式化引用信息"""
+    def _format_references(self, chapter_outline_dict: dict) -> str:
+        """格式化当前章节大纲的关键信息作为引用"""
         references = []
-        for chapter in outline['chapters']:
-            references.append(f"第{chapter['chapter_number']}章 {chapter['title']}")
+        references.append(f"本章标题: {chapter_outline_dict.get('title', '未知')}")
+        if chapter_outline_dict.get('key_points'):
+            references.append(f"关键情节: {', '.join(chapter_outline_dict['key_points'])}")
+        if chapter_outline_dict.get('characters'):
+            references.append(f"涉及角色: {', '.join(chapter_outline_dict['characters'])}")
+        if chapter_outline_dict.get('settings'):
+            references.append(f"场景: {', '.join(chapter_outline_dict['settings'])}")
+        if chapter_outline_dict.get('conflicts'):
+            references.append(f"冲突: {', '.join(chapter_outline_dict['conflicts'])}")
         return "\n".join(references)
 
     def generate_outline_chapters(self, novel_type: str, theme: str, style: str, mode: str = 'replace', replace_range: Tuple[int, int] = None, extra_prompt: str = None) -> bool:
@@ -1770,71 +1777,100 @@ class NovelGenerator:
                     logging.error("无效的章节范围")
                     return False
 
-                # 获取现有章节的上下文
-                existing_context = self._get_context_for_chapter(start_chapter)
-                
-                # 计算需要生成的章节数
-                batch_size = end_chapter - start_chapter + 1
-                
-                # 生成大纲
-                prompt = prompts.get_outline_prompt(
-                    novel_type=novel_type,
-                    theme=theme,
-                    style=style,
-                    current_start_chapter_num=start_chapter,
-                    current_batch_size=batch_size,
-                    existing_context=existing_context,
-                    extra_prompt=extra_prompt
-                )
-                
-                # 调用模型生成大纲
-                outline_text = self.outline_model.generate(prompt)
-                if not outline_text:
-                    logging.error("生成大纲失败：模型返回空内容")
-                    return False
-                
-                try:
-                    # 解析大纲文本
-                    outline_data = json.loads(outline_text)
+                # 计算总共需要生成的章节数
+                total_chapters = end_chapter - start_chapter + 1
+                batch_size = 50  # 每批次生成75章
+                successful_outlines = []  # 用于存储成功生成的大纲
+
+                # 分批次生成大纲
+                for batch_start in range(start_chapter, end_chapter + 1, batch_size):
+                    batch_end = min(batch_start + batch_size - 1, end_chapter)
+                    current_batch_size = batch_end - batch_start + 1
+
+                    logging.info(f"开始生成第 {batch_start} 到 {batch_end} 章的大纲（共 {current_batch_size} 章）")
+
+                    # 获取当前批次的上下文（包括之前成功生成的大纲）
+                    existing_context = self._get_context_for_chapter(batch_start, successful_outlines)
                     
-                    # 验证大纲数据
-                    if not isinstance(outline_data, list):
-                        logging.error("生成的大纲格式不正确：不是数组")
-                        return False
+                    # 生成大纲
+                    prompt = prompts.get_outline_prompt(
+                        novel_type=novel_type,
+                        theme=theme,
+                        style=style,
+                        current_start_chapter_num=batch_start,
+                        current_batch_size=current_batch_size,
+                        existing_context=existing_context,
+                        extra_prompt=extra_prompt
+                    )
                     
-                    if len(outline_data) != batch_size:
-                        logging.error(f"生成的章节数量不正确：期望 {batch_size}，实际 {len(outline_data)}")
-                        return False
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            # 调用模型生成大纲
+                            outline_text = self.outline_model.generate(prompt)
+                            if not outline_text:
+                                logging.error(f"生成大纲失败：模型返回空内容（第 {attempt + 1} 次尝试）")
+                                continue
+                            
+                            # 解析大纲文本
+                            outline_data = json.loads(outline_text)
+                            
+                            # 验证大纲数据
+                            if not isinstance(outline_data, list):
+                                logging.error(f"生成的大纲格式不正确：不是数组（第 {attempt + 1} 次尝试）")
+                                continue
+                            
+                            if len(outline_data) != current_batch_size:
+                                logging.error(f"生成的章节数量不正确：期望 {current_batch_size}，实际 {len(outline_data)}（第 {attempt + 1} 次尝试）")
+                                continue
+                            
+                            # 创建新的章节大纲对象
+                            new_outlines = []
+                            for i, chapter in enumerate(outline_data):
+                                chapter_num = batch_start + i
+                                new_outline = ChapterOutline(
+                                    chapter_number=chapter_num,
+                                    title=chapter.get('title', f'第{chapter_num}章'),
+                                    key_points=chapter.get('key_points', []),
+                                    characters=chapter.get('characters', []),
+                                    settings=chapter.get('settings', []),
+                                    conflicts=chapter.get('conflicts', [])
+                                )
+                                new_outlines.append(new_outline)
+                            
+                            # 替换指定范围的章节
+                            self.chapter_outlines[batch_start-1:batch_end] = new_outlines
+                            successful_outlines.extend(new_outlines)
+                            
+                            # 每批次完成后保存大纲
+                            self._save_outline()
+                            
+                            logging.info(f"成功生成第 {batch_start} 到 {batch_end} 章的大纲")
+                            break  # 成功生成，跳出重试循环
+                            
+                        except json.JSONDecodeError as e:
+                            logging.error(f"解析大纲JSON时出错（第 {attempt + 1} 次尝试）：{str(e)}")
+                            if attempt == max_retries - 1:
+                                return False
+                        except Exception as e:
+                            logging.error(f"处理大纲数据时出错（第 {attempt + 1} 次尝试）：{str(e)}")
+                            if attempt == max_retries - 1:
+                                return False
+                        
+                        # 重试前等待
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 30
+                            logging.info(f"等待 {wait_time} 秒后重试...")
+                            time.sleep(wait_time)
                     
-                    # 创建新的章节大纲对象
-                    new_outlines = []
-                    for i, chapter in enumerate(outline_data):
-                        chapter_num = start_chapter + i
-                        new_outline = ChapterOutline(
-                            chapter_number=chapter_num,
-                            title=chapter.get('title', f'第{chapter_num}章'),
-                            key_points=chapter.get('key_points', []),
-                            characters=chapter.get('characters', []),
-                            settings=chapter.get('settings', []),
-                            conflicts=chapter.get('conflicts', [])
-                        )
-                        new_outlines.append(new_outline)
-                    
-                    # 替换指定范围的章节
-                    self.chapter_outlines[start_chapter-1:end_chapter] = new_outlines
-                    
-                    # 保存更新后的大纲
-                    self._save_outline()
-                    
-                    logging.info(f"成功生成并更新了第 {start_chapter} 到 {end_chapter} 章的大纲")
-                    return True
-                    
-                except json.JSONDecodeError as e:
-                    logging.error(f"解析大纲JSON时出错：{str(e)}")
-                    return False
-                except Exception as e:
-                    logging.error(f"处理大纲数据时出错：{str(e)}")
-                    return False
+                    # 每批次之间添加间隔，避免频繁请求
+                    if batch_end < end_chapter:
+                        wait_time = 60  # 每批次之间等待60秒
+                        logging.info(f"本批次完成，等待 {wait_time} 秒后继续下一批次...")
+                        time.sleep(wait_time)
+
+                logging.info(f"所有批次的大纲生成完成，共生成 {len(successful_outlines)} 章")
+                return True
             else:
                 logging.error("不支持的生成模式或缺少必要参数")
                 return False
