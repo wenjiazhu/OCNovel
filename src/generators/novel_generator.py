@@ -808,6 +808,9 @@ class NovelGenerator:
             if not safe_title: # 如果清理后标题为空，使用默认名称
                 safe_title = f"章节_{chapter_num}"
 
+            # 在保存之前，将连续的空格替换为一个换行符
+            content = re.sub(r' +', '\n', content)
+
             # 构建文件名和路径
             filename = f"第{chapter_num}章_{safe_title}.txt"
             filepath = os.path.join(self.output_dir, filename)
@@ -1291,6 +1294,8 @@ class NovelGenerator:
                         logger.warning(f"第{attempt + 1}次尝试生成大纲失败，返回空文本")
                         continue
 
+                    logging.debug(f"Generated outline text (first 400 chars): {outline_text[:400]}")
+
                     # 解析大纲
                     outline = self._parse_outline(outline_text)
                     if not outline:
@@ -1560,6 +1565,30 @@ class NovelGenerator:
                             
                             # 验证章节内容
                             if self._validate_chapter_content(content, chapter_outline):
+                                # 一致性检查
+                                consistency_report, needs_revision, consistency_score = self.consistency_checker.check_chapter_consistency(
+                                    content, outline_dict, self.current_chapter, self.characters
+                                )
+                                if needs_revision:
+                                    logging.info(f"第{self.current_chapter + 1} 章需要一致性修正，得分: {consistency_score}")
+                                    content = self.consistency_checker.ensure_chapter_consistency(
+                                        content, outline_dict, self.current_chapter, self.characters
+                                    )
+                                
+                                # 逻辑性验证
+                                logic_report, logic_needs_revision = self.logic_validator.check_logic(content, outline_dict)
+                                if logic_needs_revision:
+                                    logging.warning(f"第{self.current_chapter + 1} 章逻辑验证失败: {logic_report}")
+                                
+                                # 重复文本验证
+                                prev_content = ""  # 可以从之前的章节中获取
+                                next_content = ""  # 可以从后续章节中获取
+                                duplicate_report, duplicate_needs_revision = self.duplicate_validator.check_duplicates(
+                                    content, prev_content, next_content
+                                )
+                                if duplicate_needs_revision:
+                                    logging.warning(f"第{self.current_chapter + 1} 章重复文本验证失败: {duplicate_report}")
+                                
                                 # 保存章节
                                 self._save_chapter(self.current_chapter + 1, content)
                                 logging.info(f"第{self.current_chapter + 1} 章生成完成")
