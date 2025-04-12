@@ -139,16 +139,25 @@ def main():
             config,
             outline_model,
             content_model,
-            knowledge_base
+            knowledge_base,
+            target_chapter=args.chapter,
+            external_prompt=args.prompt
         )
         
-        # 设置当前章节为目标章节索引
+        # 强制设置当前章节为目标章节的索引，覆盖从 progress.json 加载的值
+        logging.info(f"强制设置开始章节为: {args.chapter}")
+        if args.prompt:
+             logging.info(f"使用外部提示词: {args.prompt}")
         generator.current_chapter = args.chapter - 1
-        
+
         # 调用generate_novel方法
         generator.generate_novel()
-        logging.info(f"第 {args.chapter} 章生成完成")
-        
+        # 检查生成器最终的 current_chapter 是否等于 target_chapter 来确认是否真的生成了
+        if generator.current_chapter == args.chapter:
+             logging.info(f"第 {args.chapter} 章重新生成完成")
+        else:
+             logging.warning(f"第 {args.chapter} 章可能未生成，生成器停止在章节 {generator.current_chapter + 1}")
+
     except Exception as e:
         logging.error(f"程序执行出错: {str(e)}")
         raise

@@ -68,12 +68,13 @@ class Character:
     states_history: List[str] = dataclasses.field(default_factory=list)    # 状态历史记录
     descriptions_history: List[str] = dataclasses.field(default_factory=list)  # 描述历史记录
 class NovelGenerator:
-    def __init__(self, config, outline_model, content_model, knowledge_base, target_chapter=None):
+    def __init__(self, config, outline_model, content_model, knowledge_base, target_chapter=None, external_prompt: Optional[str] = None):
         self.config = config
         self.outline_model = outline_model
         self.content_model = content_model
         self.knowledge_base = knowledge_base
         self.target_chapter = target_chapter  # 设置 target_chapter
+        self.external_prompt = external_prompt  # <--- 保存外部提示词
         
         # 验证模型配置
         if not self._validate_model_config():
@@ -545,10 +546,8 @@ class NovelGenerator:
                     escaped_left = re.escape(left)
                     escaped_right = re.escape(right)
                     # Construct pattern using escaped delimiters
-                    # Using negated character set:
-                    pattern = f'{escaped_left}([^{escaped_right}]+){escaped_right}'
-                    # Alternatively, non-greedy match (safer for nested structures, though less performant):
-                    # pattern = f'{escaped_left}(.*?){escaped_right}'
+                    # Using non-greedy match (safer for nested structures):
+                    pattern = f'{escaped_left}(.*?){escaped_right}' # 使用非贪婪匹配替代原来的 negated character set
 
                     try:
                         # Use the constructed pattern
@@ -1265,11 +1264,21 @@ class NovelGenerator:
             try:
                 with open(outline_file, 'r', encoding='utf-8') as f:
                     outline_data = json.load(f)
+                    # 检查加载的数据是否为列表
+                    if not isinstance(outline_data, list):
+                        logging.error(f"大纲文件 {outline_file} 格式不正确，期望列表，实际为 {type(outline_data)}")
+                        self.chapter_outlines = []
+                        return # 格式不正确则返回
+
+                    # 直接迭代列表来创建 ChapterOutline 对象
                     self.chapter_outlines = [
                         ChapterOutline(**chapter)
-                        for chapter in outline_data['chapters']
+                        for chapter in outline_data # <--- 修改这里，直接迭代列表
                     ]
                 logging.info(f"成功从文件加载大纲，共 {len(self.chapter_outlines)} 章")
+            except json.JSONDecodeError as e:
+                logging.error(f"加载大纲文件 {outline_file} 时 JSON 解析失败: {str(e)}")
+                self.chapter_outlines = []
             except Exception as e:
                 logging.error(f"加载大纲文件时出错 {str(e)}")
                 self.chapter_outlines = []
@@ -1600,7 +1609,8 @@ class NovelGenerator:
 
             while self.current_chapter < total_chapters:
                 if self.target_chapter is not None and self.current_chapter == self.target_chapter:
-                    logging.info(f"已生成目标章节 {self.current_chapter + 1}，停止生成后续章节。")
+                    # 修改日志，使其更清晰地表明已完成目标章节并停止
+                    logging.info(f"已完成目标章节 {self.target_chapter} 的生成，停止生成后续章节。")
                     break
 
                 chapter_retries = 0
@@ -1625,20 +1635,27 @@ class NovelGenerator:
                             "conflicts": chapter_outline.conflicts
                         }
 
-                        # 构建提示词 - 在重试时添加额外指导
-                        extra_prompt = ""
+                        # --- 修改这里：合并外部提示词和重试提示词 ---
+                        combined_extra_prompt = ""
+                        # 1. 添加外部提示词 (如果存在)
+                        if self.external_prompt:
+                            combined_extra_prompt += f"\n**额外指令**：\n{self.external_prompt}\n"
+                            logging.info(f"为第 {self.current_chapter + 1} 章添加外部提示词: {self.external_prompt[:100]}...") # 日志记录
+
+                        # 2. 添加重试相关的提示词 (如果不是第一次尝试)
                         if chapter_retries > 0:
-                            extra_prompt = f"""
-                            注意：这是第{chapter_retries+1}次尝试生成。请务必严格遵循以下章节大纲要点：
+                            retry_prompt_header = f"\n注意：这是第{chapter_retries+1}次尝试生成。请务必严格遵循以下章节大纲要点："
+                            retry_prompt_body = f"""
                             - 关键情节点：{chr(10).join(['  * ' + point for point in chapter_outline.key_points])}
                             - 涉及角色：{chr(10).join(['  * ' + character for character in chapter_outline.characters])}
                             - 场景：{chr(10).join(['  * ' + setting for setting in chapter_outline.settings])}
                             - 冲突：{chr(10).join(['  * ' + conflict for conflict in chapter_outline.conflicts])}
                             """
+                            combined_extra_prompt += retry_prompt_header + retry_prompt_body
                             # 如果有上一轮的修改建议，添加到提示词中
                             if retry_suggestions:
-                                extra_prompt += f"\n\n**重要：请根据上次尝试失败后的以下建议进行修改和优化：**\n{retry_suggestions}\n"
-
+                                combined_extra_prompt += f"\n\n**重要：请根据上次尝试失败后的以下建议进行修改和优化：**\n{retry_suggestions}\n"
+                        # --- 合并结束 ---
 
                         # 尝试从前一章获取上下文信息
                         context_info = ""
@@ -1658,13 +1675,14 @@ class NovelGenerator:
                                 except Exception as e:
                                     logging.warning(f"读取前一章内容时出错: {str(e)}")
 
-                        # 获取章节内容
+                        # 获取章节内容 - 使用合并后的提示词
                         prompt = prompts.get_chapter_prompt(
                             outline=outline_dict,
                             references=self._format_references(outline_dict),
-                            extra_prompt=extra_prompt,
+                            extra_prompt=combined_extra_prompt.strip(), # <--- 使用合并后的提示词
                             context_info=context_info
                         )
+                        # logging.debug(f"最终传递给 get_chapter_prompt 的 extra_prompt:\n{combined_extra_prompt.strip()}") # 可选：调试日志
 
                         # 生成章节内容
                         try:

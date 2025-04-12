@@ -131,6 +131,42 @@ python src/tools/update_summary.py 5 8
 python src/tools/update_summary.py 12 --output_dir output
 ```
 
+### 6. 整理章节内容 (process_novel.py)
+
+如果你有原始的、未处理的小说章节文件（例如，繁体中文、标点不规范），可以使用 `src/tools/process_novel.py` 脚本进行批量整理。该脚本可以完成以下任务：
+
+-   将繁体中文转换为简体中文。
+-   将常见的半角标点符号转换为全角中文标点。
+-   移除文本中的所有空格。
+-   （可选）将每个句子拆分成单独的段落。
+-   统计每个章节正文的汉字数量，并将其添加到输出文件名末尾的括号中。
+
+```bash
+python src/tools/process_novel.py <输入目录> <输出目录> -e <结束章节号> [-s <起始章节号>] [--split-sentences]
+```
+
+**参数说明:**
+
+-   `<输入目录>`: 包含原始章节文件的目录路径。章节文件命名应符合格式 `第{数字}章_任意字符.txt` (例如 `第1章_初遇.txt`)。**必需参数**。
+-   `<输出目录>`: 保存处理后章节文件的目录路径。脚本会自动创建此目录（如果不存在）。**必需参数**。
+-   `-e <结束章节号>` 或 `--end <结束章节号>`: 需要处理的结束章节号（包含）。**必需参数**。
+-   `-s <起始章节号>` 或 `--start <起始章节号>`: *(可选)* 需要处理的起始章节号（包含），默认为 `1`。
+-   `--split-sentences`: *(可选)* 是否将每个句子拆分为一个段落。如果指定此参数，则启用该功能。
+
+**示例:**
+
+处理位于 `data/raw_chapters` 目录下的第 1 章到第 50 章，将结果保存到 `data/processed_chapters`，并启用句子分段：
+
+```bash
+python src/tools/process_novel.py data/raw_chapters data/processed_chapters -s 1 -e 50 --split-sentences
+```
+
+处理位于 `input` 目录下所有章节号小于等于 100 的章节（从默认第 1 章开始），保存到 `output` 目录，不进行句子分段：
+
+```bash
+python src/tools/process_novel.py input output -e 100
+```
+
 ## 项目结构
 
 ```
@@ -226,187 +262,3 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
   "chapter_length": 2000    // 每章目标字数 (AI会尽量靠近此目标)
 }
 ```
-
-##### 2.3.2 写作指南 (`writing_guide`)
-
-用于详细指导 AI 的创作方向。
-
-###### 世界观设定 (`world_building`)
-```json
-{
-  "magic_system": "示例力量体系或核心设定", // 定义世界的力量规则、科技水平等
-  "social_system": "示例社会结构或势力划分", // 描述世界的主要组织、国家、种族等
-  "background": "示例时代背景或世界起源"   // 设定故事发生的宏观背景
-}
-```
-
-###### 人物设定 (`character_guide`)
-```json
-{
-  "protagonist": { // 主角设定
-    "background": "示例主角背景故事",
-    "initial_personality": "示例主角初始性格",
-    "growth_path": "示例主角成长或转变路径"
-  },
-  "supporting_roles": [ // 重要配角列表
-    {
-      "role_type": "示例配角类型 (例如: 导师, 挚友, 竞争对手)", // 配角的类型或定位
-      "personality": "示例配角性格",
-      "relationship": "示例配角与主角的关系"
-    }
-    // 可添加更多配角...
-  ],
-  "antagonists": [ // 主要反派列表
-    {
-      "role_type": "示例反派类型 (例如: 宿敌, 幕后黑手, 理念冲突者)", // 反派的类型或定位
-      "personality": "示例反派性格",
-      "conflict_point": "示例反派与主角的核心冲突"
-    }
-    // 可添加更多反派...
-  ]
-}
-```
-
-###### 情节结构 (`plot_structure`)
-这部分定义了故事的大致走向，可以参考经典的三幕剧结构或其他结构。
-```json
-{
-  "act_one": { // 第一幕：开端
-    "setup": "示例开篇设定和背景介绍",
-    "inciting_incident": "示例激励事件，故事的起点",
-    "first_plot_point": "示例第一主要情节转折点"
-  },
-  "act_two": { // 第二幕：发展
-    "rising_action": "示例上升情节，主角应对挑战",
-    "midpoint": "示例中点事件，重要的转折或揭示",
-    "complications": "示例情节复杂化，困难加剧",
-    "darkest_moment": "示例主角面临的最低谷或最大危机",
-    "second_plot_point": "示例第二主要情节转折点，导向结局"
-  },
-  "act_three": { // 第三幕：结局
-    "climax": "示例高潮，最终对决或问题解决",
-    "resolution": "示例结局，事件的最终结果",
-    "denouement": "示例尾声，展示结局后的状态"
-  }
-}
-```
-
-###### 写作风格指南 (`style_guide`)
-```json
-{
-  "tone": "示例整体基调 (例如: 轻松幽默, 严肃深刻)", // 小说的整体情感色彩
-  "pacing": "示例节奏控制 (例如: 快节奏, 张弛有度)", // 故事进展的速度
-  "description_focus": [ // 描写侧重点列表
-    "示例描写侧重点1 (例如: 动作场面)", // AI应侧重描写的方面
-    "示例描写侧重点2 (例如: 内心活动)",
-    "示例描写侧重点3 (例如: 环境氛围)"
-    // 可添加更多侧重点...
-  ]
-}
-```
-
-##### 2.3.3 额外指导 (`extra_guidance`) (可选)
-
-提供更具体、细化的写作规则，进一步约束或引导 AI 的生成。
-
-```json
-{
-  "writing_style": { // 细化的写作风格要求
-    "pacing": "示例章节节奏 (例如: 每章一个小高潮)",
-    "description": "示例描写风格 (例如: 简洁, 华丽)",
-    "dialogue": "示例对话风格 (例如: 生活化, 富含信息)",
-    "action": "示例动作场景风格 (例如: 强调速度, 强调策略)"
-  },
-  "content_rules": { // 内容规则
-    "must_include": [ // 每章或整体必须包含的特定元素
-      "示例必须包含的元素1",
-      "示例必须包含的元素2"
-     ],
-    "must_avoid": [ // 需要避免的情节或设定
-      "示例必须避免的内容1",
-      "示例必须避免的内容2"
-     ]
-  },
-  "chapter_structure": { // 章节结构建议
-    "opening": "示例章节开头方式 (例如: 以悬念开始)",
-    "development": "示例章节情节推进方式",
-    "climax": "示例章节高潮设置方式",
-    "ending": "示例章节结尾方式 (例如: 留下钩子)"
-  },
-  "plot_corrections": { // 针对常见网文套路的修正或创新点 (可选)
-    "example_correction_1": {
-      "title": "示例修正点标题1", // 修正点的简要概括
-      "description": "示例修正点描述1，说明如何避免某个套路或进行创新" // 具体描述
-    },
-    "example_correction_2": {
-      "title": "示例修正点标题2",
-      "description": "示例修正点描述2"
-    }
-    // 可添加更多修正点...
-  }
-}
-```
-
-#### 2.4 生成配置 (generation_config)
-
-控制小说生成过程的配置项。
-
-```json
-{
-  "max_retries": 3,                                     // 生成失败时的最大重试次数
-  "retry_delay": 10,                                    // 重试间隔时间（秒）
-  "force_rebuild_kb": false,                            // 是否强制重建知识库
-  "validation": {                                       // 内容验证选项
-    "check_logic": true,                                // 检查逻辑连贯性
-    "check_consistency": true,                          // 检查前后一致性
-    "check_duplicates": true                            // 检查重复内容
-  }
-}
-```
-
-#### 2.5 输出配置 (output_config)
-
-控制生成结果的保存配置项。
-
-```json
-{
-  "format": "txt",                                      // 输出文件格式
-  "encoding": "utf-8",                                  // 文件编码
-  "save_outline": true,                                 // 是否保存大纲
-  "save_character_states": true,                        // 是否保存角色状态
-  "output_dir": "data/output"                           // 输出目录
-}
-```
-
-## 注意事项
-
-1. 首次运行时会自动创建必要的目录结构
-2. 确保参考小说文件存在且格式正确
-3. 生成过程中可以随时中断，下次运行时会询问是否继续
-4. 建议定期备份生成的内容
-5. 请妥善保管 `.env` 文件中的 API 密钥，不要将其提交到版本控制系统
-
-## 常见问题
-
-1. API 密钥配置问题
-   - 检查 `.env` 文件是否正确配置
-   - 确认 API 密钥是否有效
-   - 确保环境变量已正确加载
-
-2. 知识库构建失败
-   - 检查参考文件是否存在
-   - 确认文件编码为 UTF-8
-   - 验证知识库配置参数是否合理
-
-3. 生成内容质量不理想
-   - 调整 `config.json` 中的生成参数
-   - 提供更多优质的参考小说
-   - 检查写作指南的详细程度
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request 来帮助改进项目。
-
-## 许可证
-
-本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。 
