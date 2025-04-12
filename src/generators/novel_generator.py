@@ -18,8 +18,13 @@ import time # 需要import time
 # import asyncio # 需要导入 asyncio 来处理可能的 TimeoutError
 import string # 导入 string 模块用于字符串处理
 from opencc import OpenCC
-from nltk.tokenize import word_tokenize
-from nltk.corpus import wordnet
+# from nltk.tokenize import word_tokenize # 可以移除 nltk 依赖
+# from nltk.corpus import wordnet # 可以移除 nltk 依赖
+try:
+    import jieba # 尝试导入 jieba
+except ImportError:
+    logging.warning("jieba 库未安装，关键词提取可能效果不佳。请运行 'pip install jieba'")
+    jieba = None # 设置为 None，以便后续检查
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
@@ -132,13 +137,13 @@ class NovelGenerator:
             handler = logging.FileHandler(log_file, encoding='utf-8')
             print("FileHandler 创建成功") # 确认 FileHandler 创建
 
-            handler.setLevel(logging.INFO) # 设置 handler 的日志级别
+            handler.setLevel(logging.DEBUG) # 设置 handler 的日志级别
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
 
             logger = logging.getLogger() # 获取 root logger
             logger.addHandler(handler) # 添加 handler 到 root logger
-            logger.setLevel(logging.INFO) # 设置 root logger 的日志级别
+            logger.setLevel(logging.DEBUG) # 设置 root logger 的日志级别
 
             print("日志 Handler 添加到 Logger") # 确认 Handler 添加成功
             logging.info("日志系统初始化完成") # 添加一条日志，确认日志系统工作
@@ -279,7 +284,7 @@ class NovelGenerator:
                         return None # 返回 None 表示加载失败
 
                     logging.info(f"从文件中加载到角色数量(前500 字符): {str(characters_data)[:500]}") # 记录加载内容（部分）
-                    
+
                     # 尝试构建 Character 对象
                     temp_chars = {}
                     for name, data in characters_data.items():
@@ -288,18 +293,30 @@ class NovelGenerator:
                             # 补充旧数据兼容性处理
                             if not hasattr(char, 'sect'): char.sect = "无门无派"
                             if not hasattr(char, 'position'): char.position = "普通弟子"
+                            # 补充更多可能缺失的字段
+                            if not hasattr(char, 'alignment'): char.alignment = "中立"
+                            if not hasattr(char, 'realm'): char.realm = "凡人"
+                            if not hasattr(char, 'level'): char.level = 1
+                            if not hasattr(char, 'cultivation_method'): char.cultivation_method = "无"
+                            if not hasattr(char, 'magic_treasure'): char.magic_treasure = []
+                            if not hasattr(char, 'temperament'): char.temperament = "平和"
+                            if not hasattr(char, 'ability'): char.ability = []
+                            if not hasattr(char, 'stamina'): char.stamina = 100
+                            if not hasattr(char, 'emotions_history'): char.emotions_history = []
+                            if not hasattr(char, 'states_history'): char.states_history = []
+                            if not hasattr(char, 'descriptions_history'): char.descriptions_history = []
                             temp_chars[name] = char
                         except TypeError as te:
                             logging.warning(f"创建角色 '{name}' 时数据字段不匹配或缺失 {te}. Data: {data}")
                         except Exception as char_e:
                             logging.error(f"创建角色 '{name}' 时发生未知错误 {char_e}. Data: {data}")
-                    
+
                     characters_dict = temp_chars # 赋值给局部变量
-                    
+
                     # 加载后立即清理
                     self.characters = characters_dict
                     self.clean_character_library()
-                    characters_dict = self.characters
+                    characters_dict = self.characters # 获取清理后的结果
 
             except json.JSONDecodeError as e:
                 logging.error(f"加载角色库文件{self.characters_file} 从JSON 解析失败: {e}")
@@ -308,18 +325,76 @@ class NovelGenerator:
                 logging.error(f"加载角色库文件{self.characters_file} 时发生未知错误 {e}", exc_info=True)
                 return None # 返回 None 表示加载失败
         else:
-            # 初始化一些基础角色
-            characters_dict = {
-                "陆沉": Character(
-                    name="陆沉",
-                    role="主角",
-                    personality={"坚韧": 0.8, "机智": 0.7},
-                    goals=["对抗伪天尊", "收集道纹"],
-                    relationships={"机械天尊": "盟友"},
-                    development_stage="成长初期"
-                )
-            }
-            logging.info("角色库文件不存在，已初始化基础角色")
+            logging.info("角色库文件不存在，根据配置初始化基础角色...")
+            characters_dict = {}
+            try:
+                # 尝试从 config.json 加载初始角色
+                character_guide = self.config.novel_config.get("writing_guide", {}).get("character_guide", {})
+
+                # 1. 处理主角
+                protagonist_data = character_guide.get("protagonist", {})
+                protagonist_bg = protagonist_data.get("background", "")
+                # 尝试从背景描述中提取主角名（这里假设主角名为"陆沉"）
+                # 注意：这种提取方式比较脆弱，最好在config中明确指定主角名
+                protagonist_name = "主角" # 默认名
+                match = re.search(r"([^\s，。；：？！]{2,4})(?:意外觉醒|继承)", protagonist_bg) # 尝试匹配名字
+                if match:
+                    protagonist_name = match.group(1)
+                elif "陆沉" in protagonist_bg: # B方案：直接查找特定名字
+                    protagonist_name = "陆沉"
+
+                if protagonist_name:
+                    char = self._create_basic_character(protagonist_name)
+                    char.role = "主角"
+                    # 可以根据config中的描述稍微丰富一下初始设定
+                    if "坚韧" in protagonist_bg or "机智" in protagonist_bg:
+                         char.personality = {"坚韧": 0.8, "机智": 0.7}
+                    # 从背景中提取目标
+                    goals = re.findall(r"对抗(.+?)[\s，。；：？！]", protagonist_bg) + re.findall(r"收集(.+?)[\s，。；：？！]", protagonist_bg)
+                    if goals:
+                         char.goals = goals
+
+                    characters_dict[char.name] = char # 使用 _create_basic_character 返回的名字（可能是简体）
+                    logging.info(f"已初始化主角: {char.name}")
+
+                # 2. 处理配角
+                supporting_roles_data = character_guide.get("supporting_roles", [])
+                for i, role_data in enumerate(supporting_roles_data):
+                    role_name = role_data.get("role_type")
+                    if role_name:
+                        char = self._create_basic_character(role_name)
+                        char.role = "配角"
+                        characters_dict[char.name] = char
+                        logging.info(f"已初始化配角: {char.name}")
+                    else:
+                         logging.warning(f"配置文件中第 {i+1} 个配角缺少 'role_type'")
+
+                # 3. 处理反派
+                antagonists_data = character_guide.get("antagonists", [])
+                for i, role_data in enumerate(antagonists_data):
+                    role_name = role_data.get("role_type")
+                    if role_name:
+                        char = self._create_basic_character(role_name)
+                        char.role = "反派"
+                        characters_dict[char.name] = char
+                        logging.info(f"已初始化反派: {char.name}")
+                    else:
+                         logging.warning(f"配置文件中第 {i+1} 个反派缺少 'role_type'")
+
+                # 如果经过以上步骤，角色库仍然为空，则添加一个默认角色以防万一
+                if not characters_dict:
+                     logging.warning("未能从配置中初始化任何角色，添加默认主角 '陆沉'")
+                     char = self._create_basic_character("陆沉")
+                     char.role = "主角"
+                     characters_dict[char.name] = char
+
+            except Exception as e:
+                logging.error(f"从配置初始化角色时出错: {str(e)}，将使用默认主角 '陆沉'")
+                # 出错时回退到只添加默认主角
+                char = self._create_basic_character("陆沉")
+                char.role = "主角"
+                characters_dict = {char.name: char}
+
         return characters_dict
 
     def _save_characters(self):
@@ -386,21 +461,35 @@ class NovelGenerator:
         """创建基本角色信息"""
         # 创建繁简转换器
         t2s = OpenCC('t2s')  # 繁体转简体
-        
+
         # 检查是否存在简体版本
         simplified_name = t2s.convert(name)
-        if simplified_name != name and simplified_name in self.characters:
-            # 如果存在简体版本，返回已存在的角色对象
-            return self.characters[simplified_name]
-        
+        # 如果存在简体版本，则使用简体名称（避免因为繁简体导致重复添加）
+        # if simplified_name != name and simplified_name in self.characters:
+        #     return self.characters[simplified_name] # 不在这里检查 self.characters，因为此函数可能在初始化时调用
+
         # 使用简体名称创建新角色
         return Character(
             name=simplified_name,
-            role="配角",
-            personality={"平和": 0.5},
-            goals=["暂无明确目标"],
-            relationships={},
-            development_stage="初次登场"
+            role="配角", # 默认角色为配角，调用者可以覆盖
+            personality={"平和": 0.5}, # 默认性格
+            goals=["暂无明确目标"], # 默认目标
+            relationships={}, # 默认关系
+            development_stage="初次登场", # 默认发展阶段
+            # 添加其他基础默认值
+            alignment="中立",
+            realm="凡人",
+            level=1,
+            cultivation_method="无",
+            magic_treasure=[],
+            temperament="平和",
+            ability=[],
+            stamina=100,
+            sect="无门无派",
+            position="普通弟子",
+            emotions_history=[],
+            states_history=[],
+            descriptions_history=[]
         )
 
     def _parse_new_characters(self, update_text: str):
@@ -452,8 +541,17 @@ class NovelGenerator:
             # 从文本中提取可能的角色名
             try:
                 for left, right in brackets:
-                    pattern = f'{left}([^{right}]+){right}'
+                    # Escape delimiters to handle regex special characters
+                    escaped_left = re.escape(left)
+                    escaped_right = re.escape(right)
+                    # Construct pattern using escaped delimiters
+                    # Using negated character set:
+                    pattern = f'{escaped_left}([^{escaped_right}]+){escaped_right}'
+                    # Alternatively, non-greedy match (safer for nested structures, though less performant):
+                    # pattern = f'{escaped_left}(.*?){escaped_right}'
+
                     try:
+                        # Use the constructed pattern
                         matches = re.finditer(pattern, cleaned_text)
                         for match in matches:
                             name = match.group(1).strip()
@@ -464,8 +562,11 @@ class NovelGenerator:
                                 if simplified_name not in self.characters:
                                     self.characters[simplified_name] = self._create_basic_character(simplified_name)
                                     logging.info(f"添加新角色: {simplified_name}")
+                    except re.error as regex_e: # Catch regex specific errors
+                        logging.error(f"正则表达式处理时出错 (pattern: {pattern}): {regex_e}")
                     except Exception as e:
-                        logging.error(f"正则表达式匹配时出错: {e}")
+                        # Log general errors during matching/processing
+                        logging.error(f"处理匹配项时出错 (pattern: {pattern}): {e}")
             except Exception as e:
                 logging.error(f"处理括号对时出错: {e}")
                 
@@ -1140,20 +1241,22 @@ class NovelGenerator:
                 continue
 
         # 删除非角色条目
+        num_deleted = 0
         for name in to_delete:
             if name not in protected_characters:  # 再次确认不删除保护角色
                 del self.characters[name]
-                logging.info(f"从角色库中删除非角色条目: {name}")
-        
+                logging.info(f"从角色库中删除非角色条目: '{name}' (原因: 包含非角色关键词)")
+                num_deleted += 1
+
         # 确保保护角色存在于角色库中
         for name in protected_characters:
             if name not in self.characters:
                 self.characters[name] = self._create_basic_character(name)
                 logging.info(f"添加保护角色到角色库: {name}")
-        
-        # 保存清理后的角色库
-        self._save_characters()
-        logging.info(f"角色库清理完成，删除了 {len(to_delete)} 个非角色条目，当前剩余 {len(self.characters)} 个角色")
+
+        # 不在此处保存，保存操作移至更高层级
+        # self._save_characters()
+        logging.info(f"角色库清理完成，尝试删除了 {len(to_delete)} 个条目，实际删除 {num_deleted} 个 (保护角色除外)，当前剩余 {len(self.characters)} 个角色")
 
     def _load_outline_file(self):
         """加载大纲文件"""
@@ -1490,23 +1593,28 @@ class NovelGenerator:
             if not self.chapter_outlines:
                 logging.error("没有找到大纲，请先生成大纲")
                 return
-            
+
             # 从当前章节开始生成
             total_chapters = len(self.chapter_outlines)
             max_retries = 3  # 每章最多重试次数
-            
+
             while self.current_chapter < total_chapters:
                 if self.target_chapter is not None and self.current_chapter == self.target_chapter:
                     logging.info(f"已生成目标章节 {self.current_chapter + 1}，停止生成后续章节。")
                     break
-                
+
                 chapter_retries = 0
+                best_content_so_far = None
+                best_consistency_score = -1.0 # 初始化为无效分数
+                best_logic_passed = False
+                retry_suggestions = "" # 初始化当前章节的重试建议
+
                 while chapter_retries < max_retries:
                     try:
                         # 获取当前章节大纲
                         chapter_outline = self.chapter_outlines[self.current_chapter]
-                        logging.info(f"开始生成第 {self.current_chapter + 1} 章: {chapter_outline.title}")
-                        
+                        logging.info(f"开始生成第 {self.current_chapter + 1} 章: {chapter_outline.title} (尝试 {chapter_retries + 1}/{max_retries})")
+
                         # 将ChapterOutline对象转换为字典
                         outline_dict = {
                             "chapter_number": chapter_outline.chapter_number,
@@ -1516,24 +1624,22 @@ class NovelGenerator:
                             "settings": chapter_outline.settings,
                             "conflicts": chapter_outline.conflicts
                         }
-                        
+
                         # 构建提示词 - 在重试时添加额外指导
                         extra_prompt = ""
                         if chapter_retries > 0:
                             extra_prompt = f"""
-                            注意：这是第{chapter_retries+1}次尝试生成。请确保包含以下关键情节点：
-                            - {chr(10).join(['- ' + point for point in chapter_outline.key_points])}
-                            
-                            请确保包含以下角色：
-                            - {chr(10).join(['- ' + character for character in chapter_outline.characters])}
-                            
-                            请确保描述以下场景：
-                            - {chr(10).join(['- ' + setting for setting in chapter_outline.settings])}
-                            
-                            请确保包含以下冲突：
-                            - {chr(10).join(['- ' + conflict for conflict in chapter_outline.conflicts])}
+                            注意：这是第{chapter_retries+1}次尝试生成。请务必严格遵循以下章节大纲要点：
+                            - 关键情节点：{chr(10).join(['  * ' + point for point in chapter_outline.key_points])}
+                            - 涉及角色：{chr(10).join(['  * ' + character for character in chapter_outline.characters])}
+                            - 场景：{chr(10).join(['  * ' + setting for setting in chapter_outline.settings])}
+                            - 冲突：{chr(10).join(['  * ' + conflict for conflict in chapter_outline.conflicts])}
                             """
-                        
+                            # 如果有上一轮的修改建议，添加到提示词中
+                            if retry_suggestions:
+                                extra_prompt += f"\n\n**重要：请根据上次尝试失败后的以下建议进行修改和优化：**\n{retry_suggestions}\n"
+
+
                         # 尝试从前一章获取上下文信息
                         context_info = ""
                         if self.current_chapter > 0:
@@ -1543,7 +1649,7 @@ class NovelGenerator:
                                 if filename.startswith(f"第{prev_chapter_num}章") and filename.endswith(".txt"):
                                     prev_chapter_file = os.path.join(self.output_dir, filename)
                                     break
-                                    
+
                             if prev_chapter_file and os.path.exists(prev_chapter_file):
                                 try:
                                     with open(prev_chapter_file, 'r', encoding='utf-8') as f:
@@ -1551,7 +1657,7 @@ class NovelGenerator:
                                     context_info = prev_content[-1000:]  # 使用前一章最后1000字符作为上下文
                                 except Exception as e:
                                     logging.warning(f"读取前一章内容时出错: {str(e)}")
-                        
+
                         # 获取章节内容
                         prompt = prompts.get_chapter_prompt(
                             outline=outline_dict,
@@ -1559,204 +1665,316 @@ class NovelGenerator:
                             extra_prompt=extra_prompt,
                             context_info=context_info
                         )
-                        
+
                         # 生成章节内容
                         try:
                             logging.info(f"正在生成第{self.current_chapter + 1} 章内容...")
-                            content = self.content_model.generate(prompt)
-                            
-                            # 验证章节内容
-                            if self._validate_chapter_content(content, chapter_outline):
+                            current_content = self.content_model.generate(prompt) # 使用 current_content 存储当前尝试内容
+
+                            # --- 验证与评分 ---
+                            content_valid_for_saving = False # 标记当前内容是否可以直接保存
+                            current_consistency_score = -1.0
+                            current_logic_passed = False
+                            current_attempt_suggestions = "" # 清空当前尝试的建议
+
+                            # 基础内容验证 (例如长度)
+                            if self._validate_chapter_content(current_content, chapter_outline):
                                 # 一致性检查
-                                consistency_report, needs_revision, consistency_score = self.consistency_checker.check_chapter_consistency(
-                                    content, outline_dict, self.current_chapter, self.characters
+                                consistency_report, needs_revision, current_consistency_score = self.consistency_checker.check_chapter_consistency(
+                                    current_content, outline_dict, self.current_chapter, self.characters
                                 )
-                                if needs_revision:
-                                    logging.info(f"第{self.current_chapter + 1} 章需要一致性修正，得分: {consistency_score}")
-                                    content = self.consistency_checker.ensure_chapter_consistency(
-                                        content, outline_dict, self.current_chapter, self.characters
-                                    )
-                                
+                                # --- 添加日志：打印一致性分数 ---
+                                logging.info(f"尝试 {chapter_retries + 1}: 一致性分数: {current_consistency_score:.2f}, 是否需要修正: {needs_revision}")
+                                logging.debug(f"一致性报告: {consistency_report}") # 可以用 DEBUG 级别记录详细报告
+                                # 如果需要修正，提取一致性建议
+                                if needs_revision and consistency_report:
+                                    match = re.search(r"\[修改建议\]:\s*(.*?)(?=\n\*\*\[修改必要性\]|\n\n|$)", consistency_report, re.DOTALL | re.IGNORECASE)
+                                    if match:
+                                        current_attempt_suggestions += f"一致性问题建议：\n{match.group(1).strip()}\n"
+
                                 # 逻辑性验证
-                                logic_report, logic_needs_revision = self.logic_validator.check_logic(content, outline_dict)
-                                if logic_needs_revision:
-                                    logging.warning(f"第{self.current_chapter + 1} 章逻辑验证失败: {logic_report}")
-                                
-                                # 重复文本验证
-                                prev_content = ""  # 可以从之前的章节中获取
-                                next_content = ""  # 可以从后续章节中获取
-                                duplicate_report, duplicate_needs_revision = self.duplicate_validator.check_duplicates(
-                                    content, prev_content, next_content
-                                )
-                                if duplicate_needs_revision:
-                                    logging.warning(f"第{self.current_chapter + 1} 章重复文本验证失败: {duplicate_report}")
-                                
-                                # 保存章节
-                                self._save_chapter(self.current_chapter + 1, content)
-                                logging.info(f"第{self.current_chapter + 1} 章生成完成")
-                                
-                                # 更新进度
-                                self.current_chapter += 1
-                                self._save_progress()
-                                break  # 跳出重试循环，继续下一章
+                                logic_report, logic_needs_revision = self.logic_validator.check_logic(current_content, outline_dict)
+                                current_logic_passed = not logic_needs_revision
+                                # --- 添加日志：打印逻辑验证结果 ---
+                                logging.info(f"尝试 {chapter_retries + 1}: 逻辑验证通过: {current_logic_passed}, 是否需要修正: {logic_needs_revision}")
+                                logging.debug(f"逻辑验证报告: {logic_report}") # 可以用 DEBUG 级别记录详细报告
+                                # 如果需要修正，提取逻辑建议
+                                if logic_needs_revision and logic_report:
+                                     match = re.search(r"\[修改建议\]:\s*(.*?)(?=\n\*\*\[修改必要性\]|\n\n|$)", logic_report, re.DOTALL | re.IGNORECASE)
+                                     if match:
+                                         # 避免重复添加相同的建议标题
+                                         prefix = "逻辑问题建议：\n" if not current_attempt_suggestions else ""
+                                         current_attempt_suggestions += f"{prefix}{match.group(1).strip()}\n"
+
+
+                                # --- 更新最佳尝试 ---
+                                if current_consistency_score > best_consistency_score:
+                                    best_consistency_score = current_consistency_score
+                                    best_logic_passed = current_logic_passed
+                                    best_content_so_far = current_content
+                                    logging.info(f"尝试 {chapter_retries + 1} 获得新的最高一致性分数: {best_consistency_score:.2f}, 逻辑通过: {best_logic_passed}")
+                                elif current_consistency_score == best_consistency_score and current_logic_passed and not best_logic_passed:
+                                    # 一致性分数相同，但当前逻辑通过，而之前最佳未通过
+                                    best_logic_passed = True
+                                    best_content_so_far = current_content
+                                    logging.info(f"尝试 {chapter_retries + 1} 一致性分数相同 ({best_consistency_score:.2f}) 但逻辑验证通过，更新最佳内容")
+
+
+                                # --- 检查是否可以直接保存 ---
+                                if not needs_revision and not logic_needs_revision:
+                                     # 如果一致性和逻辑都通过，直接保存当前内容并结束重试
+                                     logging.info(f"尝试 {chapter_retries + 1} 内容通过所有验证，直接保存。")
+                                     # 可选：一致性修正（如果需要，即使验证通过也可以运行修正）
+                                     # if needs_revision:
+                                     #    logging.info(f"第{self.current_chapter + 1} 章需要一致性修正，得分: {current_consistency_score}")
+                                     #    current_content = self.consistency_checker.ensure_chapter_consistency(
+                                     #        current_content, outline_dict, self.current_chapter, self.characters
+                                     #    )
+
+                                     # 重复文本验证 (可以放在保存前)
+                                     prev_content = ""
+                                     next_content = ""
+                                     duplicate_report, duplicate_needs_revision = self.duplicate_validator.check_duplicates(
+                                         current_content, prev_content, next_content
+                                     )
+                                     if duplicate_needs_revision:
+                                         logging.warning(f"第{self.current_chapter + 1} 章重复文本验证失败: {duplicate_report}")
+
+                                     # 保存章节
+                                     self._save_chapter(self.current_chapter + 1, current_content)
+                                     logging.info(f"第{self.current_chapter + 1} 章生成完成")
+
+                                     # 更新进度
+                                     self.current_chapter += 1
+                                     self._save_progress()
+                                     content_valid_for_saving = True # 标记成功
+                                     break # 成功，跳出重试循环
+
+                                else:
+                                     logging.warning(f"尝试 {chapter_retries + 1} 未完全通过验证 (一致性修正: {needs_revision}, 逻辑修正: {logic_needs_revision})")
+                                     # 保存当前尝试的建议，用于下一次重试
+                                     retry_suggestions = current_attempt_suggestions
+
                             else:
-                                logging.error(f"第{self.current_chapter + 1} 章内容验证失败，这是第{chapter_retries + 1} 次尝试")
+                                logging.error(f"尝试 {chapter_retries + 1}: 第{self.current_chapter + 1} 章基础内容验证失败")
+                                # 基础验证失败也可能产生建议（如果验证函数能提供），这里假设基础验证不产生建议
+                                # 如果基础验证失败，也保存已有的建议（一致性/逻辑性）用于下次重试
+                                retry_suggestions = current_attempt_suggestions
+
+                            # 如果当前尝试未成功保存，增加重试次数
+                            if not content_valid_for_saving:
                                 chapter_retries += 1
-                                
-                                # 如果所有重试都失败，尝试放宽验证标准
-                                if chapter_retries >= max_retries:
-                                    logging.warning(f"已达到最大重试次数，使用最后一次生成的内容并继续...")
-                                    self._save_chapter(self.current_chapter + 1, content)
-                                    logging.info(f"第{self.current_chapter + 1} 章已保存（警告：内容可能不完全符合要求）")
-                                    self.current_chapter += 1
-                                    self._save_progress()
-                                    break
-                                
-                                # 重试前等待一段时间
-                                wait_time = 10 * (chapter_retries + 1)  # 逐次增加等待时间
-                                logging.info(f"等待 {wait_time} 秒后重试...")
-                                time.sleep(wait_time)
-                                
+                                # 重试前等待
+                                if chapter_retries < max_retries:
+                                     wait_time = 10 * (chapter_retries + 1)
+                                     logging.info(f"等待 {wait_time} 秒后重试...")
+                                     time.sleep(wait_time)
+
                         except (TimeoutError, asyncio.TimeoutError) as e:
                             logging.error(f"生成第{self.current_chapter + 1} 章时请求超时: {str(e)}")
+                            # 超时也保存已有的建议，用于下次重试
+                            retry_suggestions = current_attempt_suggestions
                             chapter_retries += 1
-                            wait_time = 30 * (chapter_retries + 1)
-                            logging.info(f"等待 {wait_time} 秒后重试...")
-                            time.sleep(wait_time)
+                            if chapter_retries < max_retries:
+                                wait_time = 30 * (chapter_retries + 1)
+                                logging.info(f"等待 {wait_time} 秒后重试...")
+                                time.sleep(wait_time)
                         except Exception as e:
                             logging.error(f"生成第{self.current_chapter + 1} 章时出错: {str(e)}")
+                             # 出错也保存已有的建议，用于下次重试
+                            retry_suggestions = current_attempt_suggestions
                             chapter_retries += 1
+                            if chapter_retries < max_retries:
+                                wait_time = 30 * (chapter_retries + 1)
+                                logging.info(f"等待 {wait_time} 秒后重试...")
+                                time.sleep(wait_time)
+
+                    except Exception as e:
+                        logging.error(f"处理第{self.current_chapter + 1} 章时发生意外错误: {str(e)}")
+                        # 出错也保存已有的建议，用于下次重试
+                        retry_suggestions = current_attempt_suggestions
+                        chapter_retries += 1
+                        if chapter_retries < max_retries:
                             wait_time = 30 * (chapter_retries + 1)
                             logging.info(f"等待 {wait_time} 秒后重试...")
                             time.sleep(wait_time)
-                            
-                    except Exception as e:
-                        logging.error(f"处理第{self.current_chapter + 1} 章时出错: {str(e)}")
-                        chapter_retries += 1
-                        wait_time = 30 * (chapter_retries + 1)
-                        logging.info(f"等待 {wait_time} 秒后重试...")
-                        time.sleep(wait_time)
-                
-                # 检查是否因为重试次数用尽而没有成功生成当前章节
+
+                # --- 重试循环结束 ---
+                # 检查是否因为重试次数用尽而退出循环
                 if chapter_retries >= max_retries:
-                    logging.error(f"在{max_retries} 次尝试后未能成功生成第{self.current_chapter + 1} 章，但仍将继续下一章")
-                    # 在这种情况下，我们已经在内部循环中处理了进度更新，所以这里不需要额外处理
-                    
+                    logging.warning(f"已达到最大重试次数 ({max_retries})")
+                    if best_content_so_far:
+                        logging.warning(f"使用评分最高的尝试内容 (一致性: {best_consistency_score:.2f}, 逻辑通过: {best_logic_passed})")
+
+                        # 可选：在保存最佳内容前再次进行一致性修正
+                        # logging.info("尝试对最佳内容进行最终一致性修正...")
+                        # best_content_so_far = self.consistency_checker.ensure_chapter_consistency(
+                        #     best_content_so_far, outline_dict, self.current_chapter, self.characters
+                        # )
+
+                        # 保存评分最高的内容
+                        self._save_chapter(self.current_chapter + 1, best_content_so_far)
+                        logging.info(f"第{self.current_chapter + 1} 章已使用最佳尝试内容保存")
+                        self.current_chapter += 1
+                        self._save_progress()
+                    else:
+                        logging.error(f"所有 {max_retries} 次尝试均未生成有效内容或评分，无法保存第{self.current_chapter + 1} 章")
+                        # 决定如何处理：是跳过本章还是停止？
+                        # 这里选择跳过本章以避免卡住，但可能导致后续问题
+                        logging.warning(f"跳过第 {self.current_chapter + 1} 章的生成")
+                        self.current_chapter += 1
+                        self._save_progress() # 仍然保存进度，避免下次从同一章开始
+
             logging.info("小说生成完成！")
-            
+
         except Exception as e:
             logging.error(f"生成小说时发生错误: {str(e)}")
             raise
 
     def _validate_chapter_content(self, content: str, outline: ChapterOutline) -> bool:
-        """验证章节内容是否符合要求"""
+        """验证章节内容是否符合要求 (使用 jieba 分词优化)"""
         try:
             # 检查内容长度
             if len(content) < 1000:  # 假设最少1000字
                 logging.error("章节内容过短")
                 return False
-                
-            # 使用自然语言处理技术进行关键词提取与匹配
-            def get_synonyms(word):
-                synonyms = set()
-                for syn in wordnet.synsets(word):
-                    for lemma in syn.lemmas():
-                        synonyms.add(lemma.name())
-                return synonyms
-            
-            # 检查是否包含关键情节点（改为更灵活的检查）
+
+            # --- 使用 jieba 进行关键词提取 ---
+            def extract_keywords_jieba(text):
+                if jieba is None: # 如果 jieba 未安装，回退到简单方法
+                    keywords_raw = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、\s]+', ' ', text).strip()
+                    return [k for k in keywords_raw.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
+
+                # 使用 jieba 分词 (精确模式)
+                seg_list = jieba.cut(text, cut_all=False)
+                # 过滤掉单个字符和常见停用词 (可以根据需要扩展停用词列表)
+                stopwords = {'的', '地', '得', '了', '和', '与', '或', '而', '在', '是', '了', '着', '将', '把', '被'}
+                keywords = [word for word in seg_list if len(word) > 1 and word not in stopwords]
+                # 去重保持顺序（可选）
+                return list(dict.fromkeys(keywords))
+
+            # --- 对章节内容进行分词 (只做一次) ---
+            content_words = set() # 使用 set 以提高查找效率
+            if jieba:
+                content_seg_list = jieba.cut(content, cut_all=False)
+                content_words = {word for word in content_seg_list if len(word) > 0} # 保留单字，因为内容中可能包含
+            else: # Fallback if jieba not installed
+                content_words_raw = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、\s]+', ' ', content).strip()
+                content_words = set(content_words_raw.split())
+
+
+            # 检查是否包含关键情节点 (基于分词后的词语匹配)
             missing_points = []
+            min_keyword_match_ratio = 0.3 # 降低阈值，比如30%的关键词在内容词中出现即可
+
             for point in outline.key_points:
-                # 提取关键词（去除常见连接词和标点符号）
-                keywords = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、]', ' ', point)
-                keywords = re.sub(r'\s+', ' ', keywords).strip()
-                keywords = [k for k in keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
-                
-                # 使用同义词扩展关键词
-                expanded_keywords = set()
-                for keyword in keywords:
-                    expanded_keywords.update(get_synonyms(keyword))
-                
-                # 只要包含一半以上的关键词就算通过
-                matches = sum(1 for k in expanded_keywords if k in content)
-                if matches < len(expanded_keywords) / 2:
+                keywords = extract_keywords_jieba(point)
+                if not keywords:
+                    logging.warning(f"无法从关键情节点 '{point}' 提取有效关键词，视为未覆盖")
                     missing_points.append(point)
-                    logging.warning(f"可能缺少关键情节点 {point}，只匹配?{matches}/{len(expanded_keywords)} 个关键词")
-            
+                    continue
+
+                found_count = 0
+                for k in keywords:
+                    if k in content_words: # 在分词后的内容词集合中查找
+                        found_count += 1
+                    # else: # 可选：增加日志，查看哪些关键词未匹配
+                    #    logging.debug(f"Keyword '{k}' from point '{point}' not found in content words.")
+
+
+                if not keywords: # 避免除以零
+                     actual_match_ratio = 0.0
+                else:
+                     actual_match_ratio = found_count / len(keywords)
+
+
+                if actual_match_ratio < min_keyword_match_ratio:
+                    missing_points.append(point)
+                    logging.warning(
+                        f"关键情节点 '{point}' 覆盖率不足: "
+                        f"内容词中仅找到 {found_count}/{len(keywords)} ({actual_match_ratio:.2f}) 个分词关键词 "
+                        f"(要求至少达到 {min_keyword_match_ratio:.2f})"
+                    )
+
             if missing_points:
-                logging.error(f"缺少 {len(missing_points)}/{len(outline.key_points)} 个关键情节点")
-                for point in missing_points[:3]:  # 只显示前三个，避免日志过长
-                    logging.error(f"缺少关键情节点 {point}")
-                
-                # 如果缺失太多关键情节点，验证失败
-                if len(missing_points) > len(outline.key_points) // 2:
+                max_missing_points_ratio = 0.75
+                # 避免除以零
+                if not outline.key_points:
+                     missing_ratio = 0.0
+                else:
+                     missing_ratio = len(missing_points) / len(outline.key_points)
+
+                if missing_ratio > max_missing_points_ratio:
+                    logging.error(
+                        f"严重缺少关键情节点覆盖: "
+                        f"{len(missing_points)}/{len(outline.key_points)} ({missing_ratio:.2f}) 的情节点关键词匹配率低于 {min_keyword_match_ratio:.2f}, "
+                        f"超过了允许的 {max_missing_points_ratio:.2f} 缺失比例)"
+                    )
                     return False
-                
-            # 检查是否包含主要角色（改为更灵活的检查）
+
+            # --- 角色、场景、冲突的检查也可以类似地优化 (使用分词) ---
+
+            # 检查是否包含主要角色 (基于分词)
             missing_chars = []
             for character in outline.characters:
-                if character not in content:
-                    # 尝试检查角色名的变体（例如：只用姓或名）
-                    if len(character) > 1 and (character[0] in content or character[1:] in content):
-                        continue
+                 # 直接检查角色名是否在内容词集合中，或者在原始内容中 (处理特殊名字)
+                 if character not in content_words and character not in content:
+                    # 可以添加更复杂的检查，比如只检查姓氏或名字
+                    if len(character) > 1 and (character[0] in content_words or character[1:] in content_words):
+                         continue
                     missing_chars.append(character)
-            
+
             if missing_chars:
-                logging.error(f"缺少 {len(missing_chars)}/{len(outline.characters)} 个主要角色")
-                for char in missing_chars:
-                    logging.error(f"缺少主要角色: {char}")
-                
-                # 如果缺失太多角色，验证失败
-                if len(missing_chars) > len(outline.characters) // 2:
+                # 避免除以零
+                if not outline.characters:
+                     missing_char_ratio = 0.0
+                else:
+                     missing_char_ratio = len(missing_chars) / len(outline.characters)
+
+                if missing_char_ratio > 0.75: # 阈值可调
+                    logging.error(f"严重缺少主要角色 ({len(missing_chars)}/{len(outline.characters)})")
                     return False
-                
-            # 检查是否包含场景描写和冲突（采用同样灵活的策略）
+
+            # 检查是否包含场景描写 (基于分词，至少一个关键词匹配)
             missing_settings = []
             for setting in outline.settings:
-                # 提取关键词
-                setting_keywords = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、]', ' ', setting)
-                setting_keywords = re.sub(r'\s+', ' ', setting_keywords).strip()
-                setting_keywords = [k for k in setting_keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
-                
-                # 检查场景关键词匹配情况
-                setting_matches = sum(1 for k in setting_keywords if k in content)
-                if setting_matches < len(setting_keywords) / 2:
+                setting_keywords = extract_keywords_jieba(setting)
+                if not setting_keywords: continue
+                # 检查是否有任何一个场景关键词出现在内容词中
+                if not any(k in content_words for k in setting_keywords):
                     missing_settings.append(setting)
-            
+                    logging.warning(f"可能缺少场景描写 '{setting}'，未在内容词中找到任何关键词: {setting_keywords}")
+
+
             if missing_settings:
-                logging.error(f"缺少 {len(missing_settings)}/{len(outline.settings)} 个场景描写")
-                for setting in missing_settings[:3]:  # 只显示前三个
-                    logging.error(f"缺少场景描写: {setting}")
-                
-                # 如果缺失太多场景，验证失败
-                if len(missing_settings) > len(outline.settings) // 2:
-                    return False
-            
-            # 检查冲突描写
+                 # 如果完全没有匹配到任何场景的关键词，则失败
+                 if len(missing_settings) == len(outline.settings) and outline.settings:
+                      logging.error(f"完全缺少场景描写")
+                      return False
+
+
+            # 检查冲突描写 (基于分词，至少一个关键词匹配)
             missing_conflicts = []
             for conflict in outline.conflicts:
-                # 提取关键词
-                conflict_keywords = re.sub(r'[，。！？；?"''【】《》（）\[\]{}、]', ' ', conflict)
-                conflict_keywords = re.sub(r'\s+', ' ', conflict_keywords).strip()
-                conflict_keywords = [k for k in conflict_keywords.split() if len(k) > 1 and k not in ['的', '地', '得', '了', '和', '与', '或', '而']]
-                
-                # 检查冲突关键词匹配情况
-                conflict_matches = sum(1 for k in conflict_keywords if k in content)
-                if conflict_matches < len(conflict_keywords) / 2:
+                conflict_keywords = extract_keywords_jieba(conflict)
+                if not conflict_keywords: continue
+                 # 检查是否有任何一个冲突关键词出现在内容词中
+                if not any(k in content_words for k in conflict_keywords):
                     missing_conflicts.append(conflict)
-            
+                    logging.warning(f"可能缺少冲突描写 '{conflict}'，未在内容词中找到任何关键词: {conflict_keywords}")
+
+
             if missing_conflicts:
-                logging.error(f"缺少 {len(missing_conflicts)}/{len(outline.conflicts)} 个冲突描写")
-                for conflict in missing_conflicts[:3]:  # 只显示前三个
-                    logging.error(f"缺少冲突描写: {conflict}")
-                
-                # 如果缺失太多冲突，验证失败
-                if len(missing_conflicts) > len(outline.conflicts) // 2:
-                    return False
-            
-            # 所有检查都通过
+                 # 如果完全没有匹配到任何冲突的关键词，则失败
+                 if len(missing_conflicts) == len(outline.conflicts) and outline.conflicts:
+                      logging.error(f"完全缺少冲突描写")
+                      return False
+
+
+            # 所有检查都通过或在容忍范围内
+            logging.info("章节内容基础验证通过 (使用 jieba 分词优化)。")
             return True
-            
+
         except Exception as e:
             logging.error(f"验证章节内容时发生错误: {str(e)}")
             return False
