@@ -1,6 +1,12 @@
 from typing import Dict, List, Optional
 import dataclasses # 导入 dataclasses 以便类型提示
 import json
+from src.config.config import Config  # 导入 Config 类
+import os
+import logging
+
+# 初始化 Config 实例
+config = Config()
 
 # 如果 ChapterOutline 只在此处用作类型提示，可以简化或使用 Dict
 # from .novel_generator import ChapterOutline # 或者定义一个类似的结构
@@ -26,33 +32,155 @@ def get_outline_prompt(
     extra_prompt: Optional[str] = None
 ) -> str:
     """生成用于创建小说大纲的提示词。"""
-    extra_requirements = f"\n[额外要求]\n{extra_prompt}\n" if extra_prompt else ""
+    extra_requirements = f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}{chr(10)}" if extra_prompt else ""
+
+    # 获取额外指导内容
+    extra_guidance = config.novel_config.get("extra_guidance", {})
+    writing_style = extra_guidance.get("writing_style", {})
+    content_rules = extra_guidance.get("content_rules", {})
+    chapter_structure = extra_guidance.get("chapter_structure", {})
+    plot_corrections = extra_guidance.get("plot_corrections", {})
+
+    # 格式化额外指导内容
+    extra_guidance_text = f"""
+[写作风格指导]
+节奏控制：{writing_style.get('pacing', '')}
+描写要求：{writing_style.get('description', '')}
+对话设计：{writing_style.get('dialogue', '')}
+动作描写：{writing_style.get('action', '')}
+
+[内容规则]
+必须包含：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_include', [])])}
+
+必须避免：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_avoid', [])])}
+
+[章节结构]
+开篇方式：{chapter_structure.get('opening', '')}
+发展过程：{chapter_structure.get('development', '')}
+高潮设计：{chapter_structure.get('climax', '')}
+结尾处理：{chapter_structure.get('ending', '')}
+
+[剧情修正要求]
+{chr(10).join([f"【{correction['title']}】{chr(10)}{correction['description']}" for correction in plot_corrections.values()])}
+"""
+
+    # 从知识库中获取参考文件内容
+    reference_files = config.novel_config.get("knowledge_base_config", {}).get("reference_files", [])
+    reference_content = ""
+    for file_path in reference_files:
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                logging.warning(f"参考文件不存在: {file_path}")
+                continue
+
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                reference_content += f"{chr(10)}[参考文件: {os.path.basename(file_path)}]{chr(10)}{content[:1000]}...{chr(10)}"
+        except UnicodeDecodeError:
+            # 尝试其他编码
+            try:
+                with open(file_path, 'r', encoding='gbk') as f:
+                    content = f.read()
+                    reference_content += f"{chr(10)}[参考文件: {os.path.basename(file_path)}]{chr(10)}{content[:1000]}...{chr(10)}"
+            except Exception as e:
+                logging.warning(f"读取参考文件 {file_path} 时出错（尝试GBK编码后）: {str(e)}")
+        except Exception as e:
+            logging.warning(f"读取参考文件 {file_path} 时出错: {str(e)}")
+
+    # 如果参考内容为空，添加提示
+    if not reference_content:
+        reference_content = f"{chr(10)}[知识库参考内容]{chr(10)}暂无参考内容，将仅基于设定生成大纲。{chr(10)}"
 
     prompt = f"""{existing_context}
 
-你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。请严格按照要求，基于以上小说信息和已有大纲（如果是续写或替换），创作后续的小说大纲。
+你是一个专业的小说大纲生成助手。你的任务是生成符合JSON格式的小说大纲。你必须严格按照要求的格式输出，不能添加任何额外的文字或解释。
 
-任务要求：
-1.  生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。
-2.  确保情节连贯，与已有上下文自然衔接。推动主线发展，引入新的冲突和看点。{extra_requirements}
-3.  每章设计一个小高潮(如反转\打脸\冲突解决\悬念揭晓等)，每3章设计一个大高潮(达成目标\境界突破\战胜强敌等)。
-4.  每章大纲必须包含以下字段：章节号 (chapter_number, 整数，必须与请求的章节号对应)，标题 (title, 字符串)，关键剧情点列表 (key_points, 字符串列表)，涉及角色列表 (characters, 字符串列表)，场景列表 (settings, 字符串列表)，核心冲突列表 (conflicts, 字符串列表)。
-5.  严格按照以下 JSON 格式返回一个包含 {current_batch_size} 个章节大纲对象的列表。不要在 JSON 列表前后添加任何其他文字、解释或代码标记 (如 ```json ... ```)。JSON 列表必须直接开始于 '[' 结束于 ']'。
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
 
-```json
+[世界观设定]
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("magic_system", "")}
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("social_system", "")}
+{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("background", "")}
+
+[角色设定]
+主角: {config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("protagonist", {}).get("background", "")}
+配角: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("supporting_roles", [])])}
+反派: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("antagonists", [])])}
+
+[知识库参考内容]
+{reference_content}
+
+[任务要求]
+1. 生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。重要：必须生成本批次要求的全部大纲，不得省略或截断。
+2. 确保情节连贯，与已有上下文自然衔接。推动主线发展，引入新的冲突和看点。{extra_requirements}
+3. 每章设计一个小高潮(如反转/打脸/冲突解决/悬念揭晓等)，每3章设计一个大高潮(达成目标/境界突破/战胜强敌等)。
+4. 模仿知识库中同类型小说的桥段/套路/剧情梗等进行剧情设计，注意保持单个事件(开始-发展-结尾)的完整性。
+5. 基于人物设定塑造人物成长经历，剧情发展不得偏离主题和设定。
+
+[输出格式要求]
+1. 你必须直接输出一个JSON数组，数组中包含 {current_batch_size} 个章节对象
+2. 不要添加任何其他文字说明、注释或代码标记
+3. 每个章节对象必须包含以下字段：
+   - chapter_number (整数): 章节号，从 {current_start_chapter_num} 开始递增，到 {current_start_chapter_num + current_batch_size - 1} 为止
+   - title (字符串): 章节标题
+   - key_points (字符串数组): 关键剧情点列表，至少2个
+   - characters (字符串数组): 涉及角色列表，至少1个
+   - settings (字符串数组): 场景列表，至少1个
+   - conflicts (字符串数组): 核心冲突列表，至少1个
+4. 所有字符串必须使用双引号，不能使用单引号
+5. 数组和对象的最后一个元素后不要加逗号
+6. 确保生成的是有效的JSON格式，可以被 JSON.parse() 解析
+
+示例格式：
 [
   {{
     "chapter_number": {current_start_chapter_num},
-    "title": "...",
-    "key_points": ["...", "..."],
-    "characters": ["...", "..."],
-    "settings": ["...", "..."],
-    "conflicts": ["...", "..."]
+    "title": "第一个高潮",
+    "key_points": [
+      "主角发现神秘法宝",
+      "与反派首次交手",
+      "觉醒特殊能力"
+    ],
+    "characters": [
+      "陆沉",
+      "神秘老者"
+    ],
+    "settings": [
+      "荒古遗迹"
+    ],
+    "conflicts": [
+      "争夺法宝"
+    ]
   }},
-  // ... (如果 current_batch_size > 1, 继续添加后续章节对象，确保 chapter_number 连续递增)
+  {{
+    "chapter_number": {current_start_chapter_num + 1},
+    "title": "逃亡之路",
+    "key_points": [
+      "被追杀",
+      "寻找庇护",
+      "结识盟友"
+    ],
+    "characters": [
+      "陆沉",
+      "神秘老者",
+      "盟友"
+    ],
+    "settings": [
+      "深山老林"
+    ],
+    "conflicts": [
+      "躲避追杀"
+    ]
+  }}
 ]
-```
-"""
+
+请直接生成符合上述格式的JSON数组，不要添加任何其他内容。确保输出的是有效的JSON格式。"""
     return prompt
 
 
@@ -66,10 +194,48 @@ def get_chapter_prompt(
 
     novel_number = outline.get('chapter_number', '未知')
     chapter_title = outline.get('title', '未知')
-    key_points = ', '.join(outline.get('key_points', []))
+    
+    # 处理关键情节点 - 改为分行展示以增强可读性和重要性
+    key_points_list = outline.get('key_points', [])
+    key_points_display = chr(10).join([f"- {point}" for point in key_points_list])
+    
+    # 其他信息
     characters = ', '.join(outline.get('characters', []))
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
+    
+    # 获取额外指导内容
+    extra_guidance = config.novel_config.get("extra_guidance", {})
+    writing_style = extra_guidance.get("writing_style", {})
+    content_rules = extra_guidance.get("content_rules", {})
+    chapter_structure = extra_guidance.get("chapter_structure", {})
+
+    # 从 config.json 中获取 novel_config 的内容
+    novel_type = config.novel_config.get("type", "玄幻")
+    theme = config.novel_config.get("theme", "逆袭")
+    style = config.novel_config.get("style", "严肃")
+
+    # 格式化额外指导内容
+    extra_guidance_text = f"""
+[写作风格指导]
+节奏控制：{writing_style.get('pacing', '')}
+描写要求：{writing_style.get('description', '')}
+对话设计：{writing_style.get('dialogue', '')}
+动作描写：{writing_style.get('action', '')}
+
+[内容规则]
+必须包含：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_include', [])])}
+
+必须避免：
+{chr(10).join(['- ' + rule for rule in content_rules.get('must_avoid', [])])}
+
+[章节结构]
+开篇方式：{chapter_structure.get('opening', '')}
+发展过程：{chapter_structure.get('development', '')}
+高潮设计：{chapter_structure.get('climax', '')}
+结尾处理：{chapter_structure.get('ending', '')}
+"""
     
     # 添加系统角色设定
     system_prompt = """你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。"""
@@ -86,7 +252,16 @@ def get_chapter_prompt(
 悬念密度：中等
 伏笔操作：埋设初始伏笔
 认知颠覆：★☆☆☆☆
-本章简述：{key_points}
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
+
+{extra_guidance_text}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
 
 可用元素：
 - 核心人物：{characters}
@@ -126,16 +301,16 @@ def get_chapter_prompt(
 [写作风格]
 请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
 尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
-步步为营的成长线、伏笔与填坑（如"神秘小瓶的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
-简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）。
-
+步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
+简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
 
 [格式要求]
-1.仅返回章节正文文本；
-2.不使用分章节小标题；
-3.长短句交错，一句一段；
-4.不要使用markdown格式;
-5.过滤*号、#号、空格等非常规文本字符。
+1. 仅返回章节正文文本；
+2. 不使用分章节小标题；
+3. 长短句交错，增强语言节奏感；
+4. 不要使用markdown格式;
+5. 仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符；
+6. 避免在章节结尾使用 '...才刚刚开始' 或类似的陈词滥调。
 """
     else:
         # 后续章节使用标准提示词
@@ -147,7 +322,17 @@ def get_chapter_prompt(
 [章节大纲]
 章节号: {novel_number}
 标题: {chapter_title}
-关键剧情点: {key_points}
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
+
+{extra_guidance_text}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
+
 涉及角色: {characters}
 场景设定: {settings}
 核心冲突: {conflicts}
@@ -165,23 +350,25 @@ def get_chapter_prompt(
 [写作风格]
 请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
 尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
-步步为营的成长线、伏笔与填坑（如"神秘小瓶的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
-简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）
+步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
+简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
 
 [格式要求]
-1.仅返回章节正文文本；
-2.不使用分章节小标题；
-3.长短句交错，一句一段；
-4.不要使用markdown格式。
+1. 仅返回章节正文文本；
+2. 不使用分章节小标题；
+3. 长短句交错，增强语言节奏感；；
+4. 不要使用markdown格式;
+5. 仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符；
+6. 避免在章节结尾使用 '...才刚刚开始' 或类似的陈词滥调。
 """
 
     # 添加额外要求
     if extra_prompt:
-        base_prompt += f"\n\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
     # 添加上下文信息
     if context_info:
-        base_prompt += f"\n\n[上下文信息]\n{context_info}"
+        base_prompt += f"{chr(10)}{chr(10)}[上下文信息]{chr(10)}{context_info}"
 
     # 添加连贯性要求
     base_prompt += f"""
@@ -192,6 +379,12 @@ def get_chapter_prompt(
 3. 章节结尾应为下一章大纲中的情节埋下伏笔
 4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
 5. 时间线和场景转换要清晰流畅
+
+[重要·最终检查]
+1. 检查你的章节内容是否明确包含了所有关键情节点
+2. 检查所有指定的角色是否都出现在了章节中
+3. 检查你描述的场景是否与场景设定一致
+4. 确保核心冲突被合理地展开和刻画
 """
     return base_prompt
 
@@ -222,49 +415,91 @@ def get_character_update_prompt(
     old_state: str
 ) -> str:
     """生成用于更新角色状态的提示词。"""
-    return f"""
+    return f"""\
 以下是新完成的章节文本：
 {chapter_text}
 
 这是当前的角色状态文档：
 {old_state}
 
-请严格按照以下规则更新主要角色状态：
+请更新主要角色状态，内容格式：
+例：
+张三：
+├──物品:
+│  ├──青衫：一件破损的青色长袍，带有暗红色的污渍
+│  └──寒铁长剑：一柄断裂的铁剑，剑身上刻有古老的符文
+├──能力
+│  ├──技能1：强大的精神感知能力：能够察觉到周围人的心中活动
+│  └──技能2：无形攻击：能够释放一种无法被视觉捕捉的精神攻击
+├──状态
+│  ├──身体状态: 身材挺拔，穿着华丽的铠甲，面色冷峻
+│  └──心理状态: 目前的心态比较平静，但内心隐藏着对柳溪镇未来掌控的野心和不安
+├──主要角色间关系网
+│  ├──李四：张三从小就与她有关联，对她的成长一直保持关注
+│  └──王二：两人之间有着复杂的过去，最近因一场冲突而让对方感到威胁
+├──触发或加深的事件
+│  ├──村庄内突然出现不明符号：这个不明符号似乎在暗示柳溪镇即将发生重大事件
+│  └──李四被刺穿皮肤：这次事件让两人意识到对方的强大实力，促使他们迅速离开队伍
 
-1. 状态更新规则：
-   - 必须基于章节文本中的具体描写
-   - 禁止添加章节中未提及的内容
-   - 保持原有格式，仅更新变化的部分
-   - 删除过时或错误的信息
+角色名：
+├──物品:
+│  ├──某物(道具)：描述
+│  └──XX长剑(武器)：描述
+│   ...
+├──能力
+│  ├──技能1：描述
+│  └──技能2：描述
+│   ...
+├──状态
+│  ├──身体状态：
+│  └──心理状态：描述
+│
+├──主要角色间关系网
+│  ├──李四：描述
+│  └──王二：描述
+│   ...
+├──触发或加深的事件
+│  ├──事件1：描述
+│  └──事件2：描述
+    ...
 
-2. 内容验证：
-   - 每个状态更新必须有文本依据
-   - 保持人物性格和行为的一致性
-   - 确保能力描述与实际表现相符
-   - 关系网络必须反映最新互动
+......
 
-3. 格式要求：
-   - 保持原有的树形结构
-   - 使用统一的缩进和符号
-   - 每个属性必须用【名称: 描述】格式
-   - 状态必须包含身体和心理两个维度
+新出场角色：
+- 任何新增角色或临时出场人物的基本信息，简要描述即可，不要展开，淡出视线的角色可删除。
 
-4. 更新优先级：
-   - 当前章节明确提到的变化优先
-   - 与当前章节冲突的信息必须删除
-   - 未提及的信息保持原样
-   - 模糊的信息需要进一步确认
+要求：
+- 必须基于章节文本中的具体描写，禁止添加章节中未提及的内容
+- 请直接在已有文档基础上进行增删改，不改变原有结构
+- 语言尽量简洁、有条理
+- 删除过时或错误的信息
+- 保持人物性格和行为的一致性
+- 确保能力描述与实际表现相符
+- 关系网络必须反映最新互动
+- 未提及的信息保持原样
+- 模糊的信息需要进一步确认
 
-请直接返回更新后的角色状态文本，不要解释任何内容。
+仅返回更新后的角色状态文本，不要解释任何内容。
 """
 
 # =============== 5. 角色导入提示词 ===================
 def get_character_import_prompt(content: str) -> str:
     """生成用于导入角色信息的提示词。"""
     return f"""
-根据以下文本内容，分析出所有角色及其属性信息，严格按照以下格式要求：
+根据以下文本内容，分析并提取所有真实角色的属性信息。请注意：
 
-<<角色状态格式要求>>
+<<角色识别规则>>
+1. 只提取真实的人物角色，不要提取：
+   - 以"**"开头的标题或分析结果
+   - 包含"属性分析"、"角色分析"等分析性文字
+   - 系统提示、总结性文字或其他非角色内容
+2. 角色必须满足以下条件：
+   - 在文本中有具体的行为、对话或描写
+   - 具有明确的身份和特征
+   - 与故事情节有实际互动
+3. 对于每个识别出的角色，必须提供文本中的依据
+
+<<角色属性格式要求>>
 1. 必须包含以下五个分类（按顺序）：
    ● 物品 ● 能力 ● 状态 ● 主要角色间关系网 ● 触发或加深的事件
 2. 每个属性条目必须用【名称: 描述】格式
@@ -277,26 +512,54 @@ def get_character_import_prompt(content: str) -> str:
 5. 触发事件格式：
    ● [事件名称]: [简要描述及影响]
 
-<<示例>>
-李员外:
+<<角色属性模板>>
+角色名：
 ├──物品:
-│  ├──青衫: 一件破损的青色长袍，带有暗红色污渍
-│  └──寒铁长剑: 剑身有裂痕，刻有「青云」符文
-├──能力:
-│  ├──精神感知: 能感知半径30米内的生命体
-│  └──剑气压制: 通过目光释放精神威压
-├──状态:
-│  ├──身体状态: 右臂有未愈合的刀伤
-│  └──心理状态: 对苏明远的实力感到忌惮
-├──主要角色间关系网:
-│  ├──苏明远: 竞争对手，十年前的同僚
-│  └──林婉儿: 暗中培养的继承人
-├──触发或加深的事件:
-│  ├──兵器库遇袭: 丢失三把传家宝剑，影响战力
-│  └──匿名威胁信: 信纸带有檀香味，暗示内部泄密
-│
+│  ├──某物(道具)：描述
+│  └──XX长剑(武器)：描述
+│   ...
+├──能力
+│  ├──技能1：描述
+│  └──技能2：描述
+│   ...
+├──状态
+│  ├──身体状态：
+│  └──心理状态：描述
+│    
+├──主要角色间关系网
+│  ├──李四：描述
+│  └──王二：描述
+│   ...
+├──触发或加深的事件
+│  ├──事件1：描述
+│  └──事件2：描述
+    ...   
 
-请严格按上述格式分析以下内容：
+<<示例>>
+张三：
+├──物品:
+│  ├──青衫：一件破损的青色长袍，带有暗红色的污渍
+│  └──寒铁长剑：一柄断裂的铁剑，剑身上刻有古老的符文
+├──能力
+│  ├──技能1：强大的精神感知能力：能够察觉到周围人的心中活动
+│  └──技能2：无形攻击：能够释放一种无法被视觉捕捉的精神攻击
+├──状态
+│  ├──身体状态: 身材挺拔，穿着华丽的铠甲，面色冷峻
+│  └──心理状态: 目前的心态比较平静，但内心隐藏着对柳溪镇未来掌控的野心和不安
+├──主要角色间关系网
+│  ├──李四：张三从小就与她有关联，对她的成长一直保持关注
+│  └──王二：两人之间有着复杂的过去，最近因一场冲突而让对方感到威胁
+├──触发或加深的事件
+│  ├──村庄内突然出现不明符号：这个不明符号似乎在暗示柳溪镇即将发生重大事件
+│  └──李四被刺穿皮肤：这次事件让两人意识到对方的强大实力，促使他们迅速离开队伍
+
+新出场角色：
+- (此处填写未来任何新增角色或临时出场人物的基本信息)
+
+<<要求>>
+仅返回编写好的角色状态文本，不要解释任何内容。
+
+请严格按上述规则和格式分析以下内容：
 <<待分析小说文本开始>>
 {content}
 <<待分析小说文本结束>>
@@ -395,7 +658,7 @@ def get_recent_chapters_summary_prompt(
 ├── 认知颠覆：{next_chapter_plot_twist_level}
 └── 本章简述：{next_chapter_summary}
 
-**上下文分析阶段**：
+[上下文分析阶段]：
 1. 回顾前三章核心内容：
    - 第一章核心要素：[章节标题]→[核心冲突/理论]→[关键人物/概念]
    - 第二章发展路径：[已建立的人物关系]→[技术/情节进展]→[遗留伏笔]
@@ -404,7 +667,7 @@ def get_recent_chapters_summary_prompt(
    - 必继承要素：列出前3章中必须延续的3个核心设定
    - 可调整要素：识别2个允许适度变化的辅助设定
 
-**当前章节摘要生成规则**：
+[当前章节摘要生成规则]：
 1. 内容架构：
    - 继承权重：70%内容需与前3章形成逻辑递进
    - 创新空间：30%内容可引入新要素，但需标注创新类型（如：技术突破/人物黑化）
@@ -575,7 +838,6 @@ def get_knowledge_search_prompt(
     
 生成规则：
     
-    
 1.关键词组合逻辑：
 -类型1：[实体]+[属性]（如"量子计算机 故障日志"）
 -类型2：[事件]+[后果]（如"实验室爆炸 辐射泄漏"）
@@ -591,7 +853,7 @@ def get_knowledge_search_prompt(
 -排除与前3章重复率超60%的词汇
     
 请生成3-5组检索词，按优先级降序排列。
-格式：每组用"·"连接2-3个关键词，每组占一行
+格式：每组用"."连接2-3个关键词，每组占一行
     
 示例：
 科技公司·数据泄露
@@ -614,7 +876,6 @@ def get_knowledge_filter_prompt(
 {json.dumps(chapter_info, ensure_ascii=False, indent=2)}
     
 过滤流程：
-    
     
 冲突检测：
     
@@ -726,6 +987,376 @@ def get_logic_check_prompt(
 
 [修改建议]:
 <针对每个逻辑问题的具体修改建议>
+
+[修改必要性]: <"需要修改"或"无需修改">
+"""
+
+def get_character_dynamics_prompt(
+    novel_config: Dict,
+    reference_content: str = ""
+) -> str:
+    """生成用于创建角色动力学设定的提示词。
+    
+    Args:
+        novel_config: 小说配置信息
+        reference_content: 知识库参考内容
+        
+    Returns:
+        str: 生成的提示词
+    """
+    # 获取世界观设定
+    world_building = novel_config.get("writing_guide", {}).get("world_building", {})
+    magic_system = world_building.get("magic_system", "")
+    social_system = world_building.get("social_system", "")
+    background = world_building.get("background", "")
+    
+    # 获取主角设定
+    character_guide = novel_config.get("writing_guide", {}).get("character_guide", {})
+    protagonist = character_guide.get("protagonist", {})
+    protagonist_background = protagonist.get("background", "")
+    
+    # 获取配角和反派设定
+    supporting_roles = character_guide.get("supporting_roles", [])
+    antagonists = character_guide.get("antagonists", [])
+    
+    prompt = f"""基于以下元素设计3-6个具有动态变化潜力的核心角色：
+
+[世界观基础]
+修炼体系：{magic_system}
+社会体系：{social_system}
+时代背景：{background}
+
+[已有角色参考]
+主角设定：{protagonist_background}
+配角阵营：{', '.join([role.get("role_type", "") for role in supporting_roles])}
+反派阵营：{', '.join([role.get("role_type", "") for role in antagonists])}
+
+[知识库参考]
+{reference_content}
+
+请为每个角色设计以下要素：
+
+1. [基础特征]
+   ├──外在特征：性别、年龄、外貌、气质等
+   ├──身份背景：出身、职业、地位等
+   ├──特殊标识：独特能力、标志性物品等
+   └──隐藏特质：暗藏的秘密或潜在弱点
+
+2. [核心驱动力三角]
+   ├──表层追求：物质层面的具体目标
+   ├──深层渴望：情感层面的内在需求
+   └──灵魂诉求：哲学层面的终极追寻
+
+3. [成长弧线]
+   ├──初始状态：性格特征与行为模式
+   ├──触发事件：改变的关键转折点
+   ├──认知失调：内外冲突与价值观碰撞
+   ├──蜕变过程：性格与行为的渐变轨迹
+   └──最终状态：成长后的新平衡
+
+4. [关系网络]
+   ├──核心关系：与主角的直接联系
+   ├──对立点：价值观或利益冲突
+   ├──合作面：共同目标或互补性
+   └──隐藏关联：潜在的背叛或反转可能
+
+5. [互动潜力]
+   ├──与主角：对主角成长的影响
+   ├──与配角：次要情节线的发展
+   ├──与世界：对整体剧情的推动
+   └──与主题：对核心主题的呼应
+
+[设计原则]
+1. 确保每个角色都具有：
+   - 独特性：避免脸谱化，设计差异化特征
+   - 复杂性：内外矛盾，多维度性格
+   - 成长性：具备变化和发展空间
+   - 互动性：与其他角色有机联系
+
+2. 角色弧线设计要求：
+   - 符合世界观和修炼体系设定
+   - 体现社会阶层和势力关系
+   - 预留反转和成长空间
+   - 为后续剧情埋下伏笔
+
+3. 关系网络构建要求：
+   - 至少与两个其他角色有显性冲突
+   - 至少与一个角色有隐藏矛盾
+   - 预设一条背叛或反转线索
+   - 为感情线留下发展空间
+
+请按以下格式输出每个角色的设定：
+
+[角色名称]
+├──基础特征
+│  ├──外在特征：xxx
+│  ├──身份背景：xxx
+│  ├──特殊标识：xxx
+│  └──隐藏特质：xxx
+├──核心驱动力
+│  ├──表层追求：xxx
+│  ├──深层渴望：xxx
+│  └──灵魂诉求：xxx
+├──成长弧线
+│  ├──初始状态：xxx
+│  ├──触发事件：xxx
+│  ├──认知失调：xxx
+│  ├──蜕变过程：xxx
+│  └──最终状态：xxx
+├──关系网络
+│  ├──核心关系：xxx
+│  ├──对立点：xxx
+│  ├──合作面：xxx
+│  └──隐藏关联：xxx
+└──互动潜力
+   ├──与主角：xxx
+   ├──与配角：xxx
+   ├──与世界：xxx
+   └──与主题：xxx
+
+仅返回角色设定文本，不要添加任何解释或说明。"""
+
+    return prompt
+
+def get_character_prompt(novel_config: Dict, character_name: str = "", reference_content: str = "") -> str:
+    """生成用于创建角色设定的提示词。
+    
+    Args:
+        novel_config: 小说配置信息
+        character_name: 角色名称
+        reference_content: 参考内容
+        
+    Returns:
+        str: 生成的提示词
+    """
+    # 获取基本设定
+    basic_settings = novel_config.get("basic_settings", {})
+    title = basic_settings.get("title", "")
+    genre = basic_settings.get("genre", "")
+    theme = basic_settings.get("theme", "")
+    
+    # 获取世界观设定
+    world_building = novel_config.get("world_building", {})
+    background = world_building.get("background", "")
+    rules = world_building.get("rules", "")
+    culture = world_building.get("culture", "")
+    
+    # 构建提示词
+    prompt = f"""请基于以下信息创建一个详细的角色设定：
+
+[基本信息]
+小说标题：{title}
+小说类型：{genre}
+小说主题：{theme}
+角色名称：{character_name}
+
+[世界观设定]
+背景：{background}
+规则：{rules}
+文化：{culture}
+
+[参考内容]
+{reference_content}
+
+[角色设定要求]
+1. 基础属性
+   ├──姓名由来
+   ├──年龄性别
+   ├──外貌特征
+   └──性格特点
+
+2. 背景设定
+   ├──家庭背景
+   ├──成长经历
+   ├──重要事件
+   └──人际关系
+
+3. 能力特点
+   ├──专业技能
+   ├──特殊能力
+   ├──兴趣爱好
+   └──行为习惯
+
+4. 故事定位
+   ├──角色身份
+   ├──剧情作用
+   ├──成长轨迹
+   └──情感线索
+
+请按照以下格式输出角色设定：
+[角色简介]
+简要概述角色的核心特点和在故事中的定位。
+
+[详细设定]
+基础属性：...
+背景设定：...
+能力特点：...
+故事定位：...
+
+直接返回创作的角色设定内容，不要添加任何解释或说明。"""
+
+    return prompt
+
+def get_style_check_prompt(
+    chapter_content: str,
+    novel_config: Dict
+) -> str:
+    """生成用于检查章节写作风格的提示词"""
+    writing_guide = novel_config.get("writing_guide", {})
+    style_guide = writing_guide.get("style_guide", {})
+    
+    # 获取风格指南
+    tone = style_guide.get("tone", "")
+    pov = style_guide.get("pov", "")
+    narrative_style = style_guide.get("narrative_style", "")
+    language_style = style_guide.get("language_style", "")
+    
+    return f"""请检查以下章节内容的写作风格：
+
+[风格指南]
+语气基调：{tone}
+叙述视角：{pov}
+叙事风格：{narrative_style}
+语言风格：{language_style}
+
+[章节内容]
+{chapter_content}
+
+===== 风格检查维度 =====
+
+1. 语气一致性
+   - 是否保持指定的语气基调
+   - 情感表达是否恰当
+   - 是否存在语气突兀转变
+
+2. 视角把控
+   - 是否严格遵守视角限制
+   - 视角切换是否自然
+   - 是否出现视角混乱
+
+3. 叙事手法
+   - 是否符合指定的叙事风格
+   - 叙事节奏是否合适
+   - 场景描写是否生动
+
+4. 语言特色
+   - 是否符合指定的语言风格
+   - 用词是否准确规范
+   - 句式是否多样流畅
+
+5. 细节处理
+   - 环境描写是否细致
+   - 人物刻画是否生动
+   - 情节铺陈是否到位
+
+===== 输出格式 =====
+[总体评分]: <0-100分>
+
+[语气一致性评分]: <0-20分>
+[语气分析]:
+<分析内容>
+
+[视角把控评分]: <0-20分>
+[视角分析]:
+<分析内容>
+
+[叙事手法评分]: <0-20分>
+[叙事分析]:
+<分析内容>
+
+[语言特色评分]: <0-20分>
+[语言分析]:
+<分析内容>
+
+[细节处理评分]: <0-20分>
+[细节分析]:
+<分析内容>
+
+[风格问题列表]:
+1. <问题描述>
+2. <问题描述>
+...
+
+[修改建议]:
+<针对每个风格问题的具体修改建议>
+
+[修改必要性]: <"需要修改"或"无需修改">
+"""
+
+def get_emotion_check_prompt(
+    chapter_content: str,
+    chapter_outline: Dict
+) -> str:
+    """生成用于检查章节情感表达的提示词"""
+    return f"""请检查以下章节内容的情感表达：
+
+[章节大纲]
+章节号：{chapter_outline.get('chapter_number', '未知')}
+标题：{chapter_outline.get('title', '未知')}
+情感基调：{chapter_outline.get('emotion', '未知')}
+关键剧情点：{', '.join(chapter_outline.get('key_points', []))}
+涉及角色：{', '.join(chapter_outline.get('characters', []))}
+
+[章节内容]
+{chapter_content}
+
+===== 情感检查维度 =====
+
+1. 情感基调
+   - 是否符合章节预设基调
+   - 情感变化是否自然
+   - 是否有突兀的情绪波动
+
+2. 人物情感
+   - 情感表达是否符合人物性格
+   - 情感反应是否合理
+   - 内心活动描写是否到位
+
+3. 情感互动
+   - 人物间情感交流是否自然
+   - 情感冲突是否鲜明
+   - 群体情绪是否传染
+
+4. 场景情感
+   - 环境氛围营造是否到位
+   - 场景与情感是否呼应
+   - 是否有画面感
+
+5. 读者共鸣
+   - 是否容易引起情感共鸣
+   - 是否有感情真实性
+   - 是否有情感升华
+
+===== 输出格式 =====
+[总体评分]: <0-100分>
+
+[情感基调评分]: <0-20分>
+[基调分析]:
+<分析内容>
+
+[人物情感评分]: <0-20分>
+[人物情感分析]:
+<分析内容>
+
+[情感互动评分]: <0-20分>
+[互动分析]:
+<分析内容>
+
+[场景情感评分]: <0-20分>
+[场景分析]:
+<分析内容>
+
+[读者共鸣评分]: <0-20分>
+[共鸣分析]:
+<分析内容>
+
+[情感问题列表]:
+1. <问题描述>
+2. <问题描述>
+...
+
+[修改建议]:
+<针对每个情感问题的具体修改建议>
 
 [修改必要性]: <"需要修改"或"无需修改">
 """ 

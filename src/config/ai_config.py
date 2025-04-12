@@ -15,7 +15,7 @@ class AIConfig:
             "models": {
                 "outline": {
                     "name": "gemini-2.0-flash-thinking-exp-01-21",
-                    "temperature": 0.8
+                    "temperature": 1.0
                 },
                 "content": {
                     "name": "gemini-2.0-flash-thinking-exp-01-21",

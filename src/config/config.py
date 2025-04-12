@@ -33,9 +33,26 @@ class Config:
         
         # AI模型配置
         self.model_config = {
-            "outline_model": self.ai_config.get_model_config("gemini_outline"),
-            "content_model": self.ai_config.get_model_config("gemini_content"),
-            "embedding_model": self.ai_config.get_model_config("openai_embedding")
+            "outline_model": {
+                "type": "gemini",
+                "model_name": self.ai_config.gemini_config["models"]["outline"]["name"],
+                "temperature": self.ai_config.gemini_config["models"]["outline"]["temperature"],
+                "api_key": self.ai_config.gemini_config["api_key"]
+            },
+            "content_model": {
+                "type": "gemini",
+                "model_name": self.ai_config.gemini_config["models"]["content"]["name"],
+                "temperature": self.ai_config.gemini_config["models"]["content"]["temperature"],
+                "api_key": self.ai_config.gemini_config["api_key"]
+            },
+            "embedding_model": {
+                "type": "openai",
+                "model_name": self.ai_config.openai_config["models"]["embedding"]["name"],
+                "temperature": self.ai_config.openai_config["models"]["embedding"]["temperature"],
+                "api_key": self.ai_config.openai_config["api_key"],
+                "base_url": self.ai_config.openai_config["base_url"],
+                "dimension": self.ai_config.openai_config["models"]["embedding"]["dimension"]
+            }
         }
         
         # 小说配置
@@ -81,7 +98,31 @@ class Config:
         Returns:
             Dict[str, Any]: 模型配置
         """
-        return self.model_config[model_type]
+        if model_type == "outline_model":
+            return {
+                "type": "gemini",
+                "model_name": self.ai_config.gemini_config["models"]["outline"]["name"],
+                "temperature": self.ai_config.gemini_config["models"]["outline"]["temperature"],
+                "api_key": self.ai_config.gemini_config["api_key"]
+            }
+        elif model_type == "content_model":
+            return {
+                "type": "gemini",
+                "model_name": self.ai_config.gemini_config["models"]["content"]["name"],
+                "temperature": self.ai_config.gemini_config["models"]["content"]["temperature"],
+                "api_key": self.ai_config.gemini_config["api_key"]
+            }
+        elif model_type == "embedding_model":
+            return {
+                "type": "openai",
+                "model_name": self.ai_config.openai_config["models"]["embedding"]["name"],
+                "temperature": self.ai_config.openai_config["models"]["embedding"]["temperature"],
+                "api_key": self.ai_config.openai_config["api_key"],
+                "base_url": self.ai_config.openai_config["base_url"],
+                "dimension": self.ai_config.openai_config["models"]["embedding"]["dimension"]
+            }
+        else:
+            raise ValueError(f"不支持的模型类型: {model_type}")
     
     def get_writing_guide(self) -> Dict:
         """获取写作指南"""
