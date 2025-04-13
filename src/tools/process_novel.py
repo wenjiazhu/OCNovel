@@ -7,7 +7,7 @@ from opencc import OpenCC
 cc = OpenCC('t2s')
 
 def standardize_punctuation(text):
-    """将常用半角标点替换为全角中文标点"""
+    """将常用半角标点替换为全角中文标点，并将单省略号替换为双省略号"""
     replacements = {
         ',': '，',
         '.': '。', # 注意：英文句点统一转为中文句号
@@ -19,8 +19,18 @@ def standardize_punctuation(text):
         "'": '’', # 简单替换，不区分前后引号
         '(': '（',
         ')': '）',
+        # 添加省略号替换规则
+        '…': '……', # 将单个省略号替换为双省略号
+        '...': '……' # 也处理三个点的英文省略号
     }
+    # 先执行省略号替换，避免三个点被先替换成句号
+    text = text.replace('...', '……')
+    text = text.replace('…', '……')
+
     for half, full in replacements.items():
+        # 跳过已经处理的省略号规则
+        if half == '…' or half == '...':
+            continue
         text = text.replace(half, full)
     # 移除所有其他类型的空白字符，保留换行符用于可能的初始段落结构
     # 但通常在处理前会合并成一个长字符串，所以移除所有 \s+ 是合适的
@@ -31,6 +41,7 @@ def split_sentences_to_paragraphs(text):
     """
     将文本拆分为段落。引号(“...”)内的内容视为一个整体，不按其内部标点拆分。
     仅根据引号外部的句末标点(。？！)进行拆分。
+    在相邻的结束引号(")和开始引号(")之间强制分段。
     段落不以 】、）、，、。、！、？、； 开头。
     """
     if not text:
@@ -43,7 +54,8 @@ def split_sentences_to_paragraphs(text):
     def replace_quote(match):
         nonlocal quote_index
         placeholder = placeholder_template.format(quote_index)
-        quotes[placeholder] = match.group(0) # Store the full quote "..."
+        # 使用 re.escape 确保占位符本身在后续正则中安全
+        quotes[re.escape(placeholder)] = match.group(0)
         quote_index += 1
         return placeholder
 
@@ -52,7 +64,6 @@ def split_sentences_to_paragraphs(text):
     text_with_placeholders = re.sub(quote_pattern, replace_quote, text)
 
     # 2. 按句末标点分割 (仅在引号外部)
-    # 使用 finditer 找到所有句末标点的位置
     sentence_enders_pattern = r'[\u3002\uFF1F\uFF01]' # .?!
     split_points = [0] # Start of text
     for match in re.finditer(sentence_enders_pattern, text_with_placeholders):
@@ -63,35 +74,53 @@ def split_sentences_to_paragraphs(text):
          split_points.append(len(text_with_placeholders))
 
     # 根据分割点创建初步的段落列表
-    segments_with_placeholders = []
+    initial_segments_with_placeholders = []
     for i in range(len(split_points) - 1):
         segment = text_with_placeholders[split_points[i]:split_points[i+1]].strip()
         if segment:
-            segments_with_placeholders.append(segment)
+            initial_segments_with_placeholders.append(segment)
 
     # 如果没有有效的分割（例如，文本不包含句末标点），则处理整个文本块
-    if not segments_with_placeholders and text_with_placeholders.strip():
-        segments_with_placeholders = [text_with_placeholders.strip()]
+    if not initial_segments_with_placeholders and text_with_placeholders.strip():
+        initial_segments_with_placeholders = [text_with_placeholders.strip()]
+
+    # 3. Refine Split: 在相邻占位符之间分割 (避免使用变长 lookbehind)
+    refined_segments_with_placeholders = []
+    # 定义一个独特的分隔符
+    delimiter = "@@ADJACENT_QUOTE_SPLIT@@"
+    # 正则：匹配第一个占位符及其后的空格，当其后紧跟另一个占位符时
+    # 使用先行断言 (?=...) 来检查后面的占位符，但不消耗它
+    adjacency_pattern = r'(\b__QUOTE_\d+__\b)\s*(?=\b__QUOTE_\d+__\b)'
+
+    for segment in initial_segments_with_placeholders:
+        # 使用 re.sub 将匹配到的 '占位符1 + 空格' 替换为 '占位符1 + 分隔符'
+        modified_segment = re.sub(adjacency_pattern, r'\1' + delimiter, segment)
+        # 按分隔符分割
+        sub_segments = modified_segment.split(delimiter)
+        # 添加非空、去除首尾空格的子段落
+        refined_segments_with_placeholders.extend([s.strip() for s in sub_segments if s.strip()])
 
 
-    # 3. 恢复引号内容
+    # 4. 恢复引号内容
     restored_segments = []
-    for segment in segments_with_placeholders:
+    for segment in refined_segments_with_placeholders:
         restored_segment = segment
-        # 迭代替换回占位符
-        for placeholder, original_quote in quotes.items():
-             restored_segment = restored_segment.replace(placeholder, original_quote)
-        if restored_segment: # 确保恢复后不为空
+        # 迭代恢复占位符
+        # 注意：字典迭代顺序在Python 3.7+是插入顺序，但这里顺序不重要
+        for placeholder_escaped, original_quote in quotes.items():
+             # 使用 re.sub 替换，因为 placeholder_escaped 已经是转义过的正则模式
+             restored_segment = re.sub(placeholder_escaped, original_quote, restored_segment)
+        if restored_segment:
              restored_segments.append(restored_segment)
 
 
-    # 4. 后处理：合并以特定标点开头的段落
+    # 5. 后处理：合并以特定标点开头的段落
     if not restored_segments:
         return ""
 
     processed_paragraphs = []
-    if restored_segments: # 确保列表不为空
-        processed_paragraphs.append(restored_segments[0]) # 添加第一个段落
+    if restored_segments:
+        processed_paragraphs.append(restored_segments[0])
 
         # 定义不允许出现在段首的标点 (使用 Unicode 转义)
         forbidden_leading_chars = (
@@ -102,17 +131,16 @@ def split_sentences_to_paragraphs(text):
             '\uFF01', # ！
             '\uFF1F', # ？
             '\uFF1B'  # ；
+            # 注意：这里不包含开始引号" (\u201C)，因为我们希望它能开启新段落
         )
 
         for i in range(1, len(restored_segments)):
             current_segment = restored_segments[i]
-            # 检查当前段落是否以不允许的标点开头
             if current_segment.startswith(forbidden_leading_chars):
-                processed_paragraphs[-1] += current_segment # 追加到前一个段落
+                processed_paragraphs[-1] += current_segment
             else:
-                processed_paragraphs.append(current_segment) # 开始新段落
+                processed_paragraphs.append(current_segment)
 
-    # 使用双换行符连接最终段落
     return '\n\n'.join(processed_paragraphs)
 
 def count_chinese_chars(text):
