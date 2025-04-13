@@ -195,9 +195,13 @@ OCNovel/
 │   │   ├── gemini_model.py        # Gemini模型
 │   │   └── openai_model.py        # OpenAI模型
 │   └── tools/         # 工具脚本
+│       ├── process_novel.py        # 章节内容整理工具
+│       ├── update_outline.py       # 大纲更新工具
+│       ├── update_summary.py       # 章节摘要更新工具
 │       └── generate_marketing.py   # 营销内容生成
 ├── tests/             # 测试文件
 ├── config.json        # 主配置文件
+├── config.json.example # 配置文件示例
 ├── requirements.txt   # 依赖列表
 └── README.md         # 项目说明
 ```
@@ -206,59 +210,54 @@ OCNovel/
 
 主要配置项分为两部分：
 
-### 1. AI 模型配置（.env 文件）
-
-在项目根目录创建 `.env` 文件，配置 AI 模型相关参数：
-
-```
-# Gemini API配置
-GEMINI_API_KEY=你的Gemini API密钥
-
-# OpenAI API配置
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_API_BASE=你的OpenAI API基础URL（可选）
-```
-
-### 2. 项目配置（config.json）
-
-编辑 `config.json` 文件，设置项目相关参数。详细配置说明如下：
-
-#### 2.1 知识库配置 (knowledge_base_config)
-
-用于管理和处理参考小说的配置项。
-
-```json
-{
-  "reference_files": ["data/reference/my_novel.txt"],  // 参考小说文件路径列表，支持多个文件
-  "chunk_size": 1000,                                  // 文本分块大小，用于将长文本分割成小块进行处理
-  "chunk_overlap": 200,                                // 分块重叠大小，确保上下文连贯性
-  "cache_dir": "data/cache"                            // 知识库缓存目录，用于存储处理后的文本块
-}
-```
-
-#### 2.2 日志配置 (log_config)
-
-用于记录系统运行状态的配置项。
-
-```json
-{
-  "log_dir": "data/logs",                              // 日志文件存储目录
-  "log_level": "INFO",                                // 日志级别：DEBUG/INFO/WARNING/ERROR
-  "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"  // 日志格式
-}
-```
-
 #### 2.3 小说配置 (`novel_config`)
 
 定义要生成的小说基本信息和写作指南，这是指导 AI 创作的核心部分。
 
-##### 2.3.1 基本信息
 ```json
 {
-  "type": "示例类型",         // 小说类型: 如 玄幻, 都市, 科幻
-  "theme": "示例主题",        // 小说主题: 如 成长, 复仇, 探索
-  "style": "示例风格",        // 写作风格: 如 热血, 轻松, 悬疑
-  "target_chapters": 100,   // 目标生成章节数
-  "chapter_length": 2000    // 每章目标字数 (AI会尽量靠近此目标)
+  "type": "示例类型",          // 小说类型: 如 玄幻, 都市, 科幻
+  "theme": "示例主题",         // 小说主题: 如 成长, 复仇, 探索
+  "style": "示例风格",         // 写作风格: 如 热血, 轻松, 悬疑
+  "target_chapters": 100,    // 目标生成章节数
+  "chapter_length": 2000,    // 每章目标字数 (AI会尽量靠近此目标)
+  "writing_guide": {         // 详细的写作指南，包含世界观、角色、情节结构、风格等方面的详细设定
+    // ... 详细配置见 config.json.example ...
+  },
+  "extra_guidance": {        // 额外的写作指导，包括具体写作风格、内容规则、章节结构和情节修正等
+    // ... 详细配置见 config.json.example ...
+  }
+}
+```
+详细的 `writing_guide` 和 `extra_guidance` 配置项请参考 `config.json.example` 文件。
+
+#### 2.4 生成配置 (`generation_config`)
+
+控制小说生成过程的行为。
+
+```json
+{
+  "max_retries": 3,          // 单个任务（如生成章节）失败时的最大重试次数
+  "retry_delay": 10,         // 重试之间的延迟时间（秒）
+  "force_rebuild_kb": false, // 是否强制重新构建知识库，即使缓存存在
+  "validation": {            // 内容验证选项
+    "check_logic": true,     // 是否检查生成内容的逻辑性
+    "check_consistency": true, // 是否检查与前文的一致性
+    "check_duplicates": true  // 是否检查重复内容
+  }
+}
+```
+
+#### 2.5 输出配置 (`output_config`)
+
+控制生成结果的保存方式。
+
+```json
+{
+  "format": "txt",               // 输出文件格式
+  "encoding": "utf-8",           // 输出文件编码
+  "save_outline": true,          // 是否保存生成的小说大纲
+  "save_character_states": true, // 是否保存角色状态信息（如果实现）
+  "output_dir": "<path/to/output>" // 生成文件的输出目录
 }
 ```
