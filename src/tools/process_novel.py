@@ -22,31 +22,98 @@ def standardize_punctuation(text):
     }
     for half, full in replacements.items():
         text = text.replace(half, full)
-    # 移除所有空格（包括全角和半角）
+    # 移除所有其他类型的空白字符，保留换行符用于可能的初始段落结构
+    # 但通常在处理前会合并成一个长字符串，所以移除所有 \s+ 是合适的
     text = re.sub(r'\s+', '', text)
     return text
 
 def split_sentences_to_paragraphs(text):
-    """将每个句子拆分为单独的段落，并正确处理句末标点后的引号和括号"""
-    # 修改正则表达式：匹配非结束标点+结束标点+[可选的后引号/括号]
-    # [^。？！]     匹配任何不是句末标点的字符
-    # +            匹配前面的字符一次或多次
-    # [。？！]     匹配句末标点（。、？、！）
-    # [”'）]*    匹配零个或多个后引号（"）、单引号（'）或右括号（）
-    sentences = re.findall(r"[^。？！]+[。？！][”'）]*", text)
-    # 如果原文末尾没有标点，可能最后一部分未被匹配，需要加上
-    if text and text[-1] not in '。？！':
-        # 找到最后一个标点后的内容
-        last_part_start = 0
-        for i in range(len(text) - 1, -1, -1):
-            if text[i] in '。？！':
-                last_part_start = i + 1
-                break
-        if last_part_start < len(text):
-             sentences.append(text[last_part_start:])
+    """
+    将文本拆分为段落。引号(“...”)内的内容视为一个整体，不按其内部标点拆分。
+    仅根据引号外部的句末标点(。？！)进行拆分。
+    段落不以 】、）、，、。、！、？、； 开头。
+    """
+    if not text:
+        return ""
 
-    # 用双换行符连接句子，形成段落
-    return '\n\n'.join(filter(None, sentences)) # filter(None, ...) 移除可能的空字符串
+    quotes = {}
+    placeholder_template = "__QUOTE_{}__"
+    quote_index = 0
+
+    def replace_quote(match):
+        nonlocal quote_index
+        placeholder = placeholder_template.format(quote_index)
+        quotes[placeholder] = match.group(0) # Store the full quote "..."
+        quote_index += 1
+        return placeholder
+
+    # 1. 保护引号内容: 替换所有 "..." 为占位符
+    quote_pattern = r'\u201C[^\u201D]*\u201D' # "..."
+    text_with_placeholders = re.sub(quote_pattern, replace_quote, text)
+
+    # 2. 按句末标点分割 (仅在引号外部)
+    # 使用 finditer 找到所有句末标点的位置
+    sentence_enders_pattern = r'[\u3002\uFF1F\uFF01]' # .?!
+    split_points = [0] # Start of text
+    for match in re.finditer(sentence_enders_pattern, text_with_placeholders):
+        split_points.append(match.end()) # End of punctuation is a split point
+
+    # 如果文本末尾没有句末标点，确保包含最后一部分
+    if split_points[-1] < len(text_with_placeholders):
+         split_points.append(len(text_with_placeholders))
+
+    # 根据分割点创建初步的段落列表
+    segments_with_placeholders = []
+    for i in range(len(split_points) - 1):
+        segment = text_with_placeholders[split_points[i]:split_points[i+1]].strip()
+        if segment:
+            segments_with_placeholders.append(segment)
+
+    # 如果没有有效的分割（例如，文本不包含句末标点），则处理整个文本块
+    if not segments_with_placeholders and text_with_placeholders.strip():
+        segments_with_placeholders = [text_with_placeholders.strip()]
+
+
+    # 3. 恢复引号内容
+    restored_segments = []
+    for segment in segments_with_placeholders:
+        restored_segment = segment
+        # 迭代替换回占位符
+        for placeholder, original_quote in quotes.items():
+             restored_segment = restored_segment.replace(placeholder, original_quote)
+        if restored_segment: # 确保恢复后不为空
+             restored_segments.append(restored_segment)
+
+
+    # 4. 后处理：合并以特定标点开头的段落
+    if not restored_segments:
+        return ""
+
+    processed_paragraphs = []
+    if restored_segments: # 确保列表不为空
+        processed_paragraphs.append(restored_segments[0]) # 添加第一个段落
+
+        # 定义不允许出现在段首的标点 (使用 Unicode 转义)
+        forbidden_leading_chars = (
+            '\u3011', # 】
+            '\uFF09', # ）
+            '\uFF0C', # ，
+            '\u3002', # 。
+            '\uFF01', # ！
+            '\uFF1F', # ？
+            '\uFF1B'  # ；
+        )
+
+        for i in range(1, len(restored_segments)):
+            current_segment = restored_segments[i]
+            # 检查当前段落是否以不允许的标点开头
+            if current_segment.startswith(forbidden_leading_chars):
+                processed_paragraphs[-1] += current_segment # 追加到前一个段落
+            else:
+                processed_paragraphs.append(current_segment) # 开始新段落
+
+    # 使用双换行符连接最终段落
+    return '\n\n'.join(processed_paragraphs)
 
 def count_chinese_chars(text):
     """统计文本中汉字的数量"""

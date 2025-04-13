@@ -508,7 +508,7 @@ class NovelGenerator:
             "分析", "总结", "说明", "介绍", "描述", "特征", "属性",
             "物品", "能力", "状态", "关系", "事件", "技能", "装备",
             "道具", "功法", "法宝", "境界", "实力", "修为", "天赋",
-            "？", "？", "？", "─", "主要角色", "次要角色", "配角"
+            "？", "？", "？", "─", "主要角色", "次要角色", "配角", "无"
         ]
         
         for line in lines:
@@ -1605,7 +1605,7 @@ class NovelGenerator:
 
             # 从当前章节开始生成
             total_chapters = len(self.chapter_outlines)
-            max_retries = 3  # 每章最多重试次数
+            max_retries = 5  # 每章最多重试次数
 
             while self.current_chapter < total_chapters:
                 if self.target_chapter is not None and self.current_chapter == self.target_chapter:
