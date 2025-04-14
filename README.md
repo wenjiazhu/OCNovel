@@ -261,3 +261,48 @@ OCNovel/
   "output_dir": "<path/to/output>" // 生成文件的输出目录
 }
 ```
+
+# 番茄小说网自动发布工具
+
+这是一个使用Playwright自动将章节发布到番茄小说网作家专区的Python脚本。
+
+## 环境要求
+
+- Python 3.7+
+- Playwright
+
+## 安装步骤
+
+1. 安装依赖：
+```bash
+pip install -r requirements.txt
+```
+
+2. 安装Playwright浏览器：
+```bash
+playwright install
+```
+
+## 使用方法
+
+1. 准备章节文件：
+   - 在项目根目录创建 `chapters` 文件夹
+   - 将章节文件（.txt格式）放入该文件夹
+   - 章节文件的第一行应为章节标题，之后为章节内容
+
+2. 准备登录信息：
+   - 手动登录番茄小说网
+   - 使用浏览器开发者工具导出cookies为JSON格式
+   - 将cookies保存为 `cookies.json` 文件放在项目根目录
+
+3. 运行脚本：
+```bash
+python auto_publish.py
+```
+
+## 注意事项
+
+- 章节文件会按文件名排序依次发布
+- 每个章节发布后会有2秒延时，避免请求过快
+- 发布过程中请勿关闭浏览器窗口
+- 所有章节都会保存为草稿，需要手动审核后发布

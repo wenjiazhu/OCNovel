@@ -34,6 +34,7 @@ data/reference/*
 data/marketing/*
 config.json
 config2.json
+cookies.json
 .cursor/rules/*
 
 # 环境变量
