@@ -36,6 +36,7 @@ config.json
 config2.json
 cookies.json
 .cursor/rules/*
+/chapters/*
 
 # 环境变量
 .env
