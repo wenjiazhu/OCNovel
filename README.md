@@ -210,7 +210,7 @@ OCNovel/
 
 主要配置项分为两部分：
 
-#### 2.3 小说配置 (`novel_config`)
+### 1. 小说配置 (`novel_config`)
 
 定义要生成的小说基本信息和写作指南，这是指导 AI 创作的核心部分。
 
@@ -231,7 +231,7 @@ OCNovel/
 ```
 详细的 `writing_guide` 和 `extra_guidance` 配置项请参考 `config.json.example` 文件。
 
-#### 2.4 生成配置 (`generation_config`)
+### 2. 生成配置 (`generation_config`)
 
 控制小说生成过程的行为。
 
@@ -248,7 +248,7 @@ OCNovel/
 }
 ```
 
-#### 2.5 输出配置 (`output_config`)
+### 3. 输出配置 (`output_config`)
 
 控制生成结果的保存方式。
 
