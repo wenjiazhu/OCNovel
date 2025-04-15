@@ -43,23 +43,23 @@ class NovelPublisher:
         print("正在启动 Microsoft Edge 浏览器...")
         try:
             # 指定 channel='msedge' 通常能确保使用您系统上安装的稳定版Edge
-            self.browser = self.playwright.msedge.launch(headless=False, channel="msedge")
-            print("Edge 浏览器启动成功")
+            self.browser = self.playwright.msedge.launch(headless=True, channel="msedge")
+            print("Edge 浏览器启动成功（无界面模式）")
         except Exception as e:
             print(f"启动 Edge (带 channel) 失败: {e}")
             print("尝试不指定 channel 启动 Edge...")
             # 如果指定 channel 失败，尝试不指定，让 Playwright 查找
             try:
-                self.browser = self.playwright.msedge.launch(headless=False)
-                print("Edge 浏览器（无 channel 指定）启动成功")
+                self.browser = self.playwright.msedge.launch(headless=True)
+                print("Edge 浏览器（无 channel 指定）启动成功（无界面模式）")
             except Exception as e2:
                  print(f"再次尝试启动 Edge 失败: {e2}")
                  print("请确保已运行 'playwright install msedge' 并安装了 Edge 浏览器。")
                  # 如果仍然失败，尝试回退到 chromium
                  print("尝试回退到 Chromium...")
                  try:
-                     self.browser = self.playwright.chromium.launch(headless=False)
-                     print("Chromium 浏览器启动成功")
+                     self.browser = self.playwright.chromium.launch(headless=True)
+                     print("Chromium 浏览器启动成功（无界面模式）")
                  except Exception as e3:
                       print(f"启动 Chromium 也失败了: {e3}")
                       raise Exception("无法启动任何支持的浏览器 (Edge 或 Chromium)")
@@ -128,14 +128,31 @@ class NovelPublisher:
             print(f"访问页面: {publish_url}")
             self.page.goto(publish_url)
 
-            # --- 定位并填写章节标题 ---
+            # --- 定位并填写章节号和章节标题 ---
             print("等待页面加载...")
+            
+            # 尝试定位章节号输入框
+            chapter_number_input_selector = ".serial-editor-title-left .left-input input"
+            try:
+                chapter_number_input = self.page.wait_for_selector(chapter_number_input_selector, state="visible", timeout=5000)
+                print("找到章节号输入框")
+                if chapter_data["number"]:
+                    print(f"输入章节号: {chapter_data['number']}")
+                    chapter_number_input.fill("")  # 清空
+                    time.sleep(0.2)
+                    chapter_number_input.fill(chapter_data["number"])  # 填入章节号
+                else:
+                    print("章节号为空，跳过输入")
+            except Exception as e:
+                print(f"查找或填写章节号输入框失败: {e}，跳过章节号输入")
+            
+            # 尝试定位章节标题输入框
             title_input_selector = "input[placeholder='请输入标题']"
             print(f"尝试查找章节标题输入框: {title_input_selector}")
+
             try:
                 title_input = self.page.wait_for_selector(title_input_selector, state="visible", timeout=10000)
                 print(f"找到章节标题输入框")
-                
                 print(f"输入章节标题: {chapter_title}")
                 title_input.fill("")  # 清空
                 time.sleep(0.2)

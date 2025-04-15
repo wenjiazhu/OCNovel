@@ -15,7 +15,7 @@ def standardize_punctuation(text):
         '!': '！',
         ':': '：',
         ';': '；',
-        '"': '”', # 简单替换，不区分前后引号，可根据需要调整
+        # '"': '”', # 移除此规则，避免破坏 "..." 结构
         "'": '’', # 简单替换，不区分前后引号
         '(': '（',
         ')': '）',
@@ -30,6 +30,9 @@ def standardize_punctuation(text):
     for half, full in replacements.items():
         # 跳过已经处理的省略号规则
         if half == '…' or half == '...':
+            continue
+        # 跳过移除的 " 规则
+        if half == '"':
             continue
         text = text.replace(half, full)
     # 移除所有其他类型的空白字符，保留换行符用于可能的初始段落结构
@@ -145,10 +148,6 @@ def process_chapter(input_path, output_dir, split_sentences):
     try:
         with open(input_path, 'r', encoding='utf-8') as f_in:
             content = f_in.read()
-
-        # 移除文件开头的章节标题（以**号为分隔）
-        if '**' in content:
-            content = content.split('**', 1)[1]
 
         # 移除文件末尾的字数统计
         content = re.sub(r'（字数：\d+字）\s*$', '', content)
