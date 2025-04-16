@@ -14,7 +14,7 @@ import dataclasses
 from typing import Dict, Tuple, Any, List, Optional
 
 # 导入提示词模块
-from . import prompts
+from .. import prompts
 
 class ConsistencyChecker:
     """小说章节内容一致性检查器类"""

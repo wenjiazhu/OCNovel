@@ -2,15 +2,15 @@ import asyncio
 import os
 import json
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
-from tenacity import retry, stop_after_attempt, wait_fixed, RetryError
+from tenacity import retry, stop_after_attempt, wait_fixed, RetryError, wait_exponential
 import dataclasses
 import math # 导入 math 模块用于 ceil
 import re # 导入 re 模块用于清理文件名
 from . import prompts # 导入新的 prompts 模块
-from .consistency_checker import ConsistencyChecker # 导入一致性检查器
-from .validators import LogicValidator, DuplicateValidator
+from .content.consistency_checker import ConsistencyChecker # 导入一致性检查器
+from .content.validators import LogicValidator, DuplicateValidator
 from ..models import ContentModel, OutlineModel, EmbeddingModel
 from ..knowledge_base.knowledge_base import KnowledgeBase
 from ..config.config import Config
@@ -18,6 +18,7 @@ import time # 需要import time
 # import asyncio # 需要导入 asyncio 来处理可能的 TimeoutError
 import string # 导入 string 模块用于字符串处理
 from opencc import OpenCC
+from datetime import datetime
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
@@ -67,9 +68,12 @@ class NovelGenerator:
         self.content_model = content_model
         self.knowledge_base = knowledge_base
         
+        # 初始化重生成相关的属性
+        self.target_chapter = None
+        self.external_prompt = None
+        
         # 验证模型配置
-        if not self._validate_model_config():
-            raise ValueError("模型配置验证失败")
+        self._validate_model_config()
         
         # 初始化一致性检查器
         self.consistency_checker = ConsistencyChecker(self.content_model, config.output_config["output_dir"])
@@ -364,148 +368,137 @@ class NovelGenerator:
             development_stage="初次登场"
         )
 
-    def _parse_new_characters(self, update_text: str):
-        """解析新角色信息并添加到角色库"""
-        logging.info("开始解析新角色信息...")
-        
-        # 创建繁简转换器
-        t2s = OpenCC('t2s')  # 繁体转简体
-        
-        # 预处理：移除可能导致解析错误的内容
-        lines = update_text.split('\n')
-        valid_lines = []
-        # 需要过滤的关键词
-        filter_keywords = [
-            "分析", "总结", "说明", "介绍", "描述", "特征", "属性",
-            "物品", "能力", "状态", "关系", "事件", "技能", "装备",
-            "道具", "功法", "法宝", "境界", "实力", "修为", "天赋",
-            "？", "？", "？", "─", "主要角色", "次要角色", "配角"
-        ]
-        
-        for line in lines:
-            # 跳过空行或只包含标点的行
-            if not line.strip() or all(c in string.punctuation for c in line.strip()):
-                continue
-                
-            # 跳过包含过滤关键词的行
-            if any(keyword in line for keyword in filter_keywords):
-                continue
-            # 跳过以特殊字符开头的行
-            if line.strip().startswith(('##', '**', '？', '[', '？', '？', '？', '─')):
-                continue
-            valid_lines.append(line)
-        # 使用处理后的文本进行解析
-        cleaned_text = '\n'.join(valid_lines)
-        
-        try:
-            # 定义不同的括号对
-            brackets = [
-                ('？', '？'),
-                ('[', ']'),
-                ('"', '"'),
-                ("'", "'"),
-                ('？', '？'),
-                ('「', '」'),
-                ('『', '』'),
-                ('(', ')')
-            ]
-            
-            # 从文本中提取可能的角色名
-            try:
-                for left, right in brackets:
-                    pattern = f'{left}([^{right}]+){right}'
-                    try:
-                        matches = re.finditer(pattern, cleaned_text)
-                        for match in matches:
-                            name = match.group(1).strip()
-                            if name and self._is_valid_character_name(name):
-                                # 转换为简体
-                                simplified_name = t2s.convert(name)
-                                # 使用简体名称作为键
-                                if simplified_name not in self.characters:
-                                    self.characters[simplified_name] = self._create_basic_character(simplified_name)
-                                    logging.info(f"添加新角色: {simplified_name}")
-                    except Exception as e:
-                        logging.error(f"正则表达式匹配时出错: {e}")
-            except Exception as e:
-                logging.error(f"处理括号对时出错: {e}")
-                
-            # 显式检查常见角色名 - 针对当前小说内容
-            common_characters = ["陆沉"]
-            for name in common_characters:
-                # 检查这些角色名是否出现在文本中
-                if name in cleaned_text:
-                    # 如果角色不在角色库中，则添加
-                    if name not in self.characters:
-                        self.characters[name] = self._create_basic_character(name)
-                        logging.info(f"显式添加常见角色: {name}")
-                        
-            # 直接在文本中搜索可能的角色名（根据语境）
-            # 查找"XX说道"、XX等模式来识别角色
-            patterns = [
-                r'([^，。？！；、\s]{2,4})(?:说道|道|喊道|叫道|回答道|问道|怒道|笑道|低声道',
-                r'([^，。？！；、\s]{2,4})(?:的声音)'
-            ]
-            
-            for pattern in patterns:
-                matches = re.finditer(pattern, cleaned_text)
-                for match in matches:
-                    name = match.group(1).strip()
-                    if name and self._is_valid_character_name(name) and name not in self.characters:
-                        self.characters[name] = self._create_basic_character(name)
-                        logging.info(f"从对话模式中添加角色: {name}")
-                        
-        except Exception as e:
-            logging.error(f"解析新角色信息时出错: {str(e)}")
-        
-        # 保存更新后的角色库
-        self._save_characters()
-
     def _is_valid_character_name(self, name: str) -> bool:
-        """检查是否为有效的角色名"""
-        # 常见角色名直接通过验证
-        common_characters = ["陆沉"]
-        if name in common_characters:
+        """
+        验证角色名是否有效
+        """
+        # 主要角色列表
+        main_characters = ['陆沉', '噬元兽娘', '数据天魔', '机械天尊']
+        if name in main_characters:
             return True
-            
-        # 如果名称过长，可能是描述性文字
-        if len(name) > 12:
-            return False
-            
-        # 如果包含特定关键词，可能是属性或描述
-        invalid_keywords = [
-            "物品", "能力", "状态", "关系", "事件", "技能", "装备",
-            "道具", "功法", "法宝", "境界", "实力", "修为", "天赋",
-            "资质", "性格", "性情", "特点", "背景", "经历", "职业",
-            "职责", "身份", "地位", "关系网", "势力", "组织", "门派",
-            "宗门", "家族", "？", "？", "？", "─", "装备", "状态"
-        ]
         
+        # 基本长度检查
+        if len(name) < 2 or len(name) > 4:
+            return False
+        
+        # 检查是否包含无效字符
+        invalid_chars = ['。', '，', '！', '？', '；', '：', '"', '"', ''', ''', '（', '）', 
+                        '(', ')', '[', ']', '{', '}', '、', '|', '/', '\\', ' ', '\t', '\n']
+        if any(char in name for char in invalid_chars):
+            return False
+        
+        # 检查是否包含无效关键词
+        invalid_keywords = ['一切', '这个', '那个', '他们', '我们', '你们', '自己', '对方',
+                           '突然', '似乎', '知道', '看到', '听到', '感觉', '表面', '内心',
+                           '猛然', '顿时', '仿佛', '好像', '也许', '可能', '应该', '必须',
+                           '开始', '结束', '之前', '之后', '现在', '曾经', '以后', '地',
+                           '的', '得', '着', '了', '过', '在', '和', '与', '或', '且']
         if any(keyword in name for keyword in invalid_keywords):
             return False
-            
-        # 如果包含标点符号或特殊字符，可能不是名称
-        if any(char in name for char in "，。！？；？''【】《》（）[]{}├│└─"):
+        
+        # 检查是否包含重复字符
+        if any(name.count(char) > 1 for char in name):
             return False
-            
-        # 如果不包含中文字符，可能不是角色名
-        if not any('\u4e00' <= c <= '\u9fff' for c in name):
+        
+        # 检查是否以动词或形容词结尾
+        invalid_endings = ['着', '了', '过', '的', '地', '得']
+        if any(name.endswith(end) for end in invalid_endings):
             return False
-            
-        # 检查名称是否以数字或特殊字符开头
-        if name[0].isdigit() or name[0] in string.punctuation:
+        
+        # 检查是否包含数字
+        if any(char.isdigit() for char in name):
             return False
-            
-        # 如果是通用描述词，不是具体角色名
-        # 放宽标准，减少误判
-        generic_terms = [
-            "总结", "分析", "介绍", "描述", "状态", "能力", "属性",
-            "关系", "事件", "介绍", "主要", "次要", "配角"
-        ]
-        if name in generic_terms:
-            return False
-            
+        
         return True
+
+    def _parse_new_characters(self, content: str) -> List[Dict[str, Any]]:
+        """
+        从章节内容中解析新角色信息
+        """
+        new_characters = []
+        
+        # 对话标识词
+        dialogue_markers = ['说道', '喊道', '回答', '问道', '叹道', '笑道', '怒道', '低声道']
+        # 动作标识词
+        action_markers = ['抬头', '低头', '转身', '走向', '看向', '伸手', '出手', '站在']
+        # 状态标识词
+        state_markers = ['眼神', '表情', '神色', '脸色', '语气', '姿态', '气息', '状态']
+        
+        # 提取对话中的角色
+        for marker in dialogue_markers:
+            pattern = f'([^，。！？；：""''（）\\s]{2,4}){marker}'
+            matches = re.finditer(pattern, content)
+            for match in matches:
+                name = match.group(1)
+                if self._is_valid_character_name(name):
+                    stage = self._determine_character_stage(name, content)
+                    new_characters.append({
+                        'name': name,
+                        'stage': stage,
+                        'first_appearance': False
+                    })
+        
+        # 提取动作描述中的角色
+        for marker in action_markers + state_markers:
+            pattern = f'([^，。！？；：""''（）\\s]{2,4})(的)?{marker}'
+            matches = re.finditer(pattern, content)
+            for match in matches:
+                name = match.group(1)
+                if self._is_valid_character_name(name):
+                    stage = self._determine_character_stage(name, content)
+                    new_characters.append({
+                        'name': name,
+                        'stage': stage,
+                        'first_appearance': False
+                    })
+        
+        # 去重
+        seen_names = set()
+        unique_characters = []
+        for char in new_characters:
+            if char['name'] not in seen_names:
+                seen_names.add(char['name'])
+                unique_characters.append(char)
+        
+        return unique_characters
+
+    def _determine_character_stage(self, name: str, content: str) -> str:
+        """
+        根据上下文确定角色发展阶段
+        """
+        # 战斗相关关键词
+        battle_keywords = ['战斗', '厮杀', '对决', '交手', '激战', '搏杀', '出手', '攻击']
+        # 突破相关关键词
+        breakthrough_keywords = ['突破', '晋升', '提升', '进阶', '蜕变', '觉醒', '领悟']
+        # 危机相关关键词
+        crisis_keywords = ['危机', '危险', '生死', '绝境', '困境', '险境', '命悬一线']
+        # 转折相关关键词
+        turning_keywords = ['转折', '改变', '转变', '蜕变', '转机', '机遇', '契机']
+        # 成长相关关键词
+        growth_keywords = ['成长', '进步', '提升', '领悟', '感悟', '明悟', '顿悟']
+        
+        # 获取角色相关的上下文（前后100个字）
+        name_index = content.find(name)
+        if name_index == -1:
+            return '剧情发展中'
+        
+        start = max(0, name_index - 100)
+        end = min(len(content), name_index + 100)
+        context = content[start:end]
+        
+        # 根据关键词确定阶段
+        if any(keyword in context for keyword in crisis_keywords):
+            return '危机阶段'
+        elif any(keyword in context for keyword in breakthrough_keywords):
+            return '突破阶段'
+        elif any(keyword in context for keyword in battle_keywords):
+            return '战斗阶段'
+        elif any(keyword in context for keyword in turning_keywords):
+            return '转折阶段'
+        elif any(keyword in context for keyword in growth_keywords):
+            return '成长阶段'
+        else:
+            return '剧情发展中'
 
     def _parse_character_update(self, update_text: str, chapter_num: int, current_chapter_characters: set = None):
         """解析角色更新信息"""
@@ -515,6 +508,7 @@ class NovelGenerator:
         try:
             current_character = None
             in_format_block = False
+            character_data = {}  # 临时存储当前角色的更新数据
             
             for line in update_text.split('\n'):
                 line = line.strip()
@@ -522,121 +516,148 @@ class NovelGenerator:
                     continue
                 
                 # 跳过格式符号行
-                if any(symbol in line for symbol in ["├──", "？└──"]):
-                    in_format_block = True
+                if any(symbol in line for symbol in ["├──", "└──", "│"]):
                     continue
-                    
+                
                 # 检测角色名行（以冒号结尾）
-                if (':' in line or '：' in line) and not in_format_block:
+                if (':' in line or '：' in line):
+                    # 提取角色名部分
                     char_part = line.split(':')[0].strip() if ':' in line else line.split('：')[0].strip()
-                    # 清理可能的格式符号
-                    char_name = char_part.replace('├──', '').replace('？ ├──', '').replace('？ └──', '').replace('└──', '').strip()
+                    # 清理可能的格式符号和标记
+                    char_name = char_part.replace('角色名', '').replace('：', '').replace(':', '').strip()
+                    char_name = re.sub(r'[├──│└]', '', char_name).strip()
                     
                     # 转换为简体
                     char_name = t2s.convert(char_name)
                     
-                    # 检查是否是受保护的主要角色
-                    protected_characters = ["陆沉"]
-                    if char_name in protected_characters:
-                        current_character = char_name
-                        logging.info(f"开始更新角色信息 {char_name}")
-                        in_format_block = False
-                        continue
+                    # 如果之前有未保存的角色数据，先保存
+                    if current_character and character_data:
+                        self._update_character_with_data(current_character, character_data)
+                        character_data = {}
                     
-                    # 检查是否在角色库中
-                    if char_name in self.characters:
-                        current_character = char_name
-                        logging.info(f"开始更新角色信息 {char_name}")
-                        in_format_block = False
-                    else:
-                        # 检查是否是当前章节中的角色
-                        if current_chapter_characters and char_name in current_chapter_characters:
-                            # 如果是当前章节中的角色但不在角色库中，添加它
+                    # 检查是否是有效的角色名
+                    if char_name and len(char_name) <= 4 and self._is_valid_character_name(char_name):
+                        if char_name in self.characters:
+                            current_character = char_name
+                            logging.info(f"开始更新角色信息: {char_name}")
+                        elif current_chapter_characters and char_name in current_chapter_characters:
+                            # 如果是当前章节中的新角色，添加它
                             self.characters[char_name] = self._create_basic_character(char_name)
                             current_character = char_name
-                            logging.info(f"添加并开始更新新角色信息: {char_name}")
-                            in_format_block = False
+                            logging.info(f"添加并开始更新新角色: {char_name}")
                         else:
                             current_character = None
-                            logging.warning(f"未找到角色 {char_name}，跳过相关更新")
+                    else:
+                        current_character = None
                     continue
                 
-                # 如果有当前角色且该行包含更新信息
-                if current_character and (':' in line or '：' in line) and not line.startswith(('？', '？', '？')):
-                    key = line.split(':')[0].strip() if ':' in line else line.split('：')[0].strip()
-                    value = line.split(':')[1].strip() if ':' in line else line.split('：')[1].strip()
+                # 如果有当前角色且该行包含属性更新信息
+                if current_character and (':' in line or '：' in line):
+                    key, value = line.split(':' if ':' in line else '：', 1)
+                    key = key.strip()
+                    value = value.strip()
                     
-                    # 清理可能的格式符号
-                    key = key.replace('├──', '').replace('？ ├──', '').replace('？ └──', '').replace('└──', '').strip()
+                    # 清理键名中的格式符号
+                    key = re.sub(r'[├──│└]', '', key).strip()
                     
                     # 跳过无效的键
-                    if key in ["├──", "？└──", "物品", "能力", "状态", "主要角色间关系网", "触发或加深的事件"]:
+                    if key in ["物品", "能力", "状态", "主要角色间关系网", "触发或加深的事件"]:
                         continue
                     
-                    # 转换value为简体（如果包含人名等）
-                    if key in ['关系', '目标']:
-                        value = t2s.convert(value)
-                    
-                    try:
-                        self._update_character_attribute(current_character, key, value, chapter_num)
-                    except Exception as e:
-                        logging.error(f"更新角色 {current_character} 的属性{key} 时出错 {str(e)}")
+                    # 将属性数据添加到临时存储
+                    character_data[key] = value
             
-            # 结束后重置格式块标记
-            in_format_block = False
+            # 处理最后一个角色的数据
+            if current_character and character_data:
+                self._update_character_with_data(current_character, character_data)
         
         except Exception as e:
-            logging.error(f"解析角色更新信息时出错 {str(e)}")
+            logging.error(f"解析角色更新信息时出错: {str(e)}")
         
         # 保存更新后的角色库
         self._save_characters()
 
-    def _update_character_attribute(self, character_name: str, key: str, value: str, chapter_num: int):
-        """更新角色的特定属性"""
-        char = self.characters[character_name]
-        
-        if key == '发展阶段' or key == 'development_stage':
-            # 添加新的发展阶段，保持原有的阶段记录
-            current_stages = set(char.development_stage.split(", "))
-            new_stages = set(value.split(", "))
-            all_stages = current_stages.union(new_stages)
-            char.development_stage = ", ".join(all_stages)
+    def _update_character_with_data(self, character_name: str, data: dict):
+        """使用收集的数据更新角色属性"""
+        try:
+            char = self.characters[character_name]
             
-        elif key == '关系' or key == 'relationships':
-            # 更新角色关系
-            for relation in value.split('，'):
-                if ':' in relation:
-                    target, rel_type = relation.split(':')
-                    char.relationships[target.strip()] = rel_type.strip()
-                elif '：' in relation:
-                    target, rel_type = relation.split('：')
-                    char.relationships[target.strip()] = rel_type.strip()
+            # 映射关系，将可能的键名映射到标准键名
+            key_mapping = {
+                '发展阶段': 'development_stage',
+                '当前状态': 'development_stage',
+                '关系': 'relationships',
+                '人物关系': 'relationships',
+                '目标': 'goals',
+                '当前目标': 'goals',
+                '性格': 'personality',
+                '性格特征': 'personality',
+                '境界': 'realm',
+                '修为境界': 'realm',
+                '功法': 'cultivation_method',
+                '修炼功法': 'cultivation_method',
+                '法宝': 'magic_treasure',
+                '法器': 'magic_treasure',
+                '情绪': 'emotions_history',
+                '当前情绪': 'emotions_history',
+                '状态': 'states_history',
+                '描述': 'descriptions_history'
+            }
+            
+            for key, value in data.items():
+                standard_key = key_mapping.get(key)
+                if not standard_key:
+                    continue
                     
-        elif key == '目标' or key == 'goals':
-            # 更新角色目标
-            new_goals = [g.strip() for g in value.split('，')]
-            for goal in new_goals:
-                if goal not in char.goals:
-                    char.goals.append(goal)
+                if standard_key == 'development_stage':
+                    current_stages = set(char.development_stage.split(", "))
+                    new_stages = set(value.split("，"))
+                    all_stages = current_stages.union(new_stages)
+                    char.development_stage = ", ".join(all_stages)
                     
-        elif key == '性格' or key == 'personality':
-            # 更新性格特征
-            traits = value.split('，')
-            for trait in traits:
-                if ':' in trait:
-                    t, weight = trait.split(':')
-                    char.personality[t.strip()] = float(weight)
-                elif '：' in trait:
-                    t, weight = trait.split('：')
-                    char.personality[t.strip()] = float(weight)
-                else:
-                    char.personality[trait.strip()] = 1.0
+                elif standard_key == 'relationships':
+                    for relation in value.split('，'):
+                        if ':' in relation or '：' in relation:
+                            target, rel_type = relation.split(':' if ':' in relation else '：')
+                            char.relationships[target.strip()] = rel_type.strip()
+                            
+                elif standard_key == 'goals':
+                    new_goals = [g.strip() for g in value.split('，')]
+                    for goal in new_goals:
+                        if goal and goal not in char.goals:
+                            char.goals.append(goal)
+                            
+                elif standard_key == 'personality':
+                    traits = value.split('，')
+                    for trait in traits:
+                        if ':' in trait or '：' in trait:
+                            t, weight = trait.split(':' if ':' in trait else '：')
+                            try:
+                                char.personality[t.strip()] = float(weight)
+                            except ValueError:
+                                char.personality[t.strip()] = 1.0
+                        else:
+                            char.personality[trait.strip()] = 1.0
+                            
+                elif standard_key in ['emotions_history', 'states_history', 'descriptions_history']:
+                    current_list = getattr(char, standard_key)
+                    new_items = [item.strip() for item in value.split('，')]
+                    for item in new_items:
+                        if item and item not in current_list:
+                            current_list.append(item)
+                            
+                elif hasattr(char, standard_key):
+                    if standard_key == 'magic_treasure':
+                        new_items = [item.strip() for item in value.split('，')]
+                        current_items = getattr(char, standard_key)
+                        for item in new_items:
+                            if item and item not in current_items:
+                                current_items.append(item)
+                    else:
+                        setattr(char, standard_key, value)
                     
-        elif hasattr(char, key):
-            # 对于其他属性，直接更新
-            setattr(char, key, value)
-        else:
-            logging.warning(f"未知的角色属性: {key}")
+        except Exception as e:
+            logging.error(f"更新角色 {character_name} 的属性时出错: {str(e)}")
 
     def _verify_character_consistency(self, content: str, current_chapter_characters: set = None) -> bool:
         """验证更新后的角色信息与章节内容的一致性"""
@@ -754,78 +775,104 @@ class NovelGenerator:
 
     def generate_novel(self):
         """生成小说内容"""
-        max_retries = 3  # 每章最大重试次数
-        
-        while self.current_chapter < len(self.chapter_outlines):
-            current_chapter_num = self.current_chapter + 1
-            chapter_retries = 0
-            chapter_generated = False
+        try:
+            # 如果指定了目标章节，验证章节号的有效性
+            if self.target_chapter is not None:
+                if self.target_chapter <= 0:
+                    raise ValueError(f"无效的目标章节号: {self.target_chapter}")
+                if not self.chapter_outlines or self.target_chapter > len(self.chapter_outlines):
+                    raise ValueError(f"目标章节号 {self.target_chapter} 超出大纲范围")
+                
+                # 获取目标章节的大纲
+                chapter_outline = self.chapter_outlines[self.target_chapter - 1]
+                logging.info(f"开始重新生成第 {self.target_chapter} 章")
+                
+                # 生成章节内容
+                content = self._generate_chapter_content(chapter_outline, self.external_prompt)
+                
+                # 保存章节内容
+                self._save_chapter_content(self.target_chapter, content)
+                
+                # 更新角色状态
+                self._update_character_states(content, self.target_chapter)
+                
+                logging.info(f"第 {self.target_chapter} 章重新生成完成")
+                return
             
-            while chapter_retries < max_retries and not chapter_generated:
-                try:
-                    # 获取当前章节大纲
-                    chapter_outline_obj = self.chapter_outlines[self.current_chapter]
-                    logging.info(f"开始生成第 {current_chapter_num} 章: {chapter_outline_obj.title} (尝试 {chapter_retries + 1}/{max_retries})")
-                    
-                    # 构建提示词
-                    prompt = self._get_context_for_chapter(current_chapter_num)
-                    
-                    # 生成章节内容
-                    logging.info(f"正在调用内容模型生成第 {current_chapter_num} 章内容...")
-                    content = self.content_model.generate(prompt)
-                    
-                    # 验证章节内容
-                    if self._validate_chapter_content(content, chapter_outline_obj):
-                        # 保存章节
-                        self._save_chapter(current_chapter_num, content)
+            # 如果没有指定目标章节，继续正常的生成流程
+            while self.current_chapter < len(self.chapter_outlines):
+                current_chapter_num = self.current_chapter + 1
+                chapter_retries = 0
+                chapter_generated = False
+                
+                while chapter_retries < max_retries and not chapter_generated:
+                    try:
+                        # 获取当前章节大纲
+                        chapter_outline_obj = self.chapter_outlines[self.current_chapter]
+                        logging.info(f"开始生成第 {current_chapter_num} 章: {chapter_outline_obj.title} (尝试 {chapter_retries + 1}/{max_retries})")
                         
-                        # 更新进度
-                        self.current_chapter += 1
-                        self._save_progress()
-                        chapter_generated = True  # 标记成功，跳出重试循环
-                        break
-                    else:
-                        logging.error(f"第 {current_chapter_num} 章内容验证失败 (尝试 {chapter_retries + 1}/{max_retries})")
+                        # 构建提示词
+                        prompt = self._get_context_for_chapter(current_chapter_num)
+                        
+                        # 生成章节内容
+                        logging.info(f"正在调用内容模型生成第 {current_chapter_num} 章内容...")
+                        content = self.content_model.generate(prompt)
+                        
+                        # 验证章节内容
+                        if self._validate_chapter_content(content, chapter_outline_obj):
+                            # 保存章节
+                            self._save_chapter(current_chapter_num, content)
+                            
+                            # 更新进度
+                            self.current_chapter += 1
+                            self._save_progress()
+                            chapter_generated = True  # 标记成功，跳出重试循环
+                            break
+                        else:
+                            logging.error(f"第 {current_chapter_num} 章内容验证失败 (尝试 {chapter_retries + 1}/{max_retries})")
+                            chapter_retries += 1
+                            if chapter_retries >= max_retries:
+                                logging.warning(f"第 {current_chapter_num} 章已达到最大重试次数，将使用最后生成的内容（可能不符合要求）。")
+                                self._save_chapter(current_chapter_num, content, skip_character_update=True)  # 保存但不更新角色状态
+                                logging.warning(f"第 {current_chapter_num} 章已强制保存（警告：内容可能不完全符合要求，且未更新角色状态）。")
+                                self.current_chapter += 1  # 强制推进进度
+                                self._save_progress()
+                                chapter_generated = True  # 标记完成（虽然有警告）
+                                break
+                            # 重试前等待
+                            wait_time = 15 * (chapter_retries + 1)  # 增加等待时间
+                            logging.info(f"等待 {wait_time} 秒后重试...")
+                            time.sleep(wait_time)
+                    
+                    except (TimeoutError, asyncio.TimeoutError) as e:
+                        logging.error(f"生成第 {current_chapter_num} 章时请求超时 (尝试 {chapter_retries + 1}/{max_retries}): {str(e)}")
                         chapter_retries += 1
                         if chapter_retries >= max_retries:
-                            logging.warning(f"第 {current_chapter_num} 章已达到最大重试次数，将使用最后生成的内容（可能不符合要求）。")
-                            self._save_chapter(current_chapter_num, content, skip_character_update=True)  # 保存但不更新角色状态
-                            logging.warning(f"第 {current_chapter_num} 章已强制保存（警告：内容可能不完全符合要求，且未更新角色状态）。")
-                            self.current_chapter += 1  # 强制推进进度
-                            self._save_progress()
-                            chapter_generated = True  # 标记完成（虽然有警告）
-                            break
-                        # 重试前等待
-                        wait_time = 15 * (chapter_retries + 1)  # 增加等待时间
+                            logging.error(f"第 {current_chapter_num} 章因超时达到最大重试次数，跳过此章节。")
+                            # 不保存，不更新进度，让下一次运行时重试
+                            break  # 跳出重试，但 chapter_generated 仍为 False
+                        wait_time = 30 * (chapter_retries + 1)
+                        logging.info(f"等待 {wait_time} 秒后重试...")
+                        time.sleep(wait_time)
+                    
+                    except Exception as e:
+                        logging.error(f"生成第 {current_chapter_num} 章时发生意外错误 (尝试 {chapter_retries + 1}/{max_retries}): {str(e)}", exc_info=True)
+                        chapter_retries += 1
+                        if chapter_retries >= max_retries:
+                            logging.error(f"第 {current_chapter_num} 章因错误达到最大重试次数，跳过此章节。")
+                            # 不保存，不更新进度
+                            break  # 跳出重试，但 chapter_generated 仍为 False
+                        wait_time = 20 * (chapter_retries + 1)
                         logging.info(f"等待 {wait_time} 秒后重试...")
                         time.sleep(wait_time)
                 
-                except (TimeoutError, asyncio.TimeoutError) as e:
-                    logging.error(f"生成第 {current_chapter_num} 章时请求超时 (尝试 {chapter_retries + 1}/{max_retries}): {str(e)}")
-                    chapter_retries += 1
-                    if chapter_retries >= max_retries:
-                        logging.error(f"第 {current_chapter_num} 章因超时达到最大重试次数，跳过此章节。")
-                        # 不保存，不更新进度，让下一次运行时重试
-                        break  # 跳出重试，但 chapter_generated 仍为 False
-                    wait_time = 30 * (chapter_retries + 1)
-                    logging.info(f"等待 {wait_time} 秒后重试...")
-                    time.sleep(wait_time)
-                
-                except Exception as e:
-                    logging.error(f"生成第 {current_chapter_num} 章时发生意外错误 (尝试 {chapter_retries + 1}/{max_retries}): {str(e)}", exc_info=True)
-                    chapter_retries += 1
-                    if chapter_retries >= max_retries:
-                        logging.error(f"第 {current_chapter_num} 章因错误达到最大重试次数，跳过此章节。")
-                        # 不保存，不更新进度
-                        break  # 跳出重试，但 chapter_generated 仍为 False
-                    wait_time = 20 * (chapter_retries + 1)
-                    logging.info(f"等待 {wait_time} 秒后重试...")
-                    time.sleep(wait_time)
-            
-            # 如果因为重试失败而未生成章节，则停止整个过程
-            if not chapter_generated:
-                logging.error(f"第 {current_chapter_num} 章生成失败，停止生成。")
-                break
+                # 如果因为重试失败而未生成章节，则停止整个过程
+                if not chapter_generated:
+                    logging.error(f"第 {current_chapter_num} 章生成失败，停止生成。")
+                    break
+
+        except Exception as e:
+            logging.error(f"生成小说内容时发生错误: {str(e)}")
 
     def _validate_chapter_content(self, content: str, outline: ChapterOutline) -> bool:
         """验证章节内容是否符合要求"""
@@ -1020,4 +1067,313 @@ class NovelGenerator:
         except Exception as e:
             logging.error(f"生成大纲时发生错误：{str(e)}")
             return False
+
+    def _validate_model_config(self):
+        """验证模型配置是否有效"""
+        try:
+            # 检查必要的模型是否存在
+            if not self.outline_model:
+                logging.error("大纲生成模型未初始化")
+                return False
+            
+            if not self.content_model:
+                logging.error("内容生成模型未初始化")
+                return False
+            
+            if not self.knowledge_base:
+                logging.error("知识库未初始化")
+                return False
+            
+            # 检查配置是否完整
+            if not self.config:
+                logging.error("配置对象未初始化")
+                return False
+            
+            # 检查输出目录配置
+            if not self.config.output_config or "output_dir" not in self.config.output_config:
+                logging.error("输出目录配置缺失")
+                return False
+            
+            logging.info("模型配置验证通过")
+            return True
+            
+        except Exception as e:
+            logging.error(f"验证模型配置时出错: {str(e)}")
+            return False
+
+    def _load_outline_file(self):
+        """加载大纲文件"""
+        outline_file = os.path.join(self.output_dir, "outline.json")
+        
+        if os.path.exists(outline_file):
+            try:
+                with open(outline_file, 'r', encoding='utf-8') as f:
+                    outline_data = json.load(f)
+                    # 处理可能的旧格式（包含元数据）和新格式（仅含章节列表）
+                    chapters_list = outline_data.get("chapters", outline_data) if isinstance(outline_data, dict) else outline_data
+                    if isinstance(chapters_list, list):
+                        self.chapter_outlines = [
+                            ChapterOutline(**chapter)
+                            for chapter in chapters_list
+                        ]
+                        logging.info(f"从文件加载了 {len(self.chapter_outlines)} 章大纲")
+                    else:
+                        logging.error("大纲文件格式无法识别，应为列表或包含'chapters'键的字典")
+                        self.chapter_outlines = []
+            except Exception as e:
+                logging.error(f"加载大纲文件时出错: {str(e)}")
+                self.chapter_outlines = []
+        else:
+            logging.warning(f"大纲文件不存在: {outline_file}")
+            self.chapter_outlines = []
+
+    def _save_outline(self):
+        """保存大纲到文件"""
+        outline_file = os.path.join(self.output_dir, "outline.json")
+        try:
+            # 将大纲对象转换为可序列化的字典列表
+            outline_data = []
+            for outline in self.chapter_outlines:
+                outline_dict = {
+                    "chapter_number": outline.chapter_number,
+                    "title": outline.title,
+                    "key_points": outline.key_points,
+                    "characters": outline.characters,
+                    "settings": outline.settings,
+                    "conflicts": outline.conflicts
+                }
+                outline_data.append(outline_dict)
+            
+            # 保存到文件
+            with open(outline_file, 'w', encoding='utf-8') as f:
+                json.dump(outline_data, f, ensure_ascii=False, indent=2)
+            logging.info(f"大纲已保存到文件: {outline_file}")
+        except Exception as e:
+            logging.error(f"保存大纲文件时出错: {str(e)}")
+            raise
+
+    def _generate_chapter_content(self, chapter_outline, extra_prompt: Optional[str] = None):
+        """生成章节内容"""
+        max_retries = 3
+        base_wait_time = 30  # 基础等待时间（秒）
+        
+        for attempt in range(max_retries):
+            try:
+                # 获取上下文信息
+                context = self._get_context_for_chapter(chapter_outline.chapter_number)
+                
+                # 将 ChapterOutline 对象转换为字典
+                outline_dict = {
+                    "chapter_number": chapter_outline.chapter_number,
+                    "title": chapter_outline.title,
+                    "key_points": chapter_outline.key_points,
+                    "characters": chapter_outline.characters,
+                    "settings": chapter_outline.settings,
+                    "conflicts": chapter_outline.conflicts
+                }
+                
+                # 构建参考信息字典
+                references = {
+                    "plot_references": [],
+                    "character_references": [],
+                    "setting_references": []
+                }
+                
+                # 从知识库获取参考内容
+                if hasattr(self.knowledge_base, 'get_all_references'):
+                    kb_refs = self.knowledge_base.get_all_references()
+                    # 将知识库内容平均分配到三个类别中
+                    refs = list(kb_refs.values())
+                    total_refs = len(refs)
+                    if total_refs > 0:
+                        plot_end = total_refs // 3
+                        char_end = (total_refs * 2) // 3
+                        references["plot_references"] = refs[:plot_end]
+                        references["character_references"] = refs[plot_end:char_end]
+                        references["setting_references"] = refs[char_end:]
+                
+                # 构建提示词
+                prompt = prompts.get_chapter_prompt(
+                    outline=outline_dict,
+                    references=references,
+                    extra_prompt=extra_prompt or "",
+                    context_info=context
+                )
+                
+                # 生成内容
+                logging.info(f"正在生成第 {chapter_outline.chapter_number} 章内容（尝试 {attempt + 1}/{max_retries}）...")
+                content = self.content_model.generate(prompt)
+                
+                if not content or len(content.strip()) < 100:  # 内容太短，视为生成失败
+                    raise ValueError("生成的内容过短或为空")
+                
+                # 验证内容
+                if self._validate_chapter_content(content, chapter_outline):
+                    logging.info(f"第 {chapter_outline.chapter_number} 章内容生成成功")
+                    return content
+                else:
+                    logging.warning(f"第 {chapter_outline.chapter_number} 章内容验证未通过，将重试")
+                    if attempt < max_retries - 1:
+                        wait_time = base_wait_time * (attempt + 1)
+                        logging.info(f"等待 {wait_time} 秒后重试...")
+                        time.sleep(wait_time)
+                    continue
+                    
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logging.error(f"生成内容超时 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    wait_time = base_wait_time * (2 ** attempt)  # 指数退避
+                    logging.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+                    
+            except Exception as e:
+                logging.error(f"生成内容时出错 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    wait_time = base_wait_time * (attempt + 1)
+                    logging.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+        
+        raise Exception(f"生成第 {chapter_outline.chapter_number} 章内容失败，已达到最大重试次数")
+
+    def _get_context_for_chapter(self, chapter_num: int, existing_outlines: Optional[List[ChapterOutline]] = None) -> str:
+        """获取章节的上下文信息"""
+        try:
+            context_parts = []
+            
+            # 获取前一章的内容（如果存在）
+            if chapter_num > 1:
+                # 获取前一章的标题
+                prev_chapter_outline = self.chapter_outlines[chapter_num - 2]
+                prev_chapter_title = prev_chapter_outline.title
+                prev_chapter_file = os.path.join(self.output_dir, f"第{chapter_num-1}章_{prev_chapter_title}.txt")
+                
+                if os.path.exists(prev_chapter_file):
+                    try:
+                        with open(prev_chapter_file, 'r', encoding='utf-8') as f:
+                            prev_content = f.read()
+                            # 只取最后一部分作为上下文
+                            max_prev_content_length = 2000  # 限制前文长度
+                            if len(prev_content) > max_prev_content_length:
+                                prev_content = prev_content[-max_prev_content_length:]
+                            context_parts.append(f"前一章内容：\n{prev_content}")
+                    except Exception as e:
+                        logging.warning(f"读取前一章内容时出错: {str(e)}")
+            
+            # 获取相关的知识库内容
+            try:
+                # 构建查询文本
+                query_text = ""
+                if existing_outlines and chapter_num <= len(existing_outlines):
+                    outline = existing_outlines[chapter_num - 1]
+                    query_text = f"{outline.title} {' '.join(outline.key_points)}"
+                elif self.chapter_outlines and chapter_num <= len(self.chapter_outlines):
+                    outline = self.chapter_outlines[chapter_num - 1]
+                    query_text = f"{outline.title} {' '.join(outline.key_points)}"
+                
+                if query_text:
+                    relevant_knowledge = self.knowledge_base.search(query_text)
+                    if relevant_knowledge:
+                        context_parts.append("相关参考内容：\n" + "\n".join(relevant_knowledge))
+            except Exception as e:
+                logging.warning(f"获取知识库内容时出错: {str(e)}")
+            
+            return "\n\n".join(context_parts)
+            
+        except Exception as e:
+            logging.error(f"获取章节上下文时出错: {str(e)}")
+            return ""
+
+    def _save_chapter_content(self, chapter_num: int, content: str):
+        """保存章节内容到文件"""
+        try:
+            # 确保输出目录存在
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            # 获取章节标题
+            chapter_outline = self.chapter_outlines[chapter_num - 1]
+            chapter_title = chapter_outline.title
+            
+            # 构建文件名：第X章_标题.txt
+            filename = f"第{chapter_num}章_{chapter_title}.txt"
+            chapter_file = os.path.join(self.output_dir, filename)
+            
+            with open(chapter_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            logging.info(f"已保存第 {chapter_num} 章内容: {filename}")
+            
+            # 更新摘要
+            self._update_summary(chapter_num, content)
+            
+            # 更新角色状态
+            self._update_character_states(content, chapter_num)
+            
+        except Exception as e:
+            logging.error(f"保存章节内容时出错: {str(e)}")
+            raise
+
+    def _update_character_states(self, content: str, chapter_num: int):
+        """更新角色状态"""
+        try:
+            # 获取当前章节的角色列表
+            current_chapter_characters = set()
+            if self.chapter_outlines and chapter_num <= len(self.chapter_outlines):
+                current_chapter_characters.update(self.chapter_outlines[chapter_num - 1].characters)
+            
+            # 解析新出现的角色
+            self._parse_new_characters(content)
+            
+            # 生成角色更新提示词
+            prompt = prompts.get_character_update_prompt(
+                content,
+                self._format_characters_for_update(current_chapter_characters)
+            )
+            
+            # 获取角色更新信息
+            try:
+                characters_update = self.content_model.generate(prompt)
+                if self._validate_character_update(characters_update):
+                    self._parse_character_update(characters_update, chapter_num, current_chapter_characters)
+                else:
+                    logging.error("角色更新信息验证失败")
+            except Exception as e:
+                logging.error(f"生成角色更新信息时出错: {str(e)}")
+            
+            # 验证更新后的角色信息
+            if not self._verify_character_consistency(content, current_chapter_characters):
+                logging.warning("角色信息与章节内容不一致，尝试修正")
+                self._correct_character_inconsistencies(content, current_chapter_characters)
+            
+        except Exception as e:
+            logging.error(f"更新角色状态时出错: {str(e)}")
+
+    def _format_characters_for_update(self, current_chapter_characters: Optional[set] = None) -> str:
+        """格式化角色信息用于更新"""
+        try:
+            formatted_chars = []
+            for name, char in self.characters.items():
+                # 如果指定了当前章节角色集合，只处理其中的角色
+                if current_chapter_characters is not None and name not in current_chapter_characters:
+                    continue
+                
+                char_info = [
+                    f"角色名：{name}",
+                    f"身份：{char.role}",
+                    f"境界：{char.realm}",
+                    f"功法：{char.cultivation_method}",
+                    f"状态：{char.development_stage}",
+                    f"性格：{', '.join(f'{k}:{v}' for k, v in char.personality.items())}",
+                    f"目标：{', '.join(char.goals)}",
+                    f"关系：{', '.join(f'{k}:{v}' for k, v in char.relationships.items())}"
+                ]
+                formatted_chars.append("\n".join(char_info))
+            
+            return "\n\n".join(formatted_chars)
+            
+        except Exception as e:
+            logging.error(f"格式化角色信息时出错: {str(e)}")
+            return ""
 

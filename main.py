@@ -3,222 +3,15 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import logging
-import json
-import hashlib
-from typing import Dict
+from typing import Optional, Tuple
 from src.config.config import Config
 from src.models.gemini_model import GeminiModel
 from src.models.openai_model import OpenAIModel
 from src.knowledge_base.knowledge_base import KnowledgeBase
-from src.generators.novel_generator import NovelGenerator
-
-def setup_logging(config: Dict):
-    """设置日志"""
-    os.makedirs(config["log_dir"], exist_ok=True)
-    
-    # 设置根日志记录器
-    root_logger = logging.getLogger()
-    root_logger.setLevel(config["log_level"])
-    
-    # 设置文件处理器
-    file_handler = logging.FileHandler(
-        os.path.join(config["log_dir"], "novel_generation.log"),
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(logging.Formatter(config["log_format"]))
-    root_logger.addHandler(file_handler)
-    
-    # 设置控制台处理器
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(config["log_format"]))
-    root_logger.addHandler(console_handler)
-
-def create_model(model_config: Dict):
-    """创建AI模型实例"""
-    logging.info(f"正在创建模型: {model_config['type']} - {model_config['model_name']}")
-    if model_config["type"] == "gemini":
-        return GeminiModel(model_config)
-    elif model_config["type"] == "openai":
-        return OpenAIModel(model_config)
-    else:
-        raise ValueError(f"不支持的模型类型: {model_config['type']}")
-
-def main():
-    parser = argparse.ArgumentParser(description="长篇网文仿写工具")
-    parser.add_argument("--config", default="config.json", help="配置文件路径")
-    args = parser.parse_args()
-    
-    try:
-        # 加载配置
-        config = Config()
-        
-        # 设置日志
-        setup_logging(config.log_config)
-        logging.info("配置加载完成")
-        
-        # 询问用户是否继续上次的生成
-        continue_last = input("是否继续上次的生成？(Y/n) ").strip().lower()
-        continue_generation = continue_last != 'n'
-        logging.info(f"用户选择{'继续' if continue_generation else '不继续'}上次的生成")
-        
-        # 创建模型实例
-        logging.info("正在初始化AI模型...")
-        outline_model = create_model(config.model_config["outline_model"])
-        content_model = create_model(config.model_config["content_model"])
-        embedding_model = create_model(config.model_config["embedding_model"])
-        logging.info("AI模型初始化完成")
-        
-        # 检查参考小说文件
-        reference_files = config.knowledge_base_config["reference_files"]
-        logging.info(f"正在检查参考小说文件: {reference_files}")
-        
-        # 获取已导入文件的记录
-        imported_files_record = os.path.join(config.knowledge_base_config["cache_dir"], "imported_files.json")
-        imported_files = set()
-        if os.path.exists(imported_files_record):
-            with open(imported_files_record, 'r', encoding='utf-8') as f:
-                imported_files = set(json.load(f))
-                logging.info(f"已导入的文件记录: {imported_files}")
-        
-        # 过滤出需要导入的文件
-        files_to_import = []
-        for file_path in reference_files:
-            if not os.path.exists(file_path):
-                logging.warning(f"参考小说文件不存在，将跳过: {file_path}")
-                continue
-                
-            file_hash = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
-            file_record = f"{file_path}:{file_hash}"
-            
-            if file_record in imported_files and not config.generator_config.get("force_rebuild_kb", False):
-                logging.info(f"文件已导入，将跳过: {file_path}")
-                continue
-                
-            files_to_import.append((file_path, file_record))
-        
-        if not files_to_import and imported_files:
-            logging.info("所有文件都已导入，无需重新构建知识库")
-            # 创建知识库但不重新构建
-            knowledge_base = KnowledgeBase(
-                config.knowledge_base_config,
-                embedding_model
-            )
-            
-            # 确保知识库被初始化 - 加载一个示例文本
-            try:
-                knowledge_base.build("示例文本以初始化知识库", force_rebuild=False)
-            except Exception as e:
-                logging.warning(f"初始化知识库时出错: {e}，尝试读取参考文件")
-                # 尝试读取第一个参考文件来初始化知识库
-                for file_path in reference_files:
-                    if os.path.exists(file_path):
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            sample_text = f.read(1000)  # 只读取前1000个字符
-                            knowledge_base.build(sample_text, force_rebuild=False)
-                            logging.info("已使用参考文件样本初始化知识库")
-                            break
-        else:
-            # 创建知识库
-            logging.info("正在构建知识库...")
-            knowledge_base = KnowledgeBase(
-                config.knowledge_base_config,
-                embedding_model
-            )
-            
-            # 导入参考小说
-            all_reference_text = ""
-            for file_path, file_record in files_to_import:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    reference_text = f.read()
-                    all_reference_text += reference_text + "\n"
-                    logging.info(f"已导入参考文件: {file_path}, 长度: {len(reference_text)}")
-                imported_files.add(file_record)
-            
-            # 强制重新构建知识库（如果需要）
-            knowledge_base.build(all_reference_text, force_rebuild=True)
-            logging.info("知识库构建完成")
-            
-            # 保存已导入文件记录
-            os.makedirs(config.knowledge_base_config["cache_dir"], exist_ok=True)
-            with open(imported_files_record, 'w', encoding='utf-8') as f:
-                json.dump(list(imported_files), f, ensure_ascii=False, indent=2)
-            logging.info("已更新导入文件记录")
-        
-        # 创建小说生成器
-        generator = NovelGenerator(
-            config,
-            outline_model,
-            content_model,
-            knowledge_base
-        )
-        
-        if not continue_generation:
-            # 生成角色动力学设定
-            logging.info("正在生成角色动力学设定...")
-            characters_data = generator.generate_character_dynamics()
-            logging.info(f"已生成 {len(characters_data)} 个角色的设定")
-            
-            # 保存小说架构信息
-            generator.save_novel_architecture(characters_data)
-            logging.info("小说架构信息已保存")
-            
-            # 生成新的大纲
-            logging.info("正在生成小说大纲...")
-            generator.generate_outline(
-                config.novel_config["type"],
-                config.novel_config["theme"],
-                config.novel_config["style"]
-            )
-            logging.info("大纲生成完成")
-        else:
-            # 检查是否有已存在的大纲
-            outline_file = os.path.join(config.generator_config["output_dir"], "outline.json")
-            if not os.path.exists(outline_file):
-                logging.info("未找到已有大纲，正在生成新大纲...")
-                # 生成角色动力学设定
-                logging.info("正在生成角色动力学设定...")
-                characters_data = generator.generate_character_dynamics()
-                logging.info(f"已生成 {len(characters_data)} 个角色的设定")
-                
-                # 保存小说架构信息
-                generator.save_novel_architecture(characters_data)
-                logging.info("小说架构信息已保存")
-            
-                # 生成新的大纲                
-                logging.info("正在生成小说大纲...")                # Call the correct method to generate the initial outline chapters
-                generator.generate_outline(
-                    config.novel_config["type"],
-                    config.novel_config["theme"],
-                    config.novel_config["style"]
-                )
-                logging.info("大纲生成完成")
-            else:
-                logging.info("已加载现有大纲")
-                # 检查大纲章节数是否达到目标
-                with open(outline_file, 'r', encoding='utf-8') as f:
-                    outline_data = json.load(f)
-                    current_chapters = len(outline_data)
-                    target_chapters = config.novel_config["target_chapters"]
-                    
-                    if current_chapters < target_chapters:
-                        logging.info(f"大纲未完成（当前 {current_chapters}/{target_chapters} 章），继续生成剩余章节...")
-                        generator.generate_outline_chapters(
-                            config.novel_config["type"],
-                            config.novel_config["theme"],
-                            config.novel_config["style"],
-                            mode='replace',
-                            replace_range=(current_chapters + 1, target_chapters)
-                        )
-                        logging.info("剩余大纲生成完成")
-        
-        # 生成小说
-        logging.info("开始生成小说...")
-        generator.generate_novel()
-        logging.info("小说生成完成")
-        
-    except Exception as e:
-        logging.error(f"程序执行出错: {str(e)}")
-        raise
+from src.generators.outline.outline_generator import OutlineGenerator
+from src.generators.content.content_generator import ContentGenerator
+from src.generators.finalizer.finalizer import NovelFinalizer
+from src.generators.common.utils import setup_logging
 
 def init_workspace():
     """初始化工作目录"""
@@ -239,8 +32,168 @@ def init_workspace():
             with open(gitkeep_file, 'w') as f:
                 pass
 
-if __name__ == "__main__":
+def create_model(model_config: dict):
+    """创建AI模型实例"""
+    logging.info(f"正在创建模型: {model_config['type']} - {model_config['model_name']}")
+    if model_config["type"] == "gemini":
+        return GeminiModel(model_config)
+    elif model_config["type"] == "openai":
+        return OpenAIModel(model_config)
+    else:
+        raise ValueError(f"不支持的模型类型: {model_config['type']}")
+
+def main():
     # 初始化工作目录
     init_workspace()
-    # 运行主程序
+    
+    parser = argparse.ArgumentParser(description='小说生成工具')
+    parser.add_argument('--config', type=str, default="config.json", help='配置文件路径')
+    
+    subparsers = parser.add_subparsers(dest='command', help='可用命令')
+    
+    # 大纲生成命令
+    outline_parser = subparsers.add_parser('outline', help='生成小说大纲')
+    outline_parser.add_argument('--start', type=int, required=True, help='起始章节')
+    outline_parser.add_argument('--end', type=int, required=True, help='结束章节')
+    outline_parser.add_argument('--novel-type', type=str, required=True, help='小说类型')
+    outline_parser.add_argument('--theme', type=str, required=True, help='主题')
+    outline_parser.add_argument('--style', type=str, required=True, help='写作风格')
+    outline_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
+    
+    # 内容生成命令
+    content_parser = subparsers.add_parser('content', help='生成章节内容')
+    content_parser.add_argument('--start-chapter', type=int, help='起始章节号')
+    content_parser.add_argument('--target-chapter', type=int, help='指定要重新生成的章节号')
+    content_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
+    
+    # 定稿处理命令
+    finalize_parser = subparsers.add_parser('finalize', help='处理章节定稿')
+    finalize_parser.add_argument('--chapter', type=int, required=True, help='要处理的章节号')
+    
+    # 自动生成命令（包含完整流程）
+    auto_parser = subparsers.add_parser('auto', help='自动执行完整生成流程')
+    auto_parser.add_argument('--start', type=int, required=True, help='起始章节')
+    auto_parser.add_argument('--end', type=int, required=True, help='结束章节')
+    auto_parser.add_argument('--novel-type', type=str, required=True, help='小说类型')
+    auto_parser.add_argument('--theme', type=str, required=True, help='主题')
+    auto_parser.add_argument('--style', type=str, required=True, help='写作风格')
+    auto_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
+    
+    args = parser.parse_args()
+    
+    try:
+        # 加载配置
+        config = Config(args.config)
+        
+        # 设置日志
+        setup_logging(config.log_config["log_dir"])
+        logging.info(f"配置 {args.config} 加载完成")
+        
+        # 创建模型实例
+        logging.info("正在初始化AI模型...")
+        content_model = create_model(config.model_config["content_model"])
+        outline_model = content_model
+        embedding_model = create_model(config.model_config["embedding_model"])
+        logging.info("AI模型初始化完成")
+        
+        # 创建知识库
+        logging.info("正在初始化知识库...")
+        knowledge_base = KnowledgeBase(
+            config.knowledge_base_config,
+            embedding_model
+        )
+        logging.info("知识库初始化完成")
+        
+        # 命令处理
+        if args.command == 'outline':
+            logging.info("--- 执行大纲生成任务 ---")
+            generator = OutlineGenerator(config, outline_model, knowledge_base)
+            success = generator.generate_outline(
+                novel_type=args.novel_type,
+                theme=args.theme,
+                style=args.style,
+                mode='replace',
+                replace_range=(args.start, args.end),
+                extra_prompt=args.extra_prompt
+            )
+            print("大纲生成成功！" if success else "大纲生成失败，请查看日志文件了解详细信息。")
+            
+        elif args.command == 'content':
+            logging.info("--- 执行内容生成任务 ---")
+            generator = ContentGenerator(config, content_model, knowledge_base)
+            
+            # 处理起始章节和目标章节逻辑
+            if args.target_chapter is not None:
+                logging.info(f"指定重新生成章节: {args.target_chapter}")
+                if args.start_chapter is not None:
+                    logging.warning(f"同时指定了 --start-chapter 和 --target-chapter，将优先处理 --target-chapter {args.target_chapter}。")
+                # generate_content 会处理 target_chapter 逻辑
+            elif args.start_chapter is not None:
+                if args.start_chapter > 0:
+                    # 覆盖从 progress.json 加载的进度
+                    generator.current_chapter = args.start_chapter - 1
+                    logging.info(f"设置起始章节为: {args.start_chapter}")
+                else:
+                    logging.warning(f"指定的起始章节 {args.start_chapter} 无效，将从头或上次进度开始。")
+            
+            # 调用内容生成方法
+            success = generator.generate_content(
+                target_chapter=args.target_chapter,
+                external_prompt=args.extra_prompt
+            )
+            print("内容生成成功！" if success else "内容生成失败，请查看日志文件了解详细信息。")
+            
+        elif args.command == 'finalize':
+            logging.info("--- 执行章节定稿任务 ---")
+            finalizer = NovelFinalizer(config, content_model, knowledge_base)
+            success = finalizer.finalize_chapter(args.chapter)
+            print("章节定稿处理成功！" if success else "章节定稿处理失败，请查看日志文件了解详细信息。")
+            
+        elif args.command == 'auto':
+            logging.info("--- 执行自动生成流程 ---")
+            # 自动流程需要实例化所有生成器
+            outline_generator = OutlineGenerator(config, outline_model, knowledge_base)
+            content_generator = ContentGenerator(config, content_model, knowledge_base)
+            finalizer = NovelFinalizer(config, content_model, knowledge_base)
+            
+            # 1. 生成大纲
+            logging.info("步骤 1: 生成大纲...")
+            outline_success = outline_generator.generate_outline(
+                novel_type=args.novel_type, theme=args.theme, style=args.style,
+                mode='replace', replace_range=(args.start, args.end),
+                extra_prompt=args.extra_prompt
+            )
+            if not outline_success: print("大纲生成失败，停止流程。"); return
+            print("大纲生成成功！")
+            
+            # 2. 生成内容 (确保从指定范围的起始章节开始)
+            logging.info("步骤 2: 生成内容...")
+            content_generator.current_chapter = args.start - 1 # 设置起始章节
+            content_success = content_generator.generate_content() # 不传 target_chapter，生成从 start 开始的所有章节
+            if not content_success: print("内容生成失败，停止流程。"); return
+            print("内容生成成功！")
+            
+            # 3. 处理定稿 (处理指定范围内的所有章节)
+            logging.info("步骤 3: 处理定稿...")
+            finalize_success = True
+            for chapter_num in range(args.start, args.end + 1):
+                logging.info(f"处理第 {chapter_num} 章定稿...")
+                if not finalizer.finalize_chapter(chapter_num):
+                    print(f"第 {chapter_num} 章定稿处理失败。")
+                    finalize_success = False
+                    break
+            if finalize_success: print("自动生成流程全部完成！")
+            else: print("自动生成流程中断，请查看日志文件了解详细信息。")
+            
+        else:
+            parser.print_help()
+            
+    except FileNotFoundError as e:
+        logging.error(f"文件未找到错误: {str(e)}。请检查配置文件路径和配置文件中引用的路径是否正确。", exc_info=True)
+    except KeyError as e:
+        logging.error(f"配置项缺失错误: 键 '{str(e)}' 在配置文件中未找到。请检查 config.json 文件。", exc_info=True)
+    except Exception as e:
+        logging.error(f"程序执行出错: {str(e)}", exc_info=True)
+
+if __name__ == "__main__":
     main() 

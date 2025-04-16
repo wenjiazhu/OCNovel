@@ -192,26 +192,41 @@ class KnowledgeBase:
             if f.startswith(os.path.basename(cache_path) + ".temp_"):
                 os.remove(os.path.join(self.cache_dir, f))
         
-    def search(self, query: str, k: int = 5) -> List[Tuple[TextChunk, float]]:
+    def search(self, query: str, k: int = 5) -> List[str]:
         """搜索相关内容"""
         if not self.index:
             raise ValueError("Knowledge base not built yet")
             
         query_vector = self.embedding_model.embed(query)
+        if query_vector is None:
+            return []
+            
+        # 搜索最相似的文本块
+        query_vector_array = np.array([query_vector]).astype('float32')
+        distances, indices = self.index.search(query_vector_array, k)
         
-        # 搜索最相似的向量
-        distances, indices = self.index.search(
-            np.array([query_vector]).astype('float32'), 
-            k
-        )
-        
-        # 返回结果
+        # 返回相关文本内容
         results = []
-        for distance, idx in zip(distances[0], indices[0]):
+        for idx in indices[0]:
             if idx < len(self.chunks):
-                results.append((self.chunks[idx], float(distance)))
-                
+                results.append(self.chunks[idx].content)
         return results
+
+    def get_all_references(self) -> Dict[str, str]:
+        """获取所有参考内容"""
+        if not self.chunks:
+            return {}
+            
+        references = {}
+        for i, chunk in enumerate(self.chunks):
+            key = f"ref_{i+1}"
+            references[key] = chunk.content
+            
+            # 为了避免返回过多数据，只返回前10个参考
+            if i >= 9:
+                break
+                
+        return references
         
     def get_context(self, chunk: TextChunk, window_size: int = 2) -> Dict:
         """获取文本块的上下文"""

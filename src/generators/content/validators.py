@@ -9,7 +9,7 @@
 import logging
 from typing import Dict, List, Tuple
 import re
-from . import prompts
+from .. import prompts
 
 class LogicValidator:
     """逻辑严密性验证器"""

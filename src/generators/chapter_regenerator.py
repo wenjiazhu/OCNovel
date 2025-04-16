@@ -4,7 +4,7 @@ import logging
 import json
 import hashlib
 import sys
-from typing import Dict
+from typing import Dict, Optional, List, Set
 import glob
 
 # 添加项目根目录到 Python 路径
@@ -47,6 +47,16 @@ def create_model(model_config: Dict):
     else:
         raise ValueError(f"不支持的模型类型: {model_config['type']}")
 
+def get_imported_files() -> Set[str]:
+    """获取已导入文件的记录"""
+    cache_file = "data/cache/imported_files.json"
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            imported_files = json.load(f)
+            # 过滤掉无效的条目
+            return {f for f in imported_files if ':' in f}  # 只保留格式为 "path:md5" 的条目
+    return set()
+
 def main():
     parser = argparse.ArgumentParser(description="章节重新生成工具")
     parser.add_argument("--config", default="config.json", help="配置文件路径")
@@ -74,36 +84,29 @@ def main():
         logging.info(f"正在检查参考小说文件: {reference_files}")
         
         # 获取已导入文件的记录
-        imported_files_record = os.path.join(config.knowledge_base_config["cache_dir"], "imported_files.json")
-        imported_files = set()
-        if os.path.exists(imported_files_record):
-            with open(imported_files_record, 'r', encoding='utf-8') as f:
-                imported_files = set(json.load(f))
-                logging.info(f"已导入的文件记录: {imported_files}")
+        imported_files = get_imported_files()
         
-        # 过滤出需要导入的文件
-        files_to_import = []
-        for file_path in reference_files:
-            if not os.path.exists(file_path):
-                logging.warning(f"参考小说文件不存在，将跳过: {file_path}")
-                continue
-                
-            file_hash = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
-            file_record = f"{file_path}:{file_hash}"
-            
-            if file_record in imported_files and not config.generator_config.get("force_rebuild_kb", False):
-                logging.info(f"文件已导入，将跳过: {file_path}")
-                continue
-                
-            files_to_import.append((file_path, file_record))
+        # 检查是否有新文件需要导入
+        new_files = []
+        for file in reference_files:
+            file_hash = hashlib.md5(open(file, 'rb').read()).hexdigest()
+            file_key = f"{file}:{file_hash}"
+            if file_key not in imported_files:
+                new_files.append(file)
         
-        if not files_to_import and imported_files:
-            logging.info("所有文件都已导入，无需重新构建知识库")
-            # 创建知识库但不重新构建
+        if not new_files and imported_files:
+            logging.info("所有文件都已导入，从缓存加载知识库")
+            # 创建知识库并从缓存加载
             knowledge_base = KnowledgeBase(
                 config.knowledge_base_config,
                 embedding_model
             )
+            # 加载第一个参考文件的缓存
+            first_file = reference_files[0]
+            if os.path.exists(first_file):
+                with open(first_file, 'r', encoding='utf-8') as f:
+                    first_text = f.read()
+                    knowledge_base.build(first_text)  # 这会触发从缓存加载
         else:
             # 创建知识库
             logging.info("正在构建知识库...")
@@ -114,12 +117,13 @@ def main():
             
             # 导入参考小说
             all_reference_text = ""
-            for file_path, file_record in files_to_import:
-                with open(file_path, 'r', encoding='utf-8') as f:
+            for file in new_files:
+                with open(file, 'r', encoding='utf-8') as f:
                     reference_text = f.read()
                     all_reference_text += reference_text + "\n"
-                    logging.info(f"已导入参考文件: {file_path}, 长度: {len(reference_text)}")
-                imported_files.add(file_record)
+                    logging.info(f"已导入参考文件: {file}, 长度: {len(reference_text)}")
+                file_hash = hashlib.md5(open(file, 'rb').read()).hexdigest()
+                imported_files.add(f"{file}:{file_hash}")
             
             if all_reference_text:
                 knowledge_base.build(
@@ -130,7 +134,7 @@ def main():
                 
                 # 保存已导入文件记录
                 os.makedirs(config.knowledge_base_config["cache_dir"], exist_ok=True)
-                with open(imported_files_record, 'w', encoding='utf-8') as f:
+                with open("data/cache/imported_files.json", 'w', encoding='utf-8') as f:
                     json.dump(list(imported_files), f, ensure_ascii=False, indent=2)
                 logging.info("已更新导入文件记录")
         
@@ -139,10 +143,12 @@ def main():
             config,
             outline_model,
             content_model,
-            knowledge_base,
-            target_chapter=args.chapter,
-            external_prompt=args.prompt
+            knowledge_base
         )
+        
+        # 设置目标章节和外部提示词
+        generator.target_chapter = args.chapter
+        generator.external_prompt = args.prompt
         
         # 强制设置当前章节为目标章节的索引，覆盖从 progress.json 加载的值
         logging.info(f"强制设置开始章节为: {args.chapter}")
