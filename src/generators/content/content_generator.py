@@ -8,6 +8,8 @@ from .validators import LogicValidator, DuplicateValidator
 from ..common.data_structures import ChapterOutline
 from ..common.utils import load_json_file, save_json_file, validate_directory
 import re
+from logging.handlers import RotatingFileHandler
+import sys
 
 class ContentGenerator:
     def __init__(self, config, content_model, knowledge_base):
@@ -17,6 +19,9 @@ class ContentGenerator:
         self.output_dir = config.output_config["output_dir"]
         self.chapter_outlines = []
         self.current_chapter = 0
+        
+        # 初始化日志系统
+        self._setup_logging()
         
         # 初始化重生成相关的属性
         self.target_chapter = None
@@ -32,6 +37,37 @@ class ContentGenerator:
         # 加载现有大纲和进度
         self._load_outline()
         self._load_progress()
+        
+        # 初始化知识库
+        self._init_knowledge_base()
+
+    def _setup_logging(self):
+        """配置日志系统，固定存放在 data/logs 目录下，并同时输出到终端和文件"""
+        log_dir = os.path.join("data", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "generation.log")
+
+        # 创建日志记录器
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+
+        # 创建文件处理器
+        file_handler = RotatingFileHandler(
+            log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
+        )
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s'
+        ))
+
+        # 创建终端处理器
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s'
+        ))
+
+        # 添加处理器
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
 
     def _load_outline(self):
         """加载大纲文件"""
@@ -310,6 +346,14 @@ class ContentGenerator:
             "setting_references": []
         }
         try:
+            # 确保知识库已构建
+            if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
+                logging.warning("知识库未构建，尝试重新初始化...")
+                self._init_knowledge_base()
+                if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
+                    logging.error("知识库初始化失败")
+                    return references
+
             query_text = f"{chapter_outline.title} {' '.join(chapter_outline.key_points)} {' '.join(chapter_outline.characters)}"
             relevant_knowledge = self.knowledge_base.search(query_text)
 
@@ -384,6 +428,32 @@ class ContentGenerator:
             prompt += f"\n**额外要求：**\n{extra_prompt}"
 
         return prompt
+
+    def _init_knowledge_base(self):
+        """初始化知识库，确保在使用前已构建"""
+        try:
+            if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
+                kb_files = self.config.knowledge_base_config.get("reference_files", [])
+                if not kb_files:
+                    logging.warning("配置中未找到知识库参考文件路径")
+                    return
+                
+                # 检查文件是否存在
+                existing_files = []
+                for file_path in kb_files:
+                    if os.path.exists(file_path):
+                        existing_files.append(file_path)
+                    else:
+                        logging.warning(f"参考文件不存在: {file_path}")
+                
+                if existing_files:
+                    logging.info("开始构建知识库...")
+                    self.knowledge_base.build_from_files(existing_files)
+                    logging.info("知识库构建完成")
+                else:
+                    logging.error("没有找到任何可用的参考文件")
+        except Exception as e:
+            logging.error(f"初始化知识库时出错: {str(e)}")
 
 if __name__ == "__main__":
     import argparse

@@ -24,6 +24,7 @@ class KnowledgeBase:
         self.chunks: List[TextChunk] = []
         self.index = None
         self.cache_dir = config["cache_dir"]
+        self.is_built = False  # 添加构建状态标志
         os.makedirs(self.cache_dir, exist_ok=True)
         
     def _get_cache_path(self, text: str) -> str:
@@ -128,6 +129,7 @@ class KnowledgeBase:
                     cached_data = pickle.load(f)
                 self.index = cached_data['index']
                 self.chunks = cached_data['chunks']
+                self.is_built = True  # 标记为已构建
                 logging.info("成功从缓存加载知识库")
                 return
             except Exception as e:
@@ -253,3 +255,20 @@ class KnowledgeBase:
         context["next_chunks"] = relevant_chunks[chunk_idx + 1:end_idx]
         
         return context 
+
+    def build_from_files(self, file_paths: List[str], force_rebuild: bool = False):
+        """从多个文件构建知识库"""
+        combined_text = ""
+        for file_path in file_paths:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    combined_text += f.read() + "\n\n"
+                logging.info(f"已加载文件: {file_path}")
+            except Exception as e:
+                logging.error(f"加载文件 {file_path} 失败: {str(e)}")
+                continue
+        
+        if not combined_text.strip():
+            raise ValueError("所有参考文件加载失败，知识库内容为空")
+            
+        return self.build(combined_text, force_rebuild) 

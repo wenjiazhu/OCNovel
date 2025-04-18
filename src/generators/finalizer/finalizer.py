@@ -13,80 +13,77 @@ class NovelFinalizer:
         self.content_model = content_model
         self.knowledge_base = knowledge_base
         self.output_dir = config.output_config["output_dir"]
-        self.characters_file = os.path.join(self.output_dir, "characters.json")
-        self.characters: Dict[str, Character] = {}
+        # self.characters_file = os.path.join(self.output_dir, "characters.json")  # 注释掉角色库文件路径
+        # self.characters: Dict[str, Character] = {}  # 注释掉角色库字典
         
         # 验证并创建输出目录
         validate_directory(self.output_dir)
         # 加载角色库
-        self._load_characters()
+        # self._load_characters()  # 注释掉角色库加载
 
-    def _load_characters(self):
-        """从文件加载角色库"""
-        characters_data = load_json_file(self.characters_file, default_value={})
-        
-        if characters_data:
-            for name, data in characters_data.items():
-                try:
-                    char_data = {
-                        "name": name,
-                        "role": data.get("role", "未知"),
-                        "personality": data.get("personality", {}),
-                        "goals": data.get("goals", []),
-                        "relationships": data.get("relationships", {}),
-                        "development_stage": data.get("development_stage", "初始"),
-                        "alignment": data.get("alignment", "中立"),
-                        "realm": data.get("realm", "凡人"),
-                        "level": data.get("level", 1),
-                        "cultivation_method": data.get("cultivation_method", "无"),
-                        "magic_treasure": data.get("magic_treasure", []),
-                        "temperament": data.get("temperament", "平和"),
-                        "ability": data.get("ability", []),
-                        "stamina": data.get("stamina", 100),
-                        "sect": data.get("sect", "无门无派"),
-                        "position": data.get("position", "普通弟子"),
-                        "emotions_history": data.get("emotions_history", []),
-                        "states_history": data.get("states_history", []),
-                        "descriptions_history": data.get("descriptions_history", [])
-                    }
-                    self.characters[name] = Character(**char_data)
-                except Exception as e:
-                    logging.error(f"创建角色 '{name}' 时出错: {str(e)}")
+    # def _load_characters(self):  # 注释掉角色库加载方法
+    #     """从文件加载角色库"""
+    #     characters_data = load_json_file(self.characters_file, default_value={})
+    #     if characters_data:
+    #         for name, data in characters_data.items():
+    #             try:
+    #                 char_data = {
+    #                     "name": name,
+    #                     "role": data.get("role", "未知"),
+    #                     "personality": data.get("personality", {}),
+    #                     "goals": data.get("goals", []),
+    #                     "relationships": data.get("relationships", {}),
+    #                     "development_stage": data.get("development_stage", "初始"),
+    #                     "alignment": data.get("alignment", "中立"),
+    #                     "realm": data.get("realm", "凡人"),
+    #                     "level": data.get("level", 1),
+    #                     "cultivation_method": data.get("cultivation_method", "无"),
+    #                     "magic_treasure": data.get("magic_treasure", []),
+    #                     "temperament": data.get("temperament", "平和"),
+    #                     "ability": data.get("ability", []),
+    #                     "stamina": data.get("stamina", 100),
+    #                     "sect": data.get("sect", "无门无派"),
+    #                     "position": data.get("position", "普通弟子"),
+    #                     "emotions_history": data.get("emotions_history", []),
+    #                     "states_history": data.get("states_history", []),
+    #                     "descriptions_history": data.get("descriptions_history", [])
+    #                 }
+    #                 self.characters[name] = Character(**char_data)
+    #             except Exception as e:
+    #                 logging.error(f"创建角色 '{name}' 时出错: {str(e)}")
 
-    def _save_characters(self):
-        """保存角色库到文件"""
-        try:
-            characters_data = {}
-            for name, char in self.characters.items():
-                characters_data[name] = {
-                    "role": char.role,
-                    "personality": char.personality,
-                    "goals": char.goals,
-                    "relationships": char.relationships,
-                    "development_stage": char.development_stage,
-                    "alignment": char.alignment,
-                    "realm": char.realm,
-                    "level": char.level,
-                    "cultivation_method": char.cultivation_method,
-                    "magic_treasure": char.magic_treasure,
-                    "temperament": char.temperament,
-                    "ability": char.ability,
-                    "stamina": char.stamina,
-                    "sect": char.sect,
-                    "position": char.position,
-                    "emotions_history": char.emotions_history,
-                    "states_history": char.states_history,
-                    "descriptions_history": char.descriptions_history
-                }
-            
-            if save_json_file(self.characters_file, characters_data):
-                logging.info("角色库保存成功")
-                return True
-            return False
-            
-        except Exception as e:
-            logging.error(f"保存角色库时出错: {str(e)}")
-            return False
+    # def _save_characters(self):  # 注释掉角色库保存方法
+    #     """保存角色库到文件"""
+    #     try:
+    #         characters_data = {}
+    #         for name, char in self.characters.items():
+    #             characters_data[name] = {
+    #                 "role": char.role,
+    #                 "personality": char.personality,
+    #                 "goals": char.goals,
+    #                 "relationships": char.relationships,
+    #                 "development_stage": char.development_stage,
+    #                 "alignment": char.alignment,
+    #                 "realm": char.realm,
+    #                 "level": char.level,
+    #                 "cultivation_method": char.cultivation_method,
+    #                 "magic_treasure": char.magic_treasure,
+    #                 "temperament": char.temperament,
+    #                 "ability": char.ability,
+    #                 "stamina": char.stamina,
+    #                 "sect": char.sect,
+    #                 "position": char.position,
+    #                 "emotions_history": char.emotions_history,
+    #                 "states_history": char.states_history,
+    #                 "descriptions_history": char.descriptions_history
+    #             }
+    #         if save_json_file(self.characters_file, characters_data):
+    #             logging.info("角色库保存成功")
+    #             return True
+    #         return False
+    #     except Exception as e:
+    #         logging.error(f"保存角色库时出错: {str(e)}")
+    #         return False
 
     def finalize_chapter(self, chapter_num: int, update_characters: bool = True, update_summary: bool = True) -> bool:
         """处理章节的定稿工作
@@ -110,10 +107,10 @@ class NovelFinalizer:
                 content = f.read()
             
             # 更新角色状态
-            if update_characters:
-                if not self._update_character_states(content, chapter_num):
-                    logging.error("更新角色状态失败")
-                    return False
+            # if update_characters:  # 注释掉角色状态更新
+            #     if not self._update_character_states(content, chapter_num):
+            #         logging.error("更新角色状态失败")
+            #         return False
             
             # 生成/更新摘要
             if update_summary:
@@ -128,38 +125,19 @@ class NovelFinalizer:
             logging.error(f"处理章节定稿时出错: {str(e)}")
             return False
 
-    def _update_character_states(self, content: str, chapter_num: int) -> bool:
-        """更新角色状态"""
-        try:
-            # 解析新出现的角色
-            self._parse_new_characters(content)
-            
-            # 获取当前章节的角色列表
-            current_chapter_characters = self._get_current_chapter_characters(chapter_num)
-            
-            # 生成角色更新提示词
-            prompt = self._create_character_update_prompt(content, current_chapter_characters)
-            
-            # 获取角色更新信息
-            characters_update = self.content_model.generate(prompt)
-            if not self._validate_character_update(characters_update):
-                logging.error("角色更新信息验证失败")
-                return False
-            
-            # 解析并应用更新
-            self._parse_character_update(characters_update, chapter_num, current_chapter_characters)
-            
-            # 验证更新后的角色信息
-            if not self._verify_character_consistency(content, current_chapter_characters):
-                logging.warning("角色信息与章节内容不一致，尝试修正")
-                self._correct_character_inconsistencies(content, current_chapter_characters)
-            
-            # 保存更新后的角色库
-            return self._save_characters()
-            
-        except Exception as e:
-            logging.error(f"更新角色状态时出错: {str(e)}")
-            return False
+    # 注释掉所有与角色库相关的方法
+    # def _update_character_states(self, content: str, chapter_num: int) -> bool:
+    # def _parse_new_characters(self, content: str):
+    # def _create_basic_character(self, name: str) -> Character:
+    # def _is_valid_character_name(self, name: str) -> bool:
+    # def _get_current_chapter_characters(self, chapter_num: int) -> Set[str]:
+    # def _create_character_update_prompt(self, content: str, current_characters: Set[str]) -> str:
+    # def _format_characters_for_update(self, current_characters: Set[str]) -> str:
+    # def _validate_character_update(self, update_text: str) -> bool:
+    # def _parse_character_update(self, update_text: str, chapter_num: int, current_characters: Set[str]):
+    # def _update_character_attribute(self, character_name: str, key: str, value: str, chapter_num: int):
+    # def _verify_character_consistency(self, content: str, current_characters: Set[str]) -> bool:
+    # def _correct_character_inconsistencies(self, content: str, current_characters: Set[str]):
 
     def _update_summary(self, chapter_num: int, content: str) -> bool:
         """生成并更新章节摘要"""
@@ -186,243 +164,6 @@ class NovelFinalizer:
         except Exception as e:
             logging.error(f"更新摘要时出错: {str(e)}")
             return False
-
-    def _parse_new_characters(self, content: str):
-        """解析新角色信息并添加到角色库"""
-        t2s = OpenCC('t2s')  # 繁体转简体
-        
-        # 从内容中提取可能的角色名
-        patterns = [
-            r'([^，。？！；、\s]{2,4})(?:说道|道|喊道|叫道|回答道|问道|怒道|笑道|低声道)',
-            r'([^，。？！；、\s]{2,4})(?:的声音)'
-        ]
-        
-        for pattern in patterns:
-            matches = re.finditer(pattern, content)
-            for match in matches:
-                name = match.group(1).strip()
-                if name and self._is_valid_character_name(name):
-                    # 转换为简体
-                    simplified_name = t2s.convert(name)
-                    if simplified_name not in self.characters:
-                        self.characters[simplified_name] = self._create_basic_character(simplified_name)
-                        logging.info(f"添加新角色: {simplified_name}")
-
-    def _create_basic_character(self, name: str) -> Character:
-        """创建基本角色信息"""
-        return Character(
-            name=name,
-            role="配角",
-            personality={"平和": 0.5},
-            goals=["暂无明确目标"],
-            relationships={},
-            development_stage="初次登场"
-        )
-
-    def _is_valid_character_name(self, name: str) -> bool:
-        """检查是否为有效的角色名"""
-        # 常见角色名直接通过验证
-        common_characters = ["陆沉"]
-        if name in common_characters:
-            return True
-            
-        # 如果名称过长，可能是描述性文字
-        if len(name) > 12:
-            return False
-            
-        # 如果包含特定关键词，可能是属性或描述
-        invalid_keywords = [
-            "物品", "能力", "状态", "关系", "事件", "技能", "装备",
-            "道具", "功法", "法宝", "境界", "实力", "修为", "天赋"
-        ]
-        
-        if any(keyword in name for keyword in invalid_keywords):
-            return False
-            
-        # 如果包含标点符号或特殊字符，可能不是名称
-        if any(char in name for char in string.punctuation):
-            return False
-            
-        # 如果不包含中文字符，可能不是角色名
-        if not any('\u4e00' <= c <= '\u9fff' for c in name):
-            return False
-            
-        return True
-
-    def _get_current_chapter_characters(self, chapter_num: int) -> Set[str]:
-        """获取当前章节的角色列表"""
-        current_characters = set()
-        
-        # 从大纲文件中获取角色列表
-        outline_file = os.path.join(self.output_dir, "outline.json")
-        outline_data = load_json_file(outline_file)
-        
-        if outline_data and isinstance(outline_data, list) and chapter_num <= len(outline_data):
-            chapter_data = outline_data[chapter_num - 1]
-            if isinstance(chapter_data, dict):
-                current_characters.update(chapter_data.get("characters", []))
-        
-        return current_characters
-
-    def _create_character_update_prompt(self, content: str, current_characters: Set[str]) -> str:
-        """创建角色更新提示词"""
-        prompt = f"""请分析以下内容中的角色状态变化：
-
-{content[:2000]}  # 限制内容长度
-
-当前出场角色：
-{chr(10).join(current_characters)}
-
-现有角色信息：
-{self._format_characters_for_update(current_characters)}
-
-请提供以下信息：
-1. 角色状态变化（包括境界、功法、性格等）
-2. 新增或改变的人物关系
-3. 角色目标的变化
-4. 重要事件对角色的影响
-
-注意：
-1. 只更新确实在内容中有变化的属性
-2. 保持角色发展的合理性和连贯性
-3. 确保更新与内容相符
-"""
-        return prompt
-
-    def _format_characters_for_update(self, current_characters: Set[str]) -> str:
-        """格式化角色信息用于更新"""
-        formatted_chars = []
-        for name in current_characters:
-            if name in self.characters:
-                char = self.characters[name]
-                char_info = [
-                    f"角色名：{name}",
-                    f"身份：{char.role}",
-                    f"境界：{char.realm}",
-                    f"功法：{char.cultivation_method}",
-                    f"状态：{char.development_stage}",
-                    f"性格：{', '.join(f'{k}:{v}' for k, v in char.personality.items())}",
-                    f"目标：{', '.join(char.goals)}",
-                    f"关系：{', '.join(f'{k}:{v}' for k, v in char.relationships.items())}"
-                ]
-                formatted_chars.append("\n".join(char_info))
-        
-        return "\n\n".join(formatted_chars)
-
-    def _validate_character_update(self, update_text: str) -> bool:
-        """验证角色更新内容的格式和完整性"""
-        if not update_text or not isinstance(update_text, str):
-            return False
-            
-        required_fields = ["状态变化", "人物关系", "目标变化", "事件影响"]
-        return all(field in update_text for field in required_fields)
-
-    def _parse_character_update(self, update_text: str, chapter_num: int, current_characters: Set[str]):
-        """解析角色更新信息"""
-        try:
-            current_character = None
-            for line in update_text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                
-                if ':' in line or '：' in line:
-                    parts = line.split(':') if ':' in line else line.split('：')
-                    key = parts[0].strip()
-                    value = parts[1].strip() if len(parts) > 1 else ""
-                    
-                    if key in self.characters:
-                        current_character = key
-                        continue
-                    
-                    if current_character and current_character in current_characters:
-                        self._update_character_attribute(current_character, key, value, chapter_num)
-                        
-        except Exception as e:
-            logging.error(f"解析角色更新信息时出错: {str(e)}")
-
-    def _update_character_attribute(self, character_name: str, key: str, value: str, chapter_num: int):
-        """更新角色的特定属性"""
-        if character_name not in self.characters:
-            return
-            
-        char = self.characters[character_name]
-        
-        try:
-            if key == '发展阶段':
-                current_stages = set(char.development_stage.split(", "))
-                new_stages = set(value.split(", "))
-                all_stages = current_stages.union(new_stages)
-                char.development_stage = ", ".join(all_stages)
-                
-            elif key == '关系':
-                for relation in value.split('，'):
-                    if ':' in relation or '：' in relation:
-                        target, rel_type = relation.split(':') if ':' in relation else relation.split('：')
-                        char.relationships[target.strip()] = rel_type.strip()
-                        
-            elif key == '目标':
-                new_goals = [g.strip() for g in value.split('，')]
-                for goal in new_goals:
-                    if goal not in char.goals:
-                        char.goals.append(goal)
-                        
-            elif key == '性格':
-                traits = value.split('，')
-                for trait in traits:
-                    if ':' in trait or '：' in trait:
-                        t, weight = trait.split(':') if ':' in trait else trait.split('：')
-                        char.personality[t.strip()] = float(weight)
-                    else:
-                        char.personality[trait.strip()] = 1.0
-                        
-            elif hasattr(char, key):
-                setattr(char, key, value)
-                
-        except Exception as e:
-            logging.error(f"更新角色 {character_name} 的属性 {key} 时出错: {str(e)}")
-
-    def _verify_character_consistency(self, content: str, current_characters: Set[str]) -> bool:
-        """验证更新后的角色信息与章节内容的一致性"""
-        for name in current_characters:
-            if name not in self.characters:
-                continue
-                
-            char = self.characters[name]
-            
-            # 验证状态描述
-            if char.realm not in content and char.temperament not in content:
-                logging.warning(f"角色 {name} 的状态描述与章节内容不一致")
-                return False
-            
-            # 验证能力描述
-            for ability in char.ability:
-                if ability not in content:
-                    logging.warning(f"角色 {name} 的能力 {ability} 在章节中未体现")
-                    return False
-            
-            # 验证关系网络
-            for rel_name, rel_type in char.relationships.items():
-                if rel_name not in content or rel_type not in content:
-                    logging.warning(f"角色 {name} 与 {rel_name} 的关系描述与章节内容不一致")
-                    return False
-        
-        return True
-
-    def _correct_character_inconsistencies(self, content: str, current_characters: Set[str]):
-        """修正角色信息与章节内容的不一致"""
-        try:
-            # 重新生成角色更新提示词
-            prompt = self._create_character_update_prompt(content, current_characters)
-            characters_update = self.content_model.generate(prompt)
-            
-            if self._validate_character_update(characters_update):
-                self._parse_character_update(characters_update, 0, current_characters)
-            else:
-                logging.error("角色信息修正失败，保留原有信息")
-                
-        except Exception as e:
-            logging.error(f"修正角色信息时出错: {str(e)}")
 
     def _create_summary_prompt(self, content: str) -> str:
         """创建摘要生成的提示词"""

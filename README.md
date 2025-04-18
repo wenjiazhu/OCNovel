@@ -54,17 +54,49 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 
 ## 使用方法
 
-### 1. 生成新小说
+### 1. 主程序运行 (main.py)
 
 ```bash
-python main.py
+python main.py [command] [options]
 ```
 
-程序会：
-- 检查并构建知识库
-- 生成小说大纲
-- 逐章节生成内容
-- 保存生成结果
+支持以下子命令：
+
+#### (1) 生成完整小说流程
+```bash
+python main.py auto \
+    --start <起始章节> \
+    --end <结束章节> \
+    --novel-type <小说类型> \
+    --theme <主题> \
+    --style <写作风格> \
+    [--extra-prompt "额外提示词"]
+```
+
+#### (2) 单独生成大纲
+```bash
+python main.py outline \
+    --start <起始章节> \
+    --end <结束章节> \
+    --novel-type <小说类型> \
+    --theme <主题> \
+    --style <写作风格> \
+    [--extra-prompt "额外提示词"]
+```
+
+#### (3) 生成章节内容
+```bash
+python main.py content \
+    [--start-chapter <起始章节>] \
+    [--target-chapter <指定章节>] \
+    [--extra-prompt "额外提示词"]
+```
+
+#### (4) 章节定稿处理
+```bash
+python main.py finalize \
+    --chapter <章节号>
+```
 
 ### 2. 重新生成特定章节
 
