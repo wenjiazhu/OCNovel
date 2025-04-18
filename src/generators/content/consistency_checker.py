@@ -37,7 +37,7 @@ class ConsistencyChecker:
         chapter_content: str,
         chapter_outline: Dict[str, Any],
         chapter_idx: int,
-        characters: Dict[str, Any] = None
+        characters: Dict[str, Any] = None  # 保留参数但不使用
     ) -> Tuple[str, bool, int]:
         """
         检查章节内容一致性，并返回检查报告和是否需要修改
@@ -46,7 +46,7 @@ class ConsistencyChecker:
             chapter_content: 待检查章节内容
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
-            characters: 角色信息字典
+            characters: 角色信息字典（已弃用）
             
         Returns:
             tuple: (检查报告, 是否需要修改, 评分)
@@ -59,8 +59,9 @@ class ConsistencyChecker:
         # 获取上一章摘要
         previous_summary = self._get_previous_summary(chapter_idx)
         
-        # 获取角色信息
-        character_info = self._get_character_info(characters, chapter_outline)
+        # 注释掉角色信息获取
+        # character_info = self._get_character_info(characters, chapter_outline)
+        character_info = ""  # 使用空字符串替代
         
         # 生成一致性检查的提示词
         prompt = prompts.get_consistency_check_prompt(
@@ -68,7 +69,7 @@ class ConsistencyChecker:
             chapter_outline=chapter_outline,
             previous_summary=previous_summary,
             global_summary=global_summary,
-            character_info=character_info
+            character_info=character_info  # 传入空字符串
         )
         
         # 调用模型进行检查
@@ -296,28 +297,28 @@ class ConsistencyChecker:
         logging.debug(f"[{method_name}] Returning previous_summary (first 100 chars): '{previous_summary[:100]}'")
         return previous_summary
     
-    def _get_character_info(self, characters: Dict[str, Any], chapter_outline: Dict[str, Any]) -> str:
-        """获取角色信息"""
-        if not characters:
-            logging.warning("角色信息为空，跳过角色一致性检查。")
-            return "（无角色信息）"
-        
-        character_info = ""
-        for name, char in characters.items():
-            # 只包含与当前章节相关的角色
-            if name in chapter_outline.get('characters', []):
-                # 使用 getattr 安全地获取角色属性，避免 KeyError
-                role = getattr(char, 'role', '未知')
-                development_stage = getattr(char, 'development_stage', '未知')
-                temperament = getattr(char, 'temperament', '未知')
-                realm = getattr(char, 'realm', '未知')
-                sect = getattr(char, 'sect', '未知')
-                
-                character_info += f"{name}: {role}, {development_stage}\n"
-                character_info += f"- 性格: {temperament}, 境界: {realm}, 门派: {sect}\n"
-        
-        if not character_info:
-            logging.warning("当前章节未涉及任何已知角色，跳过角色一致性检查。")
-            return "（无相关角色信息）"
-        
-        return character_info 
+    # def _get_character_info(self, characters: Dict[str, Any], chapter_outline: Dict[str, Any]) -> str:
+    #     """获取角色信息"""
+    #     if not characters:
+    #         logging.warning("角色信息为空，跳过角色一致性检查。")
+    #         return "（无角色信息）"
+    #     
+    #     character_info = ""
+    #     for name, char in characters.items():
+    #         # 只包含与当前章节相关的角色
+    #         if name in chapter_outline.get('characters', []):
+    #             # 使用 getattr 安全地获取角色属性，避免 KeyError
+    #             role = getattr(char, 'role', '未知')
+    #             development_stage = getattr(char, 'development_stage', '未知')
+    #             temperament = getattr(char, 'temperament', '未知')
+    #             realm = getattr(char, 'realm', '未知')
+    #             sect = getattr(char, 'sect', '未知')
+    #             
+    #             character_info += f"{name}: {role}, {development_stage}\n"
+    #             character_info += f"- 性格: {temperament}, 境界: {realm}, 门派: {sect}\n"
+    #     
+    #     if not character_info:
+    #         logging.warning("当前章节未涉及任何已知角色，跳过角色一致性检查。")
+    #         return "（无相关角色信息）"
+    #     
+    #     return character_info 

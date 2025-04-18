@@ -191,18 +191,38 @@ def get_chapter_prompt(
     context_info: str = ""
 ) -> str:
     """生成用于创建章节内容的提示词。"""
+    
+    # 读取同步信息
+    sync_info = {}
+    sync_info_file = os.path.join("data", "cache", "sync_info.json")
+    if os.path.exists(sync_info_file):
+        try:
+            with open(sync_info_file, 'r', encoding='utf-8') as f:
+                sync_info = json.load(f)
+        except Exception as e:
+            logging.warning(f"读取同步信息时出错: {str(e)}")
+    
+    # 格式化同步信息
+    world_background = "\n".join([f"- {item}" for item in sync_info.get("世界观", {}).get("世界背景", [])])
+    factions = "\n".join([f"- {item}" for item in sync_info.get("世界观", {}).get("阵营势力", [])])
+    character_settings = "\n".join([f"- {item}" for item in sync_info.get("人物设定", {}).get("人物设定", [])])
+    character_relations = "\n".join([f"- {item}" for item in sync_info.get("人物设定", {}).get("人物关系", [])])
+    other_settings = "\n".join([f"- {item}" for item in sync_info.get("其他设定", [])])
+    story_summary = "\n".join([f"- {item}" for item in sync_info.get("前情提要", [])])
 
+    # 获取章节信息
     novel_number = outline.get('chapter_number', '未知')
     chapter_title = outline.get('title', '未知')
+    key_points = outline.get('key_points', [])
+    characters = outline.get('characters', [])
+    settings = outline.get('settings', [])
+    conflicts = outline.get('conflicts', [])
     
-    # 处理关键情节点 - 改为分行展示以增强可读性和重要性
-    key_points_list = outline.get('key_points', [])
-    key_points_display = chr(10).join([f"- {point}" for point in key_points_list])
-    
-    # 其他信息
-    characters = ', '.join(outline.get('characters', []))
-    settings = ', '.join(outline.get('settings', []))
-    conflicts = ', '.join(outline.get('conflicts', []))
+    # 格式化章节信息
+    key_points_display = "\n".join([f"- {point}" for point in key_points])
+    characters_display = "\n".join([f"- {character}" for character in characters])
+    settings_display = "\n".join([f"- {setting}" for setting in settings])
+    conflicts_display = "\n".join([f"- {conflict}" for conflict in conflicts])
     
     # 获取额外指导内容
     extra_guidance = config.novel_config.get("extra_guidance", {})
@@ -210,8 +230,60 @@ def get_chapter_prompt(
     content_rules = extra_guidance.get("content_rules", {})
     chapter_structure = extra_guidance.get("chapter_structure", {})
 
-    # 格式化额外指导内容
-    extra_guidance_text = f"""
+    prompt = f"""请根据以下信息创作小说第 {novel_number} 章《{chapter_title}》：
+
+[同步信息]
+世界背景：
+{world_background}
+
+阵营势力：
+{factions}
+
+人物设定：
+{character_settings}
+
+人物关系：
+{character_relations}
+
+其他设定：
+{other_settings}
+
+前情提要：
+{story_summary}
+
+[本章大纲]
+关键情节点：
+{key_points_display}
+
+出场角色：
+{characters_display}
+
+场景设定：
+{settings_display}
+
+核心冲突：
+{conflicts_display}
+
+[上下文信息]
+{context_info}
+
+[参考信息]
+剧情参考：
+{chr(10).join(f"- {ref}" for ref in references.get("plot_references", []))}
+
+角色参考：
+{chr(10).join(f"- {ref}" for ref in references.get("character_references", []))}
+
+场景参考：
+{chr(10).join(f"- {ref}" for ref in references.get("setting_references", []))}
+
+[写作要求]
+1. 严格遵循本章大纲的关键情节点、角色、场景和冲突进行创作
+2. 确保内容与前文摘要自然衔接
+3. 合理运用同步信息中的设定，保持世界观和人物塑造的一致性
+4. 章节字数控制在 {config.novel_config.get("chapter_length", 2500)} 字左右
+5. 保持 {config.novel_config.get("style", "默认")} 的写作风格
+
 [写作风格指导]
 节奏控制：{writing_style.get('pacing', '')}
 描写要求：{writing_style.get('description', '')}
@@ -229,147 +301,12 @@ def get_chapter_prompt(
 开篇方式：{chapter_structure.get('opening', '')}
 发展过程：{chapter_structure.get('development', '')}
 高潮设计：{chapter_structure.get('climax', '')}
-结尾处理：{chapter_structure.get('ending', '')}
-"""
-    
-    # 添加系统角色设定
-    system_prompt = """你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。"""
-    
-    # 根据章节号确定使用哪个提示词模板
-    if novel_number == 1:
-        # 第一章使用 first_chapter_draft_prompt
-        base_prompt = f"""
-{system_prompt}
+结尾处理：{chapter_structure.get('ending', '')}"""
 
-即将创作：第 {novel_number} 章《{chapter_title}》
-本章定位：开篇章节
-核心作用：引入主角和世界观
-悬念密度：中等
-伏笔操作：埋设初始伏笔
-认知颠覆：★☆☆☆☆
-
-{extra_guidance_text}
-
-【重要】本章必须包含的关键情节点：
-{key_points_display}
-
-可用元素：
-- 核心人物：{characters}
-- 关键场景：{settings}
-- 核心冲突：{conflicts}
-
-[参考信息]
-情节参考：
-{chr(10).join(references['plot_references'])}
-
-角色参考：
-{chr(10).join(references['character_references'])}
-
-场景参考：
-{chr(10).join(references['setting_references'])}
-
-完成第 {novel_number} 章的正文，至少设计下方2个或以上具有动态张力的场景：
-1. 对话场景：
-   - 潜台词冲突（表面谈论A，实际博弈B）
-   - 权力关系变化（通过非对称对话长度体现）
-
-2. 动作场景：
-   - 环境交互细节（至少3个感官描写）
-   - 节奏控制（短句加速+比喻减速）
-   - 动作揭示人物隐藏特质
-
-3. 心理场景：
-   - 认知失调的具体表现（行为矛盾）
-   - 隐喻系统的运用（连接世界观符号）
-   - 决策前的价值天平描写
-
-4. 环境场景：
-   - 空间透视变化（宏观→微观→异常焦点）
-   - 非常规感官组合（如"听见阳光的重量"）
-   - 动态环境反映心理（环境与人物心理对应）
-
-[写作风格]
-请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
-尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
-步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
-简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
-
-[格式要求]
-1.仅返回章节正文文本；
-2.不使用分章节小标题；
-3.长短句交错，多分段，长句一句一段，短句两到三句一段；
-4.不要使用markdown格式;
-5.仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符。
-"""
-    else:
-        # 后续章节使用标准提示词
-        base_prompt = f"""
-{system_prompt}
-
-请根据以下章节大纲和参考信息，创作小说章节内容。
-
-[章节大纲]
-章节号: {novel_number}
-标题: {chapter_title}
-
-{extra_guidance_text}
-
-【重要】本章必须包含的关键情节点：
-{key_points_display}
-
-涉及角色: {characters}
-场景设定: {settings}
-核心冲突: {conflicts}
-
-[参考信息]
-情节参考：
-{chr(10).join(references['plot_references'])}
-
-角色参考：
-{chr(10).join(references['character_references'])}
-
-场景参考：
-{chr(10).join(references['setting_references'])}
-
-[写作风格]
-请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
-尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
-步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
-简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
-
-[格式要求]
-1.仅返回章节正文文本；
-2.不使用分章节小标题；
-3.长短句交错，多分段，长句一句一段，短句两到三句一段；
-4.不要使用markdown格式;
-5.仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符。
-"""
-
-    # 添加额外要求
     if extra_prompt:
-        base_prompt += f"{chr(10)}{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
+        prompt += f"\n\n[额外要求]\n{extra_prompt}"
 
-    # 添加上下文信息
-    if context_info:
-        base_prompt += f"{chr(10)}{chr(10)}[上下文信息]{chr(10)}{context_info}"
-
-    # 添加连贯性要求
-    base_prompt += f"""
-
-[连贯性要求]
-1. 请确保本章情节与上一章摘要中描述的情节有明确的连接
-2. 章节开头应自然承接上一章的结尾，避免跳跃感
-3. 章节结尾应为下一章大纲中的情节埋下伏笔
-4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
-5. 时间线和场景转换要清晰流畅
-
-[重要·最终检查]
-1. 检查你的章节内容是否明确包含了所有关键情节点
-2. 检查所有指定的角色是否都出现在了章节中
-3. 检查你描述的场景是否与场景设定一致
-4. 确保核心冲突被合理地展开和刻画
-"""
-    return base_prompt
+    return prompt
 
 
 def get_summary_prompt(

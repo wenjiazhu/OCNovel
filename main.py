@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import logging
@@ -55,9 +56,9 @@ def main():
     outline_parser = subparsers.add_parser('outline', help='生成小说大纲')
     outline_parser.add_argument('--start', type=int, required=True, help='起始章节')
     outline_parser.add_argument('--end', type=int, required=True, help='结束章节')
-    outline_parser.add_argument('--novel-type', type=str, required=True, help='小说类型')
-    outline_parser.add_argument('--theme', type=str, required=True, help='主题')
-    outline_parser.add_argument('--style', type=str, required=True, help='写作风格')
+    outline_parser.add_argument('--novel-type', type=str, help='小说类型（可选，默认使用配置文件中的设置）')
+    outline_parser.add_argument('--theme', type=str, help='主题（可选，默认使用配置文件中的设置）')
+    outline_parser.add_argument('--style', type=str, help='写作风格（可选，默认使用配置文件中的设置）')
     outline_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
     
     # 内容生成命令
@@ -72,11 +73,6 @@ def main():
     
     # 自动生成命令（包含完整流程）
     auto_parser = subparsers.add_parser('auto', help='自动执行完整生成流程')
-    auto_parser.add_argument('--start', type=int, required=True, help='起始章节')
-    auto_parser.add_argument('--end', type=int, required=True, help='结束章节')
-    auto_parser.add_argument('--novel-type', type=str, required=True, help='小说类型')
-    auto_parser.add_argument('--theme', type=str, required=True, help='主题')
-    auto_parser.add_argument('--style', type=str, required=True, help='写作风格')
     auto_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
     
     args = parser.parse_args()
@@ -108,10 +104,16 @@ def main():
         if args.command == 'outline':
             logging.info("--- 执行大纲生成任务 ---")
             generator = OutlineGenerator(config, outline_model, knowledge_base)
+            
+            # 使用命令行参数或配置文件中的设置
+            novel_type = args.novel_type or config.novel_config.get("type")
+            theme = args.theme or config.novel_config.get("theme")
+            style = args.style or config.novel_config.get("style")
+            
             success = generator.generate_outline(
-                novel_type=args.novel_type,
-                theme=args.theme,
-                style=args.style,
+                novel_type=novel_type,
+                theme=theme,
+                style=style,
                 mode='replace',
                 replace_range=(args.start, args.end),
                 extra_prompt=args.extra_prompt
@@ -156,34 +158,68 @@ def main():
             content_generator = ContentGenerator(config, content_model, knowledge_base)
             finalizer = NovelFinalizer(config, content_model, knowledge_base)
             
-            # 1. 生成大纲
-            logging.info("步骤 1: 生成大纲...")
-            outline_success = outline_generator.generate_outline(
-                novel_type=args.novel_type, theme=args.theme, style=args.style,
-                mode='replace', replace_range=(args.start, args.end),
-                extra_prompt=args.extra_prompt
-            )
-            if not outline_success: print("大纲生成失败，停止流程。"); return
-            print("大纲生成成功！")
+            # 从progress.json获取当前章节进度
+            progress_file = os.path.join(config.output_config["output_dir"], "progress.json")
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    progress_data = json.load(f)
+                    start_chapter = progress_data.get("current_chapter", 0) + 1
+            else:
+                start_chapter = 1
             
-            # 2. 生成内容 (确保从指定范围的起始章节开始)
+            # 从config.json获取目标章节数
+            end_chapter = config.novel_config.get("target_chapters")
+            if not end_chapter:
+                logging.error("配置文件中未找到目标章节数设置")
+                return
+            
+            logging.info(f"自动生成范围：第 {start_chapter} 章到第 {end_chapter} 章")
+            
+            # 1. 检查并生成大纲
+            logging.info("步骤 1: 检查大纲状态...")
+            current_outline_count = len(outline_generator.chapter_outlines)
+            
+            if current_outline_count < end_chapter:
+                # 只生成缺失的章节大纲
+                logging.info(f"当前大纲章节数 ({current_outline_count}) 小于目标章节数 ({end_chapter})，将生成缺失的章节大纲...")
+                outline_success = outline_generator.generate_outline(
+                    novel_type=config.novel_config.get("type"),
+                    theme=config.novel_config.get("theme"),
+                    style=config.novel_config.get("style"),
+                    mode='replace',
+                    replace_range=(current_outline_count + 1, end_chapter),
+                    extra_prompt=args.extra_prompt
+                )
+                if not outline_success:
+                    print("大纲生成失败，停止流程。")
+                    return
+                print("缺失章节大纲生成成功！")
+            else:
+                logging.info(f"大纲章节数充足（当前：{current_outline_count}，目标：{end_chapter}），无需生成新大纲。")
+                outline_success = True
+            
+            # 2. 生成内容
             logging.info("步骤 2: 生成内容...")
-            content_generator.current_chapter = args.start - 1 # 设置起始章节
-            content_success = content_generator.generate_content() # 不传 target_chapter，生成从 start 开始的所有章节
-            if not content_success: print("内容生成失败，停止流程。"); return
+            content_generator.current_chapter = start_chapter - 1  # 从当前进度的下一章开始
+            content_success = content_generator.generate_content()
+            if not content_success:
+                print("内容生成失败，停止流程。")
+                return
             print("内容生成成功！")
             
-            # 3. 处理定稿 (处理指定范围内的所有章节)
+            # 3. 处理定稿
             logging.info("步骤 3: 处理定稿...")
             finalize_success = True
-            for chapter_num in range(args.start, args.end + 1):
+            for chapter_num in range(start_chapter, end_chapter + 1):
                 logging.info(f"处理第 {chapter_num} 章定稿...")
                 if not finalizer.finalize_chapter(chapter_num):
                     print(f"第 {chapter_num} 章定稿处理失败。")
                     finalize_success = False
                     break
-            if finalize_success: print("自动生成流程全部完成！")
-            else: print("自动生成流程中断，请查看日志文件了解详细信息。")
+            if finalize_success:
+                print("自动生成流程全部完成！")
+            else:
+                print("自动生成流程中断，请查看日志文件了解详细信息。")
             
         else:
             parser.print_help()

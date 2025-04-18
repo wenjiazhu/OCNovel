@@ -10,6 +10,7 @@ from ..common.utils import load_json_file, save_json_file, validate_directory
 import re
 from logging.handlers import RotatingFileHandler
 import sys
+import json
 
 class ContentGenerator:
     def __init__(self, config, content_model, knowledge_base):
@@ -19,6 +20,14 @@ class ContentGenerator:
         self.output_dir = config.output_config["output_dir"]
         self.chapter_outlines = []
         self.current_chapter = 0
+        
+        # 新增：缓存计数器和同步信息生成器
+        self.chapters_since_last_cache = 0
+        self.content_kb_dir = os.path.join("data", "cache", "content_kb")
+        self.sync_info_file = os.path.join("data", "cache", "sync_info.json")
+        
+        # 验证并创建缓存目录
+        os.makedirs(self.content_kb_dir, exist_ok=True)
         
         # 初始化日志系统
         self._setup_logging()
@@ -454,6 +463,111 @@ class ContentGenerator:
                     logging.error("没有找到任何可用的参考文件")
         except Exception as e:
             logging.error(f"初始化知识库时出错: {str(e)}")
+
+    def _check_and_update_cache(self, chapter_num: int) -> None:
+        """检查是否需要更新缓存，每5章更新一次"""
+        self.chapters_since_last_cache += 1
+        if self.chapters_since_last_cache >= 5:
+            logging.info(f"已完成5章内容，开始更新缓存...")
+            self._update_content_cache()
+            self._trigger_sync_info_update()
+            self.chapters_since_last_cache = 0
+
+    def _update_content_cache(self) -> None:
+        """更新正文知识库缓存"""
+        try:
+            # 获取所有已完成章节的内容
+            chapter_contents = []
+            for chapter_num in range(1, self.current_chapter + 1):
+                filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
+                filepath = os.path.join(self.output_dir, filename)
+                if os.path.exists(filepath):
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        chapter_contents.append(content)
+
+            if chapter_contents:
+                # 使用嵌入模型对内容进行向量化
+                self.knowledge_base.build_from_texts(
+                    texts=chapter_contents,
+                    cache_dir=self.content_kb_dir
+                )
+                logging.info(f"正文知识库缓存更新完成，共处理 {len(chapter_contents)} 章内容")
+            else:
+                logging.warning("未找到任何已完成的章节内容")
+
+        except Exception as e:
+            logging.error(f"更新正文知识库缓存时出错: {str(e)}")
+
+    def _trigger_sync_info_update(self) -> None:
+        """触发同步信息更新"""
+        try:
+            # 获取所有已完成章节的内容
+            all_content = ""
+            for chapter_num in range(1, self.current_chapter + 1):
+                filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
+                filepath = os.path.join(self.output_dir, filename)
+                if os.path.exists(filepath):
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        all_content += f.read() + "\n\n"
+
+            if all_content:
+                # 生成同步信息的提示词
+                prompt = self._create_sync_info_prompt(all_content)
+                # 使用LLM生成同步信息
+                sync_info = self.content_model.generate(prompt)
+                
+                try:
+                    # 验证生成的JSON格式
+                    sync_info_dict = json.loads(sync_info)
+                    # 保存同步信息
+                    with open(self.sync_info_file, 'w', encoding='utf-8') as f:
+                        json.dump(sync_info_dict, f, ensure_ascii=False, indent=2)
+                    logging.info("同步信息更新完成")
+                except json.JSONDecodeError:
+                    logging.error("生成的同步信息不是有效的JSON格式")
+            else:
+                logging.warning("未找到任何已完成的章节内容，无法更新同步信息")
+
+        except Exception as e:
+            logging.error(f"更新同步信息时出错: {str(e)}")
+
+    def _create_sync_info_prompt(self, story_content: str) -> str:
+        """创建生成同步信息的提示词"""
+        # 读取现有的同步信息（如果存在）
+        existing_sync_info = ""
+        if os.path.exists(self.sync_info_file):
+            try:
+                with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                    existing_sync_info = f.read()
+            except Exception as e:
+                logging.warning(f"读取现有同步信息时出错: {str(e)}")
+
+        return f"""根据故事进展整理相关信息，具体要求：
+1. 合理细化使得相关信息逻辑完整，但不扩展不存在的设定，未尽之处可参考 [同步信息]
+2. 精简表达，去除一切不必要的修饰，确保信息有效的同时使用最少tokens
+3. 你在整理信息的时候，只保留对后续故事发展有参考借鉴意义的内容，如果是对后续故事不再有影响的人和事，可以不再归纳出来
+4. 严格按照以下模板回答
+
+现有同步信息：
+{existing_sync_info}
+
+故事内容：
+{story_content}
+
+请按以下格式输出JSON：
+{{
+    "世界观": {{
+        "世界背景": [],
+        "阵营势力": []
+    }},
+    "人物设定": {{
+        "人物设定": [],
+        "人物关系": []
+    }},
+    "其他设定": [],
+    "前情提要": []
+}}"""
 
 if __name__ == "__main__":
     import argparse

@@ -27,7 +27,40 @@ class OutlineModel(BaseModel):
         """生成章节大纲"""
         # TODO: 实现实际的大纲生成逻辑
         logging.info(f"使用模型 {self.model_name} 生成大纲")
-        return "这是一个示例大纲"
+        
+        try:
+            # 调用LLM生成大纲
+            response = self.llm.generate(prompt)
+            
+            # 验证返回的内容是否为有效的JSON
+            try:
+                json.loads(response)
+                return response
+            except json.JSONDecodeError:
+                # 如果不是有效的JSON，尝试提取JSON部分
+                import re
+                json_pattern = r'\[.*\]'
+                match = re.search(json_pattern, response, re.DOTALL)
+                if match:
+                    json_str = match.group()
+                    # 再次验证提取的内容是否为有效的JSON
+                    json.loads(json_str)
+                    return json_str
+                else:
+                    raise ValueError("无法从模型响应中提取有效的JSON数据")
+                    
+        except Exception as e:
+            logging.error(f"生成大纲时发生错误：{str(e)}")
+            # 返回一个有效的JSON数组，包含一个基本的错误提示章节
+            error_outline = [{
+                "chapter_number": 1,
+                "title": "生成失败",
+                "key_points": ["生成大纲时发生错误"],
+                "characters": [],
+                "settings": [],
+                "conflicts": []
+            }]
+            return json.dumps(error_outline, ensure_ascii=False)
 
 class EmbeddingModel(BaseModel):
     """文本嵌入模型"""
