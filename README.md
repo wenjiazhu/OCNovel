@@ -64,25 +64,30 @@ python main.py [command] [options]
 
 #### (1) 生成完整小说流程
 ```bash
-python main.py auto \
-    --start <起始章节> \
-    --end <结束章节> \
-    --novel-type <小说类型> \
-    --theme <主题> \
-    --style <写作风格> \
-    [--extra-prompt "额外提示词"]
+python main.py auto [--extra-prompt "额外提示词"]
 ```
+- **功能**：自动执行完整的小说生成流程（大纲生成、内容生成、章节定稿）。
+- **参数**：
+  - `--extra-prompt`：可选，用于指导生成的额外提示词。
 
 #### (2) 单独生成大纲
 ```bash
 python main.py outline \
     --start <起始章节> \
     --end <结束章节> \
-    --novel-type <小说类型> \
-    --theme <主题> \
-    --style <写作风格> \
+    [--novel-type <小说类型>] \
+    [--theme <主题>] \
+    [--style <写作风格>] \
     [--extra-prompt "额外提示词"]
 ```
+- **功能**：生成或更新指定章节范围的小说大纲。
+- **参数**：
+  - `--start`：必需，起始章节号（从 1 开始）。
+  - `--end`：必需，结束章节号（包含）。
+  - `--novel-type`：可选，小说类型（如未提供，使用配置文件中的设置）。
+  - `--theme`：可选，主题（如未提供，使用配置文件中的设置）。
+  - `--style`：可选，写作风格（如未提供，使用配置文件中的设置）。
+  - `--extra-prompt`：可选，额外提示词。
 
 #### (3) 生成章节内容
 ```bash
@@ -91,112 +96,30 @@ python main.py content \
     [--target-chapter <指定章节>] \
     [--extra-prompt "额外提示词"]
 ```
+- **功能**：生成或重新生成章节内容。
+- **参数**：
+  - `--start-chapter`：可选，起始章节号（从 1 开始）。如未提供，从上次进度或默认章节开始。
+  - `--target-chapter`：可选，指定重新生成的章节号（优先级高于 `--start-chapter`）。
+  - `--extra-prompt`：可选，额外提示词。
 
 #### (4) 章节定稿处理
 ```bash
-python main.py finalize \
-    --chapter <章节号>
+python main.py finalize --chapter <章节号>
 ```
+- **功能**：对指定章节进行定稿处理（如内容优化、格式检查等）。
+- **参数**：
+  - `--chapter`：必需，章节号（从 1 开始）。
 
-### 2. 重新生成特定章节
-
-```bash
-python src/generators/chapter_regenerator.py --chapter <章节号> --prompt "额外提示词"
-```
-
-### 3. 生成营销内容
+### 2. 生成营销内容
 
 ```bash
 python src/tools/generate_marketing.py --keywords "关键词1" "关键词2" --characters "角色1" "角色2"
 ```
 
-### 4. 手动更新小说大纲
-
-如果你需要手动更新小说的大纲，可以使用 `src/tools/update_outline.py` 脚本。这允许你指定章节范围和额外的提示词来重新生成大纲。
-
-```bash
-python src/tools/update_outline.py --start <起始章节号> --end <结束章节号> [--prompt "额外提示词"] [--config <配置文件路径>] [--log-level <日志级别>]
-```
-
-**参数说明:**
-
-- `--start <起始章节号>`:  起始章节号 (包含)，从 1 开始。**必需参数**。
-- `--end <结束章节号>`:  结束章节号 (包含)，从 1 开始。**必需参数**。
-- `--prompt "额外提示词"`:  *(可选)* 用于指导大纲生成的额外提示词。如果需要更精细地控制大纲生成，可以添加此参数。
-- `--config <配置文件路径>`:  *(可选)* 配置文件路径，默认为 `config.json`。如果你的配置文件不在项目根目录或者文件名不同，可以使用此参数指定。
-- `--log-level <日志级别>`:  *(可选)* 日志级别，默认为 `INFO`。可以选择 `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` 等。
-
-**示例:**
-
-更新第 10 章到第 20 章的大纲，并添加额外提示词 "增加主角的冒险元素":
-
-```bash
-python src/tools/update_outline.py --start 10 --end 20 --prompt "增加主角的冒险元素"
-```
-
-### 5. 手动更新章节摘要
-
-如果你希望更新已生成章节的摘要信息，可以使用 `src/tools/update_summary.py` 脚本。这在你修改了章节内容后，希望更新摘要以保持信息同步时非常有用。
-
-```bash
-python src/tools/update_summary.py <章节号1> [<章节号2> ...] [--output_dir <输出目录路径>] [--config <配置文件路径>] [--log-level <日志级别>]
-```
-
-**参数说明:**
-
-- `<章节号1> [<章节号2> ...]`:  需要更新摘要的章节号，可以指定一个或多个，用空格分隔。**必需参数**。
-- `--output_dir <输出目录路径>`:  *(可选)* 输出目录路径，默认为 `data/output`。如果你的小说章节输出目录不是默认路径，可以使用此参数指定。
-- `--config <配置文件路径>`:  *(可选)* 配置文件路径，默认为 `config.json`。
-- `--log-level <日志级别>`:  *(可选)* 日志级别，默认为 `INFO`。
-
-**示例:**
-
-更新第 5 章和第 8 章的摘要:
-
-```bash
-python src/tools/update_summary.py 5 8
-```
-
-更新第 12 章的摘要，并指定输出目录为 `output` 文件夹:
-
-```bash
-python src/tools/update_summary.py 12 --output_dir output
-```
-
-### 6. 整理章节内容 (process_novel.py)
-
-如果你有原始的、未处理的小说章节文件（例如，繁体中文、标点不规范），可以使用 `src/tools/process_novel.py` 脚本进行批量整理。该脚本可以完成以下任务：
-
--   将繁体中文转换为简体中文。
--   将常见的半角标点符号转换为全角中文标点。
--   移除文本中的所有空格。
--   （可选）将每个句子拆分成单独的段落。
--   统计每个章节正文的汉字数量，并将其添加到输出文件名末尾的括号中。
+### 3. 整理章节内容
 
 ```bash
 python src/tools/process_novel.py <输入目录> <输出目录> -e <结束章节号> [-s <起始章节号>] [--split-sentences]
-```
-
-**参数说明:**
-
--   `<输入目录>`: 包含原始章节文件的目录路径。章节文件命名应符合格式 `第{数字}章_任意字符.txt` (例如 `第1章_初遇.txt`)。**必需参数**。
--   `<输出目录>`: 保存处理后章节文件的目录路径。脚本会自动创建此目录（如果不存在）。**必需参数**。
--   `-e <结束章节号>` 或 `--end <结束章节号>`: 需要处理的结束章节号（包含）。**必需参数**。
--   `-s <起始章节号>` 或 `--start <起始章节号>`: *(可选)* 需要处理的起始章节号（包含），默认为 `1`。
--   `--split-sentences`: *(可选)* 是否将每个句子拆分为一个段落。如果指定此参数，则启用该功能。
-
-**示例:**
-
-处理位于 `data/raw_chapters` 目录下的第 1 章到第 50 章，将结果保存到 `data/processed_chapters`，并启用句子分段：
-
-```bash
-python src/tools/process_novel.py data/raw_chapters data/processed_chapters -s 1 -e 50 --split-sentences
-```
-
-处理位于 `input` 目录下所有章节号小于等于 100 的章节（从默认第 1 章开始），保存到 `output` 目录，不进行句子分段：
-
-```bash
-python src/tools/process_novel.py input output -e 100
 ```
 
 ## 项目结构
