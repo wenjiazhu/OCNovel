@@ -113,12 +113,13 @@ class OutlineGenerator:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                outline_text = self.outline_model.generate(prompt)
-                if not outline_text:
-                    logging.error(f"生成大纲失败：模型返回空内容（第 {attempt + 1} 次尝试）")
-                    continue
-
-                outline_data = json.loads(outline_text)
+                response = self.outline_model.generate(prompt)
+                logging.debug(f"模型原始响应: {response}")  # 添加日志记录
+                try:
+                    outline_data = json.loads(response)
+                except json.JSONDecodeError as e:
+                    logging.error(f"解析模型响应失败: {e}\n响应内容: {response}")
+                    raise
                 if not isinstance(outline_data, list) or len(outline_data) != current_batch_size:
                     logging.error(f"生成的大纲格式不正确（第 {attempt + 1} 次尝试）")
                     continue

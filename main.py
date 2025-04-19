@@ -127,21 +127,19 @@ def main():
             # 处理起始章节和目标章节逻辑
             if args.target_chapter is not None:
                 logging.info(f"指定重新生成章节: {args.target_chapter}")
+                update_sync_info = False  # 目标章节不更新同步信息
+            else:
+                update_sync_info = True   # 起始章节需要更新同步信息
+                # 如果指定了起始章节，则设置当前章节索引
                 if args.start_chapter is not None:
-                    logging.warning(f"同时指定了 --start-chapter 和 --target-chapter，将优先处理 --target-chapter {args.target_chapter}。")
-                # generate_content 会处理 target_chapter 逻辑
-            elif args.start_chapter is not None:
-                if args.start_chapter > 0:
-                    # 覆盖从 progress.json 加载的进度
+                    logging.info(f"指定起始章节: {args.start_chapter}")
                     generator.current_chapter = args.start_chapter - 1
-                    logging.info(f"设置起始章节为: {args.start_chapter}")
-                else:
-                    logging.warning(f"指定的起始章节 {args.start_chapter} 无效，将从头或上次进度开始。")
             
             # 调用内容生成方法
             success = generator.generate_content(
                 target_chapter=args.target_chapter,
-                external_prompt=args.extra_prompt
+                external_prompt=args.extra_prompt,
+                update_sync_info=update_sync_info
             )
             print("内容生成成功！" if success else "内容生成失败，请查看日志文件了解详细信息。")
             
@@ -201,7 +199,7 @@ def main():
             # 2. 生成内容
             logging.info("步骤 2: 生成内容...")
             content_generator.current_chapter = start_chapter - 1  # 从当前进度的下一章开始
-            content_success = content_generator.generate_content()
+            content_success = content_generator.generate_content(update_sync_info=True)
             if not content_success:
                 print("内容生成失败，停止流程。")
                 return

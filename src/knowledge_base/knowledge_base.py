@@ -314,3 +314,33 @@ class KnowledgeBase:
             raise ValueError("所有参考文件加载失败，知识库内容为空")
             
         return self.build(combined_text, force_rebuild) 
+
+    def build_from_texts(self, texts: List[str], cache_dir: Optional[str] = None) -> None:
+        """从文本列表构建知识库
+        
+        Args:
+            texts: 文本列表，例如章节内容列表
+            cache_dir: 缓存目录，如果提供则使用该目录，否则使用默认缓存目录
+        """
+        if cache_dir:
+            old_cache_dir = self.cache_dir
+            self.cache_dir = cache_dir
+            os.makedirs(self.cache_dir, exist_ok=True)
+        
+        try:
+            # 合并所有文本，加上章节标记
+            combined_text = ""
+            for i, text in enumerate(texts, 1):
+                combined_text += f"第{i}章\n{text}\n\n"
+                
+            # 使用现有的构建方法
+            self.build(combined_text)
+            logging.info(f"从 {len(texts)} 个文本构建知识库成功")
+            
+        except Exception as e:
+            logging.error(f"从文本构建知识库时出错: {str(e)}", exc_info=True)
+            raise
+        finally:
+            # 恢复原始缓存目录
+            if cache_dir:
+                self.cache_dir = old_cache_dir 

@@ -37,7 +37,8 @@ class ConsistencyChecker:
         chapter_content: str,
         chapter_outline: Dict[str, Any],
         chapter_idx: int,
-        characters: Dict[str, Any] = None  # 保留参数但不使用
+        characters: Dict[str, Any] = None,
+        previous_scene: str = ""
     ) -> Tuple[str, bool, int]:
         """
         检查章节内容一致性，并返回检查报告和是否需要修改
@@ -47,6 +48,7 @@ class ConsistencyChecker:
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
             characters: 角色信息字典（已弃用）
+            previous_scene: 前一章的场景信息
             
         Returns:
             tuple: (检查报告, 是否需要修改, 评分)
@@ -69,7 +71,8 @@ class ConsistencyChecker:
             chapter_outline=chapter_outline,
             previous_summary=previous_summary,
             global_summary=global_summary,
-            character_info=character_info  # 传入空字符串
+            character_info=character_info,  # 传入空字符串
+            previous_scene=previous_scene  # 新增参数
         )
         
         # 调用模型进行检查
@@ -141,7 +144,8 @@ class ConsistencyChecker:
         chapter_content: str,
         chapter_outline: Dict[str, Any],
         chapter_idx: int,
-        characters: Dict[str, Any] = None
+        characters: Dict[str, Any] = None,
+        previous_scene: str = ""
     ) -> str:
         """
         确保章节内容的一致性，进行必要的检查和修正
@@ -151,6 +155,7 @@ class ConsistencyChecker:
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
             characters: 角色信息字典
+            previous_scene: 前一章的场景信息
             
         Returns:
             str: 修正后的章节内容
@@ -159,7 +164,7 @@ class ConsistencyChecker:
         for attempt in range(self.max_revision_attempts):
             # 进行一致性检查
             consistency_report, needs_revision, score = self.check_chapter_consistency(
-                chapter_content, chapter_outline, chapter_idx, characters
+                chapter_content, chapter_outline, chapter_idx, characters, previous_scene
             )
             
             # 如果分数达标或不需要修改，则跳出循环
@@ -176,7 +181,7 @@ class ConsistencyChecker:
             # 如果是最后一次尝试，再次检查但不再修改
             if attempt == self.max_revision_attempts - 1:
                 final_report, _, final_score = self.check_chapter_consistency(
-                    chapter_content, chapter_outline, chapter_idx, characters
+                    chapter_content, chapter_outline, chapter_idx, characters, previous_scene
                 )
                 logging.info(f"第 {chapter_idx + 1} 章: 完成所有修正尝试，最终分数: {final_score}")
         
@@ -296,6 +301,28 @@ class ConsistencyChecker:
         # 返回获取到的摘要（可能为空字符串）
         logging.debug(f"[{method_name}] Returning previous_summary (first 100 chars): '{previous_summary[:100]}'")
         return previous_summary
+    
+    def _get_previous_scene(self, chapter_idx: int) -> str:
+        """获取前一章的场景信息"""
+        method_name = "_get_previous_scene"
+        logging.debug(f"[{method_name}] Called for chapter_idx: {chapter_idx}")
+        previous_scene = ""
+        if chapter_idx > 0:
+            try:
+                # 获取前一章的文件名
+                prev_chapter_num = chapter_idx  # 前一章的章节号是 chapter_idx
+                prev_chapter_file = os.path.join(
+                    self.output_dir,
+                    f"第{prev_chapter_num}章_{self._clean_filename(self.chapter_outlines[prev_chapter_num - 1].title)}.txt"
+                )
+                if os.path.exists(prev_chapter_file):
+                    with open(prev_chapter_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # 提取场景信息（假设场景信息在文件开头或结尾）
+                        previous_scene = content.split("\n")[0]  # 简单示例：取第一行作为场景
+            except Exception as e:
+                logging.warning(f"[{method_name}] 获取前一章场景信息时出错: {str(e)}")
+        return previous_scene
     
     # def _get_character_info(self, characters: Dict[str, Any], chapter_outline: Dict[str, Any]) -> str:
     #     """获取角色信息"""

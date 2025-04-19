@@ -464,7 +464,8 @@ def get_consistency_check_prompt(
     chapter_outline: Dict,
     previous_summary: str = "",
     global_summary: str = "",
-    character_info: str = ""
+    character_info: str = "",
+    previous_scene: str = ""
 ) -> str:
     """生成用于检查章节一致性的提示词"""
     return f"""
@@ -476,6 +477,9 @@ def get_consistency_check_prompt(
 
 [上一章摘要]
 {previous_summary if previous_summary else "（无上一章摘要）"}
+
+[前一章场景]
+{previous_scene if previous_scene else "（无前一章场景信息）"}
 
 [当前章节大纲]
 章节号：{chapter_outline.get('chapter_number', '未知')}
@@ -500,6 +504,12 @@ def get_consistency_check_prompt(
 4. 世界观一致性：是否符合已建立的世界设定、规则和环境
 5. 逻辑完整性：情节中是否存在明显漏洞、不合理、断层或自相矛盾之处
 
+===== 新增检查项 =====
+6. 场景切换合理性：
+   - 如果当前章节的场景与前一章不同，是否有合理的过渡或铺垫
+   - 场景切换是否符合逻辑（如角色移动、时间推移等）
+   - 禁止未经过交代或铺垫就切换场景
+
 ===== 输出格式 =====
 [总体评分]: <0-100分>
 
@@ -521,6 +531,10 @@ def get_consistency_check_prompt(
 
 [逻辑完整性评分]: <0-20分>
 [逻辑完整性分析]:
+<分析内容>
+
+[场景切换合理性评分]: <0-20分>
+[场景切换合理性分析]:
 <分析内容>
 
 [总体建议]:
