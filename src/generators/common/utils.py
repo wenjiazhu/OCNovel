@@ -8,46 +8,30 @@ from opencc import OpenCC
 
 def setup_logging(log_dir: str, clear_logs: bool = False):
     """设置日志系统"""
-    # 确保日志目录存在
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "generation.log")
-    
+    root_logger = logging.getLogger()
+    # 检查是否已存在相同格式的处理器
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and handler.formatter._fmt == '%(asctime)s - %(levelname)s - %(message)s':
+            return  # 已存在，直接返回
+
     # 清理旧的日志文件
+    log_file = os.path.join(log_dir, "generation.log")
     if clear_logs and os.path.exists(log_file):
         try:
             os.remove(log_file)
-            print(f"已清理旧的日志文件: {log_file}")
         except Exception as e:
-            print(f"清理日志文件失败: {e}")
-
-    # 移除所有已存在的处理器
-    root_logger = logging.getLogger()
-    if root_logger.handlers:
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-        logging.info("已清除旧的日志处理器。")
+            logging.error(f"清理日志文件失败: {e}")
 
     # 配置根日志记录器
     root_logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    # 创建格式化器
-    formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S,%f'[:-3]
-    )
-
-    # 添加文件处理器
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5,
-        encoding='utf-8',
-        mode='a'
-    )
+    # 添加文件处理器（唯一）
+    file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    # 添加控制台处理器
+    # 添加控制台处理器（唯一）
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)

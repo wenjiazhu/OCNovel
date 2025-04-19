@@ -19,77 +19,9 @@ class NovelFinalizer:
         self.content_model = content_model
         self.knowledge_base = knowledge_base
         self.output_dir = config.output_config["output_dir"]
-        # self.characters_file = os.path.join(self.output_dir, "characters.json")  # 注释掉角色库文件路径
-        # self.characters: Dict[str, Character] = {}  # 注释掉角色库字典
         
         # 验证并创建输出目录
         validate_directory(self.output_dir)
-        # 加载角色库
-        # self._load_characters()  # 注释掉角色库加载
-
-    # def _load_characters(self):  # 注释掉角色库加载方法
-    #     """从文件加载角色库"""
-    #     characters_data = load_json_file(self.characters_file, default_value={})
-    #     if characters_data:
-    #         for name, data in characters_data.items():
-    #             try:
-    #                 char_data = {
-    #                     "name": name,
-    #                     "role": data.get("role", "未知"),
-    #                     "personality": data.get("personality", {}),
-    #                     "goals": data.get("goals", []),
-    #                     "relationships": data.get("relationships", {}),
-    #                     "development_stage": data.get("development_stage", "初始"),
-    #                     "alignment": data.get("alignment", "中立"),
-    #                     "realm": data.get("realm", "凡人"),
-    #                     "level": data.get("level", 1),
-    #                     "cultivation_method": data.get("cultivation_method", "无"),
-    #                     "magic_treasure": data.get("magic_treasure", []),
-    #                     "temperament": data.get("temperament", "平和"),
-    #                     "ability": data.get("ability", []),
-    #                     "stamina": data.get("stamina", 100),
-    #                     "sect": data.get("sect", "无门无派"),
-    #                     "position": data.get("position", "普通弟子"),
-    #                     "emotions_history": data.get("emotions_history", []),
-    #                     "states_history": data.get("states_history", []),
-    #                     "descriptions_history": data.get("descriptions_history", [])
-    #                 }
-    #                 self.characters[name] = Character(**char_data)
-    #             except Exception as e:
-    #                 logging.error(f"创建角色 '{name}' 时出错: {str(e)}")
-
-    # def _save_characters(self):  # 注释掉角色库保存方法
-    #     """保存角色库到文件"""
-    #     try:
-    #         characters_data = {}
-    #         for name, char in self.characters.items():
-    #             characters_data[name] = {
-    #                 "role": char.role,
-    #                 "personality": char.personality,
-    #                 "goals": char.goals,
-    #                 "relationships": char.relationships,
-    #                 "development_stage": char.development_stage,
-    #                 "alignment": char.alignment,
-    #                 "realm": char.realm,
-    #                 "level": char.level,
-    #                 "cultivation_method": char.cultivation_method,
-    #                 "magic_treasure": char.magic_treasure,
-    #                 "temperament": char.temperament,
-    #                 "ability": char.ability,
-    #                 "stamina": char.stamina,
-    #                 "sect": char.sect,
-    #                 "position": char.position,
-    #                 "emotions_history": char.emotions_history,
-    #                 "states_history": char.states_history,
-    #                 "descriptions_history": char.descriptions_history
-    #             }
-    #         if save_json_file(self.characters_file, characters_data):
-    #             logging.info("角色库保存成功")
-    #             return True
-    #         return False
-    #     except Exception as e:
-    #         logging.error(f"保存角色库时出错: {str(e)}")
-    #         return False
 
     def finalize_chapter(self, chapter_num: int, update_characters: bool = False, update_summary: bool = True) -> bool:
         """处理章节的定稿工作
@@ -144,12 +76,6 @@ class NovelFinalizer:
             with open(chapter_file, 'r', encoding='utf-8') as f:
                 content = f.read()
             logger.debug(f"成功读取章节 {chapter_num} 内容，长度: {len(content)}")
-
-            # Update character states (currently disabled)
-            # if update_characters:  # 注释掉角色状态更新
-            #     if not self._update_character_states(content, chapter_num):
-            #         logging.error("更新角色状态失败")
-            #         return False
             
             # Generate/update summary
             if update_summary:
@@ -166,20 +92,6 @@ class NovelFinalizer:
             # Log the full traceback for unexpected errors
             logger.error(f"处理章节 {chapter_num} 定稿时发生意外错误: {str(e)}", exc_info=True)
             return False
-
-    # 注释掉所有与角色库相关的方法
-    # def _update_character_states(self, content: str, chapter_num: int) -> bool:
-    # def _parse_new_characters(self, content: str):
-    # def _create_basic_character(self, name: str) -> Character:
-    # def _is_valid_character_name(self, name: str) -> bool:
-    # def _get_current_chapter_characters(self, chapter_num: int) -> Set[str]:
-    # def _create_character_update_prompt(self, content: str, current_characters: Set[str]) -> str:
-    # def _format_characters_for_update(self, current_characters: Set[str]) -> str:
-    # def _validate_character_update(self, update_text: str) -> bool:
-    # def _parse_character_update(self, update_text: str, chapter_num: int, current_characters: Set[str]):
-    # def _update_character_attribute(self, character_name: str, key: str, value: str, chapter_num: int):
-    # def _verify_character_consistency(self, content: str, current_characters: Set[str]) -> bool:
-    # def _correct_character_inconsistencies(self, content: str, current_characters: Set[str]):
 
     def _clean_filename(self, filename: str) -> str:
         """清理字符串，使其适合作为文件名"""

@@ -13,7 +13,8 @@ import sys
 import json
 from ..prompts import (
     get_chapter_prompt,
-    get_sync_info_prompt
+    get_sync_info_prompt,
+    get_knowledge_search_prompt
 )
 
 # Get a logger specific to this module
@@ -412,42 +413,36 @@ class ContentGenerator:
             return "（这是第一章，无前文）"
 
     def _get_references_for_chapter(self, chapter_outline: ChapterOutline) -> dict:
-        """获取章节的参考信息（从知识库）"""
+        """获取章节的参考信息（从知识库），使用优化后的检索逻辑"""
         references = {
             "plot_references": [],
             "character_references": [],
             "setting_references": []
         }
+
         try:
-            # 确保知识库已构建
-            if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
-                logger.warning("知识库未构建，尝试重新初始化...")
-                self._init_knowledge_base()
-                if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
-                    logger.error("知识库初始化失败")
-                    return references
+            # 生成检索关键词
+            search_prompt = get_knowledge_search_prompt(
+                chapter_number=chapter_outline.chapter_number,
+                chapter_title=chapter_outline.title,
+                characters_involved=chapter_outline.characters,
+                key_items=chapter_outline.key_points,  # 假设关键点可作为检索项
+                scene_location=", ".join(chapter_outline.settings),
+                chapter_role="发展",  # 可根据实际需求调整
+                chapter_purpose="推动主线",  # 可根据实际需求调整
+                foreshadowing="",  # 可根据实际需求补充
+                short_summary="",  # 可根据实际需求补充
+            )
 
-            query_text = f"{chapter_outline.title} {' '.join(chapter_outline.key_points)} {' '.join(chapter_outline.characters)}"
-            relevant_knowledge = self.knowledge_base.search(query_text)
-
+            # 调用知识库检索
+            relevant_knowledge = self.knowledge_base.search(search_prompt)
             if relevant_knowledge and isinstance(relevant_knowledge, list):
-                total_refs = len(relevant_knowledge)
-                plot_end = math.ceil(total_refs / 3)
-                char_end = math.ceil(total_refs * 2 / 3)
+                references["plot_references"] = relevant_knowledge[:3]  # 限制数量
+                references["character_references"] = relevant_knowledge[3:6]
+                references["setting_references"] = relevant_knowledge[6:9]
 
-                references["plot_references"] = relevant_knowledge[:plot_end]
-                references["character_references"] = relevant_knowledge[plot_end:char_end]
-                references["setting_references"] = relevant_knowledge[char_end:]
-                logger.debug(f"为第 {chapter_outline.chapter_number} 章获取了 {total_refs} 条参考信息。")
-            elif not relevant_knowledge:
-                 logger.debug(f"未找到第 {chapter_outline.chapter_number} 章的参考信息。")
-            else:
-                 logger.warning(f"知识库返回的参考信息格式不正确 (非列表): {type(relevant_knowledge)}")
-
-        except AttributeError:
-             logger.error("知识库对象没有 'search' 方法。请确保传入了正确的 KnowledgeBase 实例。")
         except Exception as e:
-            logger.error(f"为第 {chapter_outline.chapter_number} 章获取参考信息时出错: {str(e)}", exc_info=True)
+            logging.error(f"优化检索章节参考信息时出错: {str(e)}")
 
         return references
 

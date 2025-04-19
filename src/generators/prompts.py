@@ -31,7 +31,7 @@ def get_outline_prompt(
     existing_context: str = "",
     extra_prompt: Optional[str] = None
 ) -> str:
-    """生成用于创建小说大纲的提示词。"""
+    """生成用于创建小说大纲的提示词，应用知识库内容过滤"""
     extra_requirements = f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}{chr(10)}" if extra_prompt else ""
 
     # 获取额外指导内容
@@ -69,6 +69,8 @@ def get_outline_prompt(
     # 从知识库中获取参考文件内容
     reference_files = config.novel_config.get("knowledge_base_config", {}).get("reference_files", [])
     reference_content = ""
+    raw_references = []  # 存储原始参考内容，用于过滤
+
     for file_path in reference_files:
         try:
             # 检查文件是否存在
@@ -78,20 +80,30 @@ def get_outline_prompt(
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                reference_content += f"{chr(10)}[参考文件: {os.path.basename(file_path)}]{chr(10)}{content[:1000]}...{chr(10)}"
+                raw_references.append(f"[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...")
         except UnicodeDecodeError:
             # 尝试其他编码
             try:
                 with open(file_path, 'r', encoding='gbk') as f:
                     content = f.read()
-                    reference_content += f"{chr(10)}[参考文件: {os.path.basename(file_path)}]{chr(10)}{content[:1000]}...{chr(10)}"
+                    raw_references.append(f"[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...")
             except Exception as e:
                 logging.warning(f"读取参考文件 {file_path} 时出错（尝试GBK编码后）: {str(e)}")
         except Exception as e:
             logging.warning(f"读取参考文件 {file_path} 时出错: {str(e)}")
 
-    # 如果参考内容为空，添加提示
-    if not reference_content:
+    # 应用知识库内容过滤
+    if raw_references:
+        chapter_info = {
+            "novel_type": novel_type,
+            "theme": theme,
+            "current_chapters": f"{current_start_chapter_num}-{current_start_chapter_num + current_batch_size - 1}"
+        }
+        filter_prompt = get_knowledge_filter_prompt(raw_references, chapter_info)
+        # 假设通过模型生成过滤后的内容（实际需调用模型）
+        filtered_content = f"（已过滤知识库内容）\n{filter_prompt}"  # 实际替换为模型调用
+        reference_content = filtered_content
+    else:
         reference_content = f"{chr(10)}[知识库参考内容]{chr(10)}暂无参考内容，将仅基于设定生成大纲。{chr(10)}"
 
     prompt = f"""{existing_context}
@@ -191,39 +203,20 @@ def get_chapter_prompt(
     extra_prompt: str = "",
     context_info: str = ""
 ) -> str:
-    """生成用于创建章节内容的提示词。"""
-    
-    # 读取同步信息
-    sync_info = {}
-    sync_info_file = os.path.join("data", "cache", "sync_info.json")
-    if os.path.exists(sync_info_file):
-        try:
-            with open(sync_info_file, 'r', encoding='utf-8') as f:
-                sync_info = json.load(f)
-        except Exception as e:
-            logging.warning(f"读取同步信息时出错: {str(e)}")
-    
-    # 格式化同步信息
-    world_background = "\n".join([f"- {item}" for item in sync_info.get("世界观", {}).get("世界背景", [])])
-    factions = "\n".join([f"- {item}" for item in sync_info.get("世界观", {}).get("阵营势力", [])])
-    character_settings = "\n".join([f"- {item}" for item in sync_info.get("人物设定", {}).get("人物设定", [])])
-    character_relations = "\n".join([f"- {item}" for item in sync_info.get("人物设定", {}).get("人物关系", [])])
-    other_settings = "\n".join([f"- {item}" for item in sync_info.get("其他设定", [])])
-    story_summary = "\n".join([f"- {item}" for item in sync_info.get("前情提要", [])])
-
-    # 获取章节信息
-    novel_number = outline.get('chapter_number', '未知')
+    """生成用于创建章节内容的提示词，根据章节号选择模板并应用知识库内容过滤。"""
+    # 获取基本信息
+    novel_number = outline.get('chapter_number', 0)
+    is_first_chapter = novel_number == 1
     chapter_title = outline.get('title', '未知')
-    key_points = outline.get('key_points', [])
-    characters = outline.get('characters', [])
-    settings = outline.get('settings', [])
-    conflicts = outline.get('conflicts', [])
     
-    # 格式化章节信息
-    key_points_display = "\n".join([f"- {point}" for point in key_points])
-    characters_display = "\n".join([f"- {character}" for character in characters])
-    settings_display = "\n".join([f"- {setting}" for setting in settings])
-    conflicts_display = "\n".join([f"- {conflict}" for conflict in conflicts])
+    # 处理关键情节点 - 改为分行展示以增强可读性和重要性
+    key_points_list = outline.get('key_points', [])
+    key_points_display = chr(10).join([f"- {point}" for point in key_points_list])
+    
+    # 其他信息
+    characters = ', '.join(outline.get('characters', []))
+    settings = ', '.join(outline.get('settings', []))
+    conflicts = ', '.join(outline.get('conflicts', []))
     
     # 获取额外指导内容
     extra_guidance = config.novel_config.get("extra_guidance", {})
@@ -231,64 +224,13 @@ def get_chapter_prompt(
     content_rules = extra_guidance.get("content_rules", {})
     chapter_structure = extra_guidance.get("chapter_structure", {})
 
-    prompt = f"""请根据以下信息创作小说第 {novel_number} 章《{chapter_title}》：
+    # 从 config.json 中获取 novel_config 的内容
+    novel_type = config.novel_config.get("type", "玄幻")
+    theme = config.novel_config.get("theme", "逆袭")
+    style = config.novel_config.get("style", "严肃")
 
-[同步信息]
-世界背景：
-{world_background}
-
-阵营势力：
-{factions}
-
-人物设定：
-{character_settings}
-
-人物关系：
-{character_relations}
-
-其他设定：
-{other_settings}
-
-前情提要：
-{story_summary}
-
-[本章大纲]
-关键情节点：
-{key_points_display}
-
-出场角色：
-{characters_display}
-
-场景设定：
-{settings_display}
-
-核心冲突：
-{conflicts_display}
-
-[上下文信息]
-{context_info}
-
-[参考信息]
-剧情参考：
-{chr(10).join(f"- {ref}" for ref in references.get("plot_references", []))}
-
-角色参考：
-{chr(10).join(f"- {ref}" for ref in references.get("character_references", []))}
-
-场景参考：
-{chr(10).join(f"- {ref}" for ref in references.get("setting_references", []))}
-
-[写作要求]
-1. 严格遵循本章大纲的关键情节点、角色、场景和冲突进行创作
-2. 重要：必须与前一章内容自然衔接，保持情节、场景和人物行为的连贯性
-3. 合理运用同步信息中的设定，保持世界观和人物塑造的一致性
-4. 章节字数控制在 {config.novel_config.get("chapter_length", 2500)} 字左右
-5. 保持 {config.novel_config.get("style", "默认")} 的写作风格
-6. 特别注意：
-   - 如果场景发生变化，必须合理描述场景转换过程
-   - 人物的心理和行为变化要有合理铺垫
-   - 确保本章开头与前一章结尾的情节和氛围自然过渡
-
+    # 格式化额外指导内容
+    extra_guidance_text = f"""
 [写作风格指导]
 节奏控制：{writing_style.get('pacing', '')}
 描写要求：{writing_style.get('description', '')}
@@ -306,12 +248,206 @@ def get_chapter_prompt(
 开篇方式：{chapter_structure.get('opening', '')}
 发展过程：{chapter_structure.get('development', '')}
 高潮设计：{chapter_structure.get('climax', '')}
-结尾处理：{chapter_structure.get('ending', '')}"""
+结尾处理：{chapter_structure.get('ending', '')}
+"""
+    
+    # 添加系统角色设定
+    system_prompt = """你具有极强的逆向思维，熟知起点中文网、番茄中文网、七猫小说网、晋江文学城的风格与爽文套路，经常提出打破他人认知的故事创意。你的思考过程应该是原始的、有机的和自然的，捕捉真实的人类思维流程，更像是一个意识流。"""
+    
+    # 处理知识库参考内容 - 应用知识库内容过滤
+    reference_files = config.novel_config.get("knowledge_base_config", {}).get("reference_files", [])
+    raw_references = []
 
+    # 读取参考文件内容
+    for file_path in reference_files:
+        try:
+            if not os.path.exists(file_path):
+                continue
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                raw_references.append(f"[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...")
+        except UnicodeDecodeError:
+            try:
+                with open(file_path, 'r', encoding='gbk') as f:
+                    content = f.read()
+                    raw_references.append(f"[参考文件: {os.path.basename(file_path)}]\n{content[:1000]}...")
+            except Exception as e:
+                logging.warning(f"读取参考文件 {file_path} 时出错（尝试GBK编码后）: {str(e)}")
+        except Exception as e:
+            logging.warning(f"读取参考文件 {file_path} 时出错: {str(e)}")
+
+    # 应用知识库内容过滤
+    filtered_reference_content = ""
+    if raw_references:
+        chapter_info = {
+            "chapter_number": novel_number,
+            "title": chapter_title,
+            "key_points": key_points_list,
+            "characters": outline.get('characters', []),
+            "is_first_chapter": is_first_chapter
+        }
+        
+        # 获取过滤提示词
+        filter_prompt = get_knowledge_filter_prompt(raw_references, chapter_info)
+        
+        # 实际应用中需要调用模型生成过滤后的内容
+        # filtered_content = content_model.generate(filter_prompt)
+        # 临时使用，实际使用时替换为模型调用结果
+        filtered_reference_content = f"[过滤后的知识库参考内容]\n{filter_prompt}"
+    else:
+        filtered_reference_content = "\n[知识库参考内容]\n暂无参考内容，将仅基于设定生成章节。\n"
+    
+    # 根据章节号选择提示词模板
+    if is_first_chapter:
+        # 第一章使用 first_chapter_draft_prompt
+        base_prompt = f"""
+{system_prompt}
+
+即将创作：第 {novel_number} 章《{chapter_title}》
+本章定位：开篇章节
+核心作用：引入主角和世界观
+悬念密度：中等
+伏笔操作：埋设初始伏笔
+认知颠覆：★☆☆☆☆
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
+
+{extra_guidance_text}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
+
+可用元素：
+- 核心人物：{characters}
+- 关键场景：{settings}
+- 核心冲突：{conflicts}
+
+[知识库参考内容]
+{filtered_reference_content}
+
+[参考信息]
+情节参考：
+{chr(10).join(references['plot_references'])}
+
+角色参考：
+{chr(10).join(references['character_references'])}
+
+场景参考：
+{chr(10).join(references['setting_references'])}
+
+完成第 {novel_number} 章的正文，至少设计下方2个或以上具有动态张力的场景：
+1. 对话场景：
+   - 潜台词冲突（表面谈论A，实际博弈B）
+   - 权力关系变化（通过非对称对话长度体现）
+
+2. 动作场景：
+   - 环境交互细节（至少3个感官描写）
+   - 节奏控制（短句加速+比喻减速）
+   - 动作揭示人物隐藏特质
+
+3. 心理场景：
+   - 认知失调的具体表现（行为矛盾）
+   - 隐喻系统的运用（连接世界观符号）
+   - 决策前的价值天平描写
+
+4. 环境场景：
+   - 空间透视变化（宏观→微观→异常焦点）
+   - 非常规感官组合（如"听见阳光的重量"）
+   - 动态环境反映心理（环境与人物心理对应）
+
+[写作风格]
+请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
+尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
+步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
+简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
+"""
+    else:
+        # 后续章节使用标准提示词
+        base_prompt = f"""
+{system_prompt}
+
+请根据以下章节大纲和参考信息，创作小说章节内容。
+
+[章节大纲]
+章节号: {novel_number}
+标题: {chapter_title}
+
+[小说设定]
+类型: {novel_type}
+主题: {theme}
+风格: {style}
+
+{extra_guidance_text}
+
+【重要】本章必须包含的关键情节点：
+{key_points_display}
+
+涉及角色: {characters}
+场景设定: {settings}
+核心冲突: {conflicts}
+
+[知识库参考内容]
+{filtered_reference_content}
+
+[参考信息]
+情节参考：
+{chr(10).join(references['plot_references'])}
+
+角色参考：
+{chr(10).join(references['character_references'])}
+
+场景参考：
+{chr(10).join(references['setting_references'])}
+
+[写作风格]
+请专注于情节推进、人物刻画和场景描写，确保内容引人入胜，尽量使文字的AIGC值低于50%。
+尽量减少乃至避免以下内容：主角的内心OS、配角的心理描写、作者的评论或议论。
+步步为营的成长线（人物境界只能单向提升、从低到高）、伏笔与填坑（如"神秘法宝的隐藏作用"）、多视角冲突（如"门派内斗""跨界追杀"）。
+简练白描文风、重复句式强化节奏（如"法宝祭出，金光一闪"）、画面感强的场景描写（如"竹海如刃，火焚天地"）、高中生都能看懂的语句。
+"""
+
+    # 添加格式要求（两种模板都需要）
+    base_prompt += f"""
+[格式要求]
+1. 仅返回章节正文文本；
+2. 不使用分章节小标题；
+3. 长短句交错，增强语言节奏感；
+4. 不要使用markdown格式;
+5. 仅输出简体中文和中文标点符号，不要使用*号、#号、空格等非常规文本字符；
+6. 避免在章节结尾使用 '...才刚刚开始' 或类似的陈词滥调。
+"""
+
+    # 添加额外要求
     if extra_prompt:
-        prompt += f"\n\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
-    return prompt
+    # 添加上下文信息
+    if context_info:
+        base_prompt += f"{chr(10)}{chr(10)}[上下文信息]{chr(10)}{context_info}"
+
+    # 添加连贯性要求（非第一章才需要）
+    if not is_first_chapter:
+        base_prompt += f"""
+[连贯性要求]
+1. 请确保本章情节与上一章摘要中描述的情节有明确的连接
+2. 章节开头应自然承接上一章的结尾，避免跳跃感
+3. 章节结尾应为下一章大纲中的情节埋下伏笔
+4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
+5. 时间线和场景转换要清晰流畅
+"""
+
+    # 最终检查部分（两种模板都需要）
+    base_prompt += f"""
+[重要·最终检查]
+1. 检查你的章节内容是否明确包含了所有关键情节点
+2. 检查所有指定的角色是否都出现在了章节中
+3. 检查你描述的场景是否与场景设定一致
+4. 确保核心冲突被合理地展开和刻画
+"""
+    return base_prompt
 
 
 def get_summary_prompt(
@@ -593,55 +729,34 @@ def get_knowledge_search_prompt(
     user_guidance: str = "",
     time_constraint: str = ""
 ) -> str:
-    """生成用于知识库检索的提示词"""
-    return f"""请基于以下当前写作需求，生成合适的知识库检索关键词：
+    """生成用于知识库检索的提示词，过滤低相关性内容"""
+    # 生成关键词组合逻辑
+    keywords = []
     
-章节元数据：
-- 准备创作：第{chapter_number}章
-- 章节主题：{chapter_title}
-- 核心人物：{', '.join(characters_involved)}
-- 关键道具：{', '.join(key_items)}
-- 场景位置：{scene_location}
+    # 1. 优先使用用户指导中的术语
+    if user_guidance:
+        keywords.extend(user_guidance.split())
     
-写作目标：
-- 本章定位：{chapter_role}
-- 核心作用：{chapter_purpose}
-- 伏笔操作：{foreshadowing}
+    # 2. 添加章节核心要素
+    keywords.extend([f"章节{chapter_number}", chapter_title])
+    keywords.extend(characters_involved)
+    keywords.extend(key_items)
+    keywords.extend([scene_location])
     
-当前摘要：
-{short_summary}
+    # 3. 补充扩展概念（如伏笔、章节作用等）
+    keywords.extend([chapter_role, chapter_purpose, foreshadowing])
     
-- 用户指导：
-{user_guidance}
+    # 去重并过滤抽象词汇
+    keywords = list(set([k for k in keywords if k and len(k) > 1]))
     
-- 核心人物(可能未指定)：{', '.join(characters_involved)}
-- 关键道具(可能未指定)：{', '.join(key_items)}
-- 空间坐标(可能未指定)：{scene_location}
-- 时间压力(可能未指定)：{time_constraint}
+    # 生成检索词组合
+    search_terms = []
+    for i in range(0, len(keywords), 2):
+        group = keywords[i:i+2]
+        if group:
+            search_terms.append(".".join(group))
     
-生成规则：
-    
-1.关键词组合逻辑：
--类型1：[实体]+[属性]（如"量子计算机 故障日志"）
--类型2：[事件]+[后果]（如"实验室爆炸 辐射泄漏"）
--类型3：[地点]+[特征]（如"地下城 氧气循环系统"）
-    
-2.优先级：
--首选用户指导中明确提及的术语
--次选当前章节涉及的核心道具/地点
--最后补充可能关联的扩展概念
-    
-3.过滤机制：
--排除抽象程度高于"中级"的概念
--排除与前3章重复率超60%的词汇
-    
-请生成3-5组检索词，按优先级降序排列。
-格式：每组用"."连接2-3个关键词，每组占一行
-    
-示例：
-科技公司.数据泄露
-地下实验室.基因编辑.禁忌实验
-"""
+    return "\n".join(search_terms[:5])  # 返回最多5组检索词
 
 
 # =============== 12. 知识库内容过滤提示词 ===================
@@ -649,49 +764,43 @@ def get_knowledge_filter_prompt(
     retrieved_texts: List[str],
     chapter_info: Dict
 ) -> str:
-    """生成用于过滤知识库内容的提示词"""
-    return f"""对知识库内容进行三级过滤：
-    
-待过滤内容：
-{chr(10).join(retrieved_texts)}
-    
-当前叙事需求：
+    """生成用于过滤知识库内容的提示词，增强过滤逻辑"""
+    return f"""
+请根据当前章节需求过滤知识库内容，严格按以下规则执行：
+
+[当前章节需求]
 {json.dumps(chapter_info, ensure_ascii=False, indent=2)}
-    
-过滤流程：
-    
-冲突检测：
-    
-删除与已有摘要重复度＞40%的内容
-    
-标记存在世界观矛盾的内容（使用▲前缀）
-    
-价值评估：
-    
-关键价值点（❗标记）：
-· 提供新的角色关系可能性
-· 包含可转化的隐喻素材
-· 存在至少2个可延伸的细节锚点
-    
-次级价值点（·标记）：
-· 补充环境细节
-· 提供技术/流程描述
-    
-结构重组：
-    
-按"情节燃料/人物维度/世界碎片/叙事技法"分类
-    
-为每个分类添加适用场景提示（如"可用于XX类型伏笔"）
-    
-输出格式：
+
+[待过滤内容]
+{chr(10).join([f"--- 片段 {i+1} ---{chr(10)}{text[:200]}..." for i, text in enumerate(retrieved_texts)])}
+
+===== 过滤规则 =====
+1. **冲突检测**：
+   - 删除与已有世界观/角色设定矛盾的内容（标记为 ▲CONFLICT）。
+   - 删除重复度＞40%的内容（标记为 ▲DUPLICATE）。
+
+2. **价值评估**：
+   - 标记高价值内容（❗）：
+     - 提供新角色关系或剧情转折可能性的内容。
+     - 包含可扩展的细节（如场景描写、技术设定）。
+   - 标记低价值内容（·）：
+     - 泛泛而谈的描述或无具体情节的内容。
+
+3. **分类输出**：
+   - 按以下分类整理内容，并标注适用场景：
+     - 情节燃料：推动主线或支线发展的内容。
+     - 人物维度：深化角色形象或关系的内容。
+     - 世界碎片：补充世界观细节的内容。
+
+[输出格式]
 [分类名称]→[适用场景]
-❗/· [内容片段] （▲冲突提示）
+❗/· [内容片段]（▲冲突提示）
 ...
-    
+
 示例：
-[情节燃料]→可用于时间压力类悬念
-❗ 地下氧气系统剩余23%储量（可制造生存危机）
-▲ 与第三章提到的"永久生态循环系统"存在设定冲突
+[情节燃料]→可用于第{chapter_info.get('chapter_number', 'N')}章高潮
+❗ "主角发现密室中的古老地图，暗示下个副本位置"（▲与第三章地图描述冲突）
+· "村民谈论最近的异常天气"（可作背景铺垫）
 """
 
 def get_logic_check_prompt(
