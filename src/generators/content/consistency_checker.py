@@ -47,8 +47,8 @@ class ConsistencyChecker:
             chapter_content: 待检查章节内容
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
-            characters: 角色信息字典（已弃用）
-            previous_scene: 前一章的场景信息
+            characters: 角色信息字典 (如果需要，应由调用者处理并传入，这里暂时忽略)
+            previous_scene: 前一章的场景信息 (由调用者传入)
             
         Returns:
             tuple: (检查报告, 是否需要修改, 评分)
@@ -61,18 +61,17 @@ class ConsistencyChecker:
         # 获取上一章摘要
         previous_summary = self._get_previous_summary(chapter_idx)
         
-        # 注释掉角色信息获取
-        # character_info = self._get_character_info(characters, chapter_outline)
-        character_info = ""  # 使用空字符串替代
+        # 角色信息获取已注释掉，使用空字符串
+        character_info = ""
         
-        # 生成一致性检查的提示词
+        # 生成一致性检查的提示词 - 使用传入的 previous_scene
         prompt = prompts.get_consistency_check_prompt(
             chapter_content=chapter_content,
             chapter_outline=chapter_outline,
             previous_summary=previous_summary,
             global_summary=global_summary,
-            character_info=character_info,  # 传入空字符串
-            previous_scene=previous_scene  # 新增参数
+            character_info=character_info,
+            previous_scene=previous_scene # <--- 使用传入的参数
         )
         
         # 调用模型进行检查
@@ -154,15 +153,15 @@ class ConsistencyChecker:
             chapter_content: 章节内容
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
-            characters: 角色信息字典
-            previous_scene: 前一章的场景信息
+            characters: 角色信息字典 (暂时忽略)
+            previous_scene: 前一章的场景信息 (传递给 check_chapter_consistency)
             
         Returns:
             str: 修正后的章节内容
         """
         # 进行一致性检查和修正的循环
         for attempt in range(self.max_revision_attempts):
-            # 进行一致性检查
+            # 进行一致性检查 - 传递 previous_scene
             consistency_report, needs_revision, score = self.check_chapter_consistency(
                 chapter_content, chapter_outline, chapter_idx, characters, previous_scene
             )
@@ -302,50 +301,8 @@ class ConsistencyChecker:
         logging.debug(f"[{method_name}] Returning previous_summary (first 100 chars): '{previous_summary[:100]}'")
         return previous_summary
     
-    def _get_previous_scene(self, chapter_idx: int) -> str:
-        """获取前一章的场景信息"""
-        method_name = "_get_previous_scene"
-        logging.debug(f"[{method_name}] Called for chapter_idx: {chapter_idx}")
-        previous_scene = ""
-        if chapter_idx > 0:
-            try:
-                # 获取前一章的文件名
-                prev_chapter_num = chapter_idx  # 前一章的章节号是 chapter_idx
-                prev_chapter_file = os.path.join(
-                    self.output_dir,
-                    f"第{prev_chapter_num}章_{self._clean_filename(self.chapter_outlines[prev_chapter_num - 1].title)}.txt"
-                )
-                if os.path.exists(prev_chapter_file):
-                    with open(prev_chapter_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        # 提取场景信息（假设场景信息在文件开头或结尾）
-                        previous_scene = content.split("\n")[0]  # 简单示例：取第一行作为场景
-            except Exception as e:
-                logging.warning(f"[{method_name}] 获取前一章场景信息时出错: {str(e)}")
-        return previous_scene
+    # def _get_previous_scene(self, chapter_idx: int) -> str:
+    #     ...
     
     # def _get_character_info(self, characters: Dict[str, Any], chapter_outline: Dict[str, Any]) -> str:
-    #     """获取角色信息"""
-    #     if not characters:
-    #         logging.warning("角色信息为空，跳过角色一致性检查。")
-    #         return "（无角色信息）"
-    #     
-    #     character_info = ""
-    #     for name, char in characters.items():
-    #         # 只包含与当前章节相关的角色
-    #         if name in chapter_outline.get('characters', []):
-    #             # 使用 getattr 安全地获取角色属性，避免 KeyError
-    #             role = getattr(char, 'role', '未知')
-    #             development_stage = getattr(char, 'development_stage', '未知')
-    #             temperament = getattr(char, 'temperament', '未知')
-    #             realm = getattr(char, 'realm', '未知')
-    #             sect = getattr(char, 'sect', '未知')
-    #             
-    #             character_info += f"{name}: {role}, {development_stage}\n"
-    #             character_info += f"- 性格: {temperament}, 境界: {realm}, 门派: {sect}\n"
-    #     
-    #     if not character_info:
-    #         logging.warning("当前章节未涉及任何已知角色，跳过角色一致性检查。")
-    #         return "（无相关角色信息）"
-    #     
-    #     return character_info 
+    #     ... 

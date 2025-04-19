@@ -100,6 +100,11 @@ def main():
         )
         logging.info("知识库初始化完成")
         
+        # --- 实例化 Finalizer ---
+        # Instantiate Finalizer early as ContentGenerator might need it
+        finalizer = NovelFinalizer(config, content_model, knowledge_base)
+        logging.info("NovelFinalizer 初始化完成")
+        
         # 命令处理
         if args.command == 'outline':
             logging.info("--- 执行大纲生成任务 ---")
@@ -122,102 +127,134 @@ def main():
             
         elif args.command == 'content':
             logging.info("--- 执行内容生成任务 ---")
-            generator = ContentGenerator(config, content_model, knowledge_base)
+            # Pass finalizer instance to ContentGenerator
+            generator = ContentGenerator(config, content_model, knowledge_base, finalizer=finalizer)
             
             # 处理起始章节和目标章节逻辑
+            target_chapter_to_generate = None
             if args.target_chapter is not None:
                 logging.info(f"指定重新生成章节: {args.target_chapter}")
-                update_sync_info = False  # 目标章节不更新同步信息
+                target_chapter_to_generate = args.target_chapter
             else:
-                update_sync_info = True   # 起始章节需要更新同步信息
                 # 如果指定了起始章节，则设置当前章节索引
                 if args.start_chapter is not None:
-                    logging.info(f"指定起始章节: {args.start_chapter}")
-                    generator.current_chapter = args.start_chapter - 1
+                    # Validate start_chapter against loaded outline length if possible?
+                    # For now, trust the input or let ContentGenerator handle invalid index later.
+                    if args.start_chapter > 0 :
+                       logging.info(f"指定起始章节: {args.start_chapter}")
+                       generator.current_chapter = args.start_chapter - 1
+                       # Save the potentially updated starting point?
+                       # generator._save_progress() # Optional: save if you want '--start-chapter' to persist
+                    else:
+                       logging.warning(f"指定的起始章节 ({args.start_chapter}) 无效，将从上次进度开始。")
+                else:
+                    # No target, no start chapter -> generate remaining from current progress
+                    logging.info(f"未指定目标或起始章节，将从进度文件记录的下一章 ({generator.current_chapter + 1}) 开始生成。")
             
-            # 调用内容生成方法
+            # 调用内容生成方法 (removed update_sync_info)
             success = generator.generate_content(
-                target_chapter=args.target_chapter,
-                external_prompt=args.extra_prompt,
-                update_sync_info=update_sync_info
+                target_chapter=target_chapter_to_generate,
+                external_prompt=args.extra_prompt
             )
             print("内容生成成功！" if success else "内容生成失败，请查看日志文件了解详细信息。")
             
         elif args.command == 'finalize':
+            # Finalize command remains for manually finalizing a chapter if needed
             logging.info("--- 执行章节定稿任务 ---")
-            finalizer = NovelFinalizer(config, content_model, knowledge_base)
+            # Finalizer is already instantiated
             success = finalizer.finalize_chapter(args.chapter)
             print("章节定稿处理成功！" if success else "章节定稿处理失败，请查看日志文件了解详细信息。")
             
         elif args.command == 'auto':
+            # 重新初始化日志系统，并清理旧日志
+            setup_logging(config.log_config["log_dir"], clear_logs=True)
             logging.info("--- 执行自动生成流程 ---")
             # 自动流程需要实例化所有生成器
             outline_generator = OutlineGenerator(config, outline_model, knowledge_base)
-            content_generator = ContentGenerator(config, content_model, knowledge_base)
-            finalizer = NovelFinalizer(config, content_model, knowledge_base)
+            # Pass finalizer instance to ContentGenerator
+            content_generator = ContentGenerator(config, content_model, knowledge_base, finalizer=finalizer)
+            # finalizer is already instantiated
             
-            # 从progress.json获取当前章节进度
-            progress_file = os.path.join(config.output_config["output_dir"], "progress.json")
-            if os.path.exists(progress_file):
-                with open(progress_file, 'r', encoding='utf-8') as f:
-                    progress_data = json.load(f)
-                    start_chapter = progress_data.get("current_chapter", 0) + 1
-            else:
-                start_chapter = 1
+            # 从 summary.json 获取当前章节进度
+            summary_file = os.path.join(config.output_config["output_dir"], "summary.json")
+            start_chapter_index = 0  # Default to 0 (start from chapter 1)
+            if os.path.exists(summary_file):
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summary_data = json.load(f)
+                        # 获取最大的章节号作为当前进度
+                        chapter_numbers = [int(k) for k in summary_data.keys() if k.isdigit()]
+                        start_chapter_index = max(chapter_numbers) if chapter_numbers else 0
+                except (json.JSONDecodeError, ValueError) as e:
+                    logging.warning(f"读取或解析摘要文件 {summary_file} 失败: {e}. 将从头开始。")
+                    start_chapter_index = 0  # Reset on error
+            
+            content_generator.current_chapter = start_chapter_index # Set generator's start point
+            actual_start_chapter_num = start_chapter_index + 1
             
             # 从config.json获取目标章节数
             end_chapter = config.novel_config.get("target_chapters")
-            if not end_chapter:
-                logging.error("配置文件中未找到目标章节数设置")
+            if not end_chapter or not isinstance(end_chapter, int) or end_chapter <= 0:
+                logging.error("配置文件中未找到有效的目标章节数设置 (target_chapters)")
                 return
             
-            logging.info(f"自动生成范围：第 {start_chapter} 章到第 {end_chapter} 章")
+            logging.info(f"自动生成范围：从第 {actual_start_chapter_num} 章开始，目标共 {end_chapter} 章")
             
             # 1. 检查并生成大纲
-            logging.info("步骤 1: 检查大纲状态...")
+            logging.info("步骤 1: 检查并生成大纲...")
+            outline_generator._load_outline() # Ensure outline is loaded
             current_outline_count = len(outline_generator.chapter_outlines)
-            
+
             if current_outline_count < end_chapter:
-                # 只生成缺失的章节大纲
-                logging.info(f"当前大纲章节数 ({current_outline_count}) 小于目标章节数 ({end_chapter})，将生成缺失的章节大纲...")
+                logging.info(f"当前大纲章节数 ({current_outline_count}) 小于目标章节数 ({end_chapter})，将生成缺失的大纲...")
                 outline_success = outline_generator.generate_outline(
                     novel_type=config.novel_config.get("type"),
                     theme=config.novel_config.get("theme"),
                     style=config.novel_config.get("style"),
-                    mode='replace',
-                    replace_range=(current_outline_count + 1, end_chapter),
+                    mode='append', # Use append mode more reliably
+                    # replace_range=(current_outline_count + 1, end_chapter), # replace_range might be less robust
+                    num_chapters=end_chapter - current_outline_count, # Specify number of chapters to add
                     extra_prompt=args.extra_prompt
                 )
                 if not outline_success:
                     print("大纲生成失败，停止流程。")
                     return
                 print("缺失章节大纲生成成功！")
+                # Reload outline in content_generator after modification
+                # content_generator._load_outline() # Moved outside
             else:
                 logging.info(f"大纲章节数充足（当前：{current_outline_count}，目标：{end_chapter}），无需生成新大纲。")
-                outline_success = True
-            
-            # 2. 生成内容
-            logging.info("步骤 2: 生成内容...")
-            content_generator.current_chapter = start_chapter - 1  # 从当前进度的下一章开始
-            content_success = content_generator.generate_content(update_sync_info=True)
-            if not content_success:
-                print("内容生成失败，停止流程。")
-                return
-            print("内容生成成功！")
-            
-            # 3. 处理定稿
-            logging.info("步骤 3: 处理定稿...")
-            finalize_success = True
-            for chapter_num in range(start_chapter, end_chapter + 1):
-                logging.info(f"处理第 {chapter_num} 章定稿...")
-                if not finalizer.finalize_chapter(chapter_num):
-                    print(f"第 {chapter_num} 章定稿处理失败。")
-                    finalize_success = False
-                    break
-            if finalize_success:
-                print("自动生成流程全部完成！")
+
+            # Ensure content_generator always loads the outline before proceeding
+            content_generator._load_outline()
+
+            # Check if start chapter is already beyond target
+            if actual_start_chapter_num > end_chapter:
+                 logging.info(f"起始章节 ({actual_start_chapter_num}) 已超过目标章节 ({end_chapter})，无需生成内容。")
+                 content_success = True # Nothing to do, considered success
             else:
-                print("自动生成流程中断，请查看日志文件了解详细信息。")
+                 # 2. 生成内容 (ContentGenerator now handles finalization internally)
+                 logging.info(f"步骤 2: 生成内容 (包含定稿)，从第 {actual_start_chapter_num} 章开始...")
+                 # The generate_content call will handle chapters from generator.current_chapter up to the end of the outline
+                 # We rely on the loaded outline length to determine the end point.
+                 # We need to ensure the outline actually covers up to end_chapter
+                 # Now that content_generator._load_outline() is guaranteed to run, this check should be correct
+                 if len(content_generator.chapter_outlines) < end_chapter:
+                      logging.error(f"错误：大纲加载后章节数 ({len(content_generator.chapter_outlines)}) 仍小于目标章节数 ({end_chapter})。")
+                      return
+
+                 # Call generate_content without target_chapter to process remaining chapters from current_chapter
+                 content_success = content_generator.generate_content(
+                      external_prompt=args.extra_prompt
+                      # Removed update_sync_info
+                 )
+
+                 if not content_success:
+                     print("内容生成或定稿过程中失败，停止流程。")
+                     return
+                 print("内容生成及定稿成功！")
+
+            print("自动生成流程全部完成！")
             
         else:
             parser.print_help()

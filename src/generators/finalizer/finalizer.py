@@ -2,10 +2,16 @@ import os
 import logging
 import re
 import string
+import random
 from typing import Optional, Set, Dict, List
-from opencc import OpenCC
-from ..common.data_structures import Character, ChapterOutline
+# from opencc import OpenCC # Keep if used elsewhere, otherwise remove
+from ..common.data_structures import Character, ChapterOutline # Keep if Character is used later
 from ..common.utils import load_json_file, save_json_file, clean_text, validate_directory
+# --- Import the correct prompt function ---
+from .. import prompts # Import the prompts module
+
+# Get logger
+logger = logging.getLogger(__name__)
 
 class NovelFinalizer:
     def __init__(self, config, content_model, knowledge_base):
@@ -85,7 +91,7 @@ class NovelFinalizer:
     #         logging.error(f"保存角色库时出错: {str(e)}")
     #         return False
 
-    def finalize_chapter(self, chapter_num: int, update_characters: bool = True, update_summary: bool = True) -> bool:
+    def finalize_chapter(self, chapter_num: int, update_characters: bool = False, update_summary: bool = True) -> bool:
         """处理章节的定稿工作
         
         Args:
@@ -96,33 +102,69 @@ class NovelFinalizer:
         Returns:
             bool: 处理是否成功
         """
+        logger.info(f"开始定稿第 {chapter_num} 章...")
         try:
-            # 读取章节内容
-            chapter_file = os.path.join(self.output_dir, f"chapter_{chapter_num}.txt")
-            if not os.path.exists(chapter_file):
-                logging.error(f"章节文件不存在: {chapter_file}")
+            # Load outline to get the title for the filename
+            outline_file = os.path.join(self.output_dir, "outline.json")
+            if not os.path.exists(outline_file):
+                logger.error(f"无法找到大纲文件: {outline_file}")
                 return False
-                
+
+            outline_data = load_json_file(outline_file, default_value={})
+            # Handle both dict {chapters: []} and list [] formats
+            chapters_list = []
+            if isinstance(outline_data, dict) and "chapters" in outline_data and isinstance(outline_data["chapters"], list):
+                 chapters_list = outline_data["chapters"]
+            elif isinstance(outline_data, list):
+                 chapters_list = outline_data
+            else:
+                 logger.error(f"无法识别的大纲文件格式: {outline_file}")
+                 return False
+
+            if not (1 <= chapter_num <= len(chapters_list)):
+                logger.error(f"章节号 {chapter_num} 超出大纲范围 (1-{len(chapters_list)})")
+                return False
+
+            chapter_outline_data = chapters_list[chapter_num - 1]
+            if not isinstance(chapter_outline_data, dict):
+                 logger.error(f"第 {chapter_num} 章的大纲条目不是有效的字典格式。")
+                 return False
+
+            title = chapter_outline_data.get('title', f'无标题章节{chapter_num}') # Default title if missing
+            cleaned_title = self._clean_filename(title) # Use helper method
+
+            # Construct the chapter filename
+            chapter_file = os.path.join(self.output_dir, f"第{chapter_num}章_{cleaned_title}.txt")
+            logger.debug(f"尝试读取章节文件: {chapter_file}")
+
+            if not os.path.exists(chapter_file):
+                logger.error(f"章节文件不存在: {chapter_file}")
+                return False
+
             with open(chapter_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
-            # 更新角色状态
+            logger.debug(f"成功读取章节 {chapter_num} 内容，长度: {len(content)}")
+
+            # Update character states (currently disabled)
             # if update_characters:  # 注释掉角色状态更新
             #     if not self._update_character_states(content, chapter_num):
             #         logging.error("更新角色状态失败")
             #         return False
             
-            # 生成/更新摘要
+            # Generate/update summary
             if update_summary:
+                logger.info(f"开始更新第 {chapter_num} 章摘要...")
                 if not self._update_summary(chapter_num, content):
-                    logging.error("更新摘要失败")
+                    # _update_summary logs its own errors
                     return False
+                logger.info(f"第 {chapter_num} 章摘要更新成功。")
             
             logging.info(f"第 {chapter_num} 章定稿完成")
             return True
             
         except Exception as e:
-            logging.error(f"处理章节定稿时出错: {str(e)}")
+            # Log the full traceback for unexpected errors
+            logger.error(f"处理章节 {chapter_num} 定稿时发生意外错误: {str(e)}", exc_info=True)
             return False
 
     # 注释掉所有与角色库相关的方法
@@ -139,66 +181,105 @@ class NovelFinalizer:
     # def _verify_character_consistency(self, content: str, current_characters: Set[str]) -> bool:
     # def _correct_character_inconsistencies(self, content: str, current_characters: Set[str]):
 
+    def _clean_filename(self, filename: str) -> str:
+        """清理字符串，使其适合作为文件名"""
+        # Remove common illegal characters
+        cleaned = re.sub(r'[\\/*?:"<>|]', "", str(filename)) # Ensure input is string
+        # Remove potentially problematic leading/trailing spaces or dots
+        cleaned = cleaned.strip(". ")
+        # Prevent overly long filenames (optional)
+        # max_len = 100
+        # if len(cleaned) > max_len:
+        #     name_part, ext = os.path.splitext(cleaned)
+        #     cleaned = name_part[:max_len-len(ext)-3] + "..." + ext
+        # Provide a default name if cleaned is empty
+        if not cleaned:
+            # Use chapter number if available, otherwise random int
+            # This method doesn't know the chapter number directly, so use random
+            return f"untitled_chapter_{random.randint(1000,9999)}"
+        return cleaned
+
     def _update_summary(self, chapter_num: int, content: str) -> bool:
         """生成并更新章节摘要"""
         try:
             summary_file = os.path.join(self.output_dir, "summary.json")
+            # Load existing summaries safely
             summaries = load_json_file(summary_file, default_value={})
-            
-            # 生成新摘要
-            prompt = self._create_summary_prompt(content[:4000])  # 限制内容长度
+            if not isinstance(summaries, dict):
+                 logger.warning(f"摘要文件 {summary_file} 内容不是字典，将重新创建。")
+                 summaries = {}
+
+            # Generate new summary
+            # Limit content length to avoid excessive prompt size/cost
+            max_content_for_summary = self.config.generation_config.get("summary_max_content_length", 4000)
+            # --- Call the imported prompt function ---
+            prompt = prompts.get_summary_prompt(content[:max_content_for_summary])
+            # --- End of change ---
+            logger.debug(f"为第 {chapter_num} 章生成摘要的提示词 (前100字符): {prompt[:100]}...")
             new_summary = self.content_model.generate(prompt)
-            
-            # 清理摘要文本
-            new_summary = self._clean_summary(new_summary)
-            
-            # 更新摘要
-            summaries[str(chapter_num)] = new_summary
-            
-            # 保存更新后的摘要
+
+            if not new_summary or not new_summary.strip():
+                 logger.error(f"模型未能为第 {chapter_num} 章生成有效摘要。")
+                 return False # Treat empty summary as failure
+
+            # Clean the summary text
+            cleaned_summary = self._clean_summary(new_summary)
+            logger.debug(f"第 {chapter_num} 章生成的原始摘要 (前100字符): {new_summary[:100]}...")
+            logger.debug(f"第 {chapter_num} 章清理后的摘要 (前100字符): {cleaned_summary[:100]}...")
+
+            # Update the summaries dictionary
+            summaries[str(chapter_num)] = cleaned_summary # Use string key
+
+            # Save updated summaries
             if save_json_file(summary_file, summaries):
-                logging.info(f"已更新第 {chapter_num} 章摘要")
+                # logger.info(f"已更新第 {chapter_num} 章摘要") # Moved success log to finalize_chapter
                 return True
-            return False
-            
+            else:
+                 logger.error(f"保存摘要文件 {summary_file} 失败。")
+                 return False
+
         except Exception as e:
-            logging.error(f"更新摘要时出错: {str(e)}")
+            logger.error(f"更新第 {chapter_num} 章摘要时出错: {str(e)}", exc_info=True)
             return False
-
-    def _create_summary_prompt(self, content: str) -> str:
-        """创建摘要生成的提示词"""
-        return f"""请为以下内容生成简洁的章节摘要，包含以下要素：
-1. 主要情节发展
-2. 重要人物行动
-3. 关键事件结果
-4. 重要信息揭示
-
-内容：
-{content}
-
-要求：
-1. 摘要长度控制在300字以内
-2. 突出重点，避免细节
-3. 保持客观性
-4. 使用第三人称叙述
-"""
 
     def _clean_summary(self, summary: str) -> str:
-        """清理摘要文本"""
-        # 移除常见的描述性开头
-        descriptive_starts = [
-            "本章讲述", "本章主要讲述", "本章描述", "本章主要描述",
-            "本章叙述", "本章主要叙述", "本章介绍", "本章主要介绍",
-            "本章", "这一章", "这一章节", "这一章节主要"
+        """清理摘要文本，移除常见的前缀、格式和多余空白"""
+        if not summary:
+            return ""
+
+        cleaned_summary = summary.strip() # Initial trim
+
+        # Patterns to remove at the beginning (case-insensitive)
+        patterns_to_remove = [
+            r"^\s*好的，根据你提供的内容，以下是章节摘要[:：\s]*",
+            r"^\s*好的，这是章节摘要[:：\s]*",
+            r"^\s*以下是章节摘要[:：\s]*",
+            r"^\s*章节摘要[:：\s]*",
+            r"^\s*摘要[:：\s]*",
+            r"^\s*\*\*摘要[:：\s]*\*\*", # Handle markdown bold
+            r"^\s*本章讲述了?[:：\s]*",
+            r"^\s*本章主要讲述了?[:：\s]*",
+            r"^\s*本章描述了?[:：\s]*",
+            r"^\s*本章主要描述了?[:：\s]*",
+            r"^\s*本章叙述了?[:：\s]*",
+            r"^\s*本章主要叙述了?[:：\s]*",
+            r"^\s*本章介绍了?[:：\s]*",
+            r"^\s*本章主要介绍了?[:：\s]*",
+            r"^\s*这一章?节?主要[:：\s]*",
+            r"^\s*本章内容摘要如下[:：\s]*",
+            # Add more patterns as needed
         ]
-        
-        summary = summary.strip()
-        for start in descriptive_starts:
-            if summary.startswith(start):
-                summary = summary[len(start):].strip()
-                break
-        
-        return summary
+
+        # Remove patterns iteratively
+        for pattern in patterns_to_remove:
+            # Use re.IGNORECASE for case-insensitivity
+            # Use re.DOTALL in case newlines are part of the pattern
+            cleaned_summary = re.sub(pattern, "", cleaned_summary, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        # Final trim to remove any leading/trailing whitespace possibly left by removal
+        cleaned_summary = cleaned_summary.strip()
+
+        return cleaned_summary
 
 if __name__ == "__main__":
     import argparse

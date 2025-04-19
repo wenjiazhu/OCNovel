@@ -1,27 +1,58 @@
 import os
 import json
 import logging
+import sys # 引入 sys 模块以访问 stdout
+from logging.handlers import RotatingFileHandler # 推荐使用 RotatingFileHandler 以防日志文件过大
 from typing import Dict, List, Optional, Any
 from opencc import OpenCC
 
-def setup_logging(output_dir: str) -> None:
+def setup_logging(log_dir: str, clear_logs: bool = False):
     """设置日志系统"""
-    os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, "generation.log")
+    # 确保日志目录存在
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "generation.log")
     
-    try:
-        handler = logging.FileHandler(log_file, encoding='utf-8')
-        handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
+    # 清理旧的日志文件
+    if clear_logs and os.path.exists(log_file):
+        try:
+            os.remove(log_file)
+            print(f"已清理旧的日志文件: {log_file}")
+        except Exception as e:
+            print(f"清理日志文件失败: {e}")
 
-        logger = logging.getLogger()
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-        
-        logging.info("日志系统初始化完成")
-    except Exception as e:
-        print(f"日志系统初始化失败: {e}")
+    # 移除所有已存在的处理器
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        logging.info("已清除旧的日志处理器。")
+
+    # 配置根日志记录器
+    root_logger.setLevel(logging.INFO)
+
+    # 创建格式化器
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S,%f'[:-3]
+    )
+
+    # 添加文件处理器
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8',
+        mode='a'
+    )
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    # 添加控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    logging.info("日志系统初始化完成，将输出到文件和终端。")
 
 def load_json_file(file_path: str, default_value: Any = None) -> Any:
     """加载JSON文件"""

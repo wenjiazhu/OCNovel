@@ -1,7 +1,7 @@
 import os
 import logging
 import time
-from typing import Optional, List
+from typing import Optional, List, Any
 import math
 from .consistency_checker import ConsistencyChecker
 from .validators import LogicValidator, DuplicateValidator
@@ -11,18 +11,23 @@ import re
 from logging.handlers import RotatingFileHandler
 import sys
 import json
+from ..prompts import (
+    get_chapter_prompt,
+    get_sync_info_prompt
+)
 
 # Get a logger specific to this module
 logger = logging.getLogger(__name__)
 
 class ContentGenerator:
-    def __init__(self, config, content_model, knowledge_base):
+    def __init__(self, config, content_model, knowledge_base, finalizer: Optional[Any] = None):
         self.config = config
         self.content_model = content_model
         self.knowledge_base = knowledge_base
         self.output_dir = config.output_config["output_dir"]
         self.chapter_outlines = []
         self.current_chapter = 0
+        self.finalizer = finalizer
         
         # 新增：缓存计数器和同步信息生成器
         self.chapters_since_last_cache = 0
@@ -44,7 +49,6 @@ class ContentGenerator:
         # 验证并创建输出目录
         validate_directory(self.output_dir)
         # 加载现有大纲和进度
-        self._load_outline()
         self._load_progress()
         
         # 初始化知识库
@@ -78,23 +82,33 @@ class ContentGenerator:
             self.chapter_outlines = []
 
     def _load_progress(self):
-        """加载生成进度"""
-        progress_file = os.path.join(self.output_dir, "progress.json")
-        progress_data = load_json_file(progress_file, default_value={"current_chapter": 0})
-        self.current_chapter = progress_data.get("current_chapter", 0)
-        logger.info(f"从 progress.json 加载进度，下一个待处理章节索引: {self.current_chapter}")
+        """从 summary.json 加载生成进度"""
+        summary_file = os.path.join(self.output_dir, "summary.json")
+        try:
+            if os.path.exists(summary_file):
+                with open(summary_file, 'r', encoding='utf-8') as f:
+                    summary_data = json.load(f)
+                    # 获取最大的章节号作为当前进度
+                    chapter_numbers = [int(k) for k in summary_data.keys() if k.isdigit()]
+                    self.current_chapter = max(chapter_numbers) if chapter_numbers else 0
+            else:
+                self.current_chapter = 0
+            logger.info(f"从 summary.json 加载进度，下一个待处理章节索引: {self.current_chapter}")
+        except Exception as e:
+            logger.error(f"加载进度时出错: {str(e)}")
+            self.current_chapter = 0
 
     def _save_progress(self):
-        """保存生成进度"""
-        progress_file = os.path.join(self.output_dir, "progress.json")
-        progress_data = {"current_chapter": self.current_chapter}
-        if save_json_file(progress_file, progress_data):
-            logger.info(f"进度已保存，下一个待处理章节索引: {self.current_chapter}")
-        else:
-            logger.error("保存进度失败")
+        """保存生成进度到 summary.json"""
+        # 不再需要单独保存 progress.json
+        # 因为进度信息已经包含在 summary.json 中的最大章节号中
+        logger.info(f"进度已更新，下一个待处理章节索引: {self.current_chapter}")
 
-    def generate_content(self, target_chapter: Optional[int] = None, external_prompt: Optional[str] = None, update_sync_info: bool = True) -> bool:
+    def generate_content(self, target_chapter: Optional[int] = None, external_prompt: Optional[str] = None) -> bool:
         """生成章节内容，根据参数选择生成模式"""
+        # 在生成内容前加载最新的大纲
+        self._load_outline()
+
         if not self.chapter_outlines:
             logger.error("无法生成内容：大纲未加载或为空。请先生成大纲。")
             return False
@@ -102,24 +116,25 @@ class ContentGenerator:
         try:
             if target_chapter is not None:
                 if 1 <= target_chapter <= len(self.chapter_outlines):
-                    return self._process_single_chapter(target_chapter, external_prompt, update_sync_info=update_sync_info)
+                    return self._process_single_chapter(target_chapter, external_prompt)
                 else:
                     logger.error(f"目标章节 {target_chapter} 超出大纲范围 (1-{len(self.chapter_outlines)})。")
                     return False
             else:
-                return self._generate_remaining_chapters(update_sync_info)
+                return self._generate_remaining_chapters()
         except Exception as e:
             logger.error(f"生成章节内容时发生未预期错误: {str(e)}", exc_info=True)
             return False
 
-    def _process_single_chapter(self, chapter_num: int, external_prompt: Optional[str] = None, max_retries: int = 3, update_sync_info: bool = True) -> bool:
-        """处理单个章节的生成、验证和保存"""
+    def _process_single_chapter(self, chapter_num: int, external_prompt: Optional[str] = None, max_retries: int = 3) -> bool:
+        """处理单个章节的生成、验证、保存和定稿"""
         if not (1 <= chapter_num <= len(self.chapter_outlines)):
             logger.error(f"无效的章节号: {chapter_num}")
             return False
 
         chapter_outline = self.chapter_outlines[chapter_num - 1]
         logger.info(f"[Chapter {chapter_num}] 开始处理章节: {chapter_outline.title}")
+        success = False
 
         for attempt in range(max_retries):
             logger.info(f"[Chapter {chapter_num}] 尝试 {attempt + 1}/{max_retries}")
@@ -129,8 +144,31 @@ class ContentGenerator:
                 if not raw_content:
                     raise Exception("原始内容生成失败，返回为空。")
 
-                # 2. 加载前一章的场景信息
-                previous_scene = self._load_adjacent_chapter(chapter_num - 1) if chapter_num > 1 else ""
+                # 2. 加载前一章的场景信息 (移到这里计算)
+                previous_scene = ""
+                if chapter_num > 1:
+                    prev_chapter_num = chapter_num - 1
+                    if 0 <= prev_chapter_num - 1 < len(self.chapter_outlines):
+                        try:
+                            prev_chapter_title = self.chapter_outlines[prev_chapter_num - 1].title
+                            cleaned_prev_title = self._clean_filename(prev_chapter_title)
+                            prev_chapter_filename = f"第{prev_chapter_num}章_{cleaned_prev_title}.txt"
+                            prev_chapter_file = os.path.join(self.output_dir, prev_chapter_filename)
+                            if os.path.exists(prev_chapter_file):
+                                with open(prev_chapter_file, 'r', encoding='utf-8') as f:
+                                    # 简单示例：取第一行或固定字符数作为场景
+                                    # 你可以根据需要调整如何定义 "场景信息"
+                                    first_line = f.readline().strip()
+                                    # 或许取前 N 个字符更稳定？
+                                    # content = f.read(100) # 读取前100个字符
+                                    previous_scene = first_line # 使用第一行
+                                    logger.debug(f"[Chapter {chapter_num}] 获取到前一章场景: {previous_scene}")
+                            else:
+                                logger.warning(f"[Chapter {chapter_num}] 未找到前一章文件 {prev_chapter_file} 以获取场景")
+                        except Exception as e:
+                            logger.warning(f"[Chapter {chapter_num}] 获取前一章场景信息时出错: {str(e)}")
+                    else:
+                        logger.warning(f"[Chapter {chapter_num}] 无法获取前一章大纲以获取场景")
 
                 # 3. 逻辑验证
                 logic_report, needs_logic_revision = self.logic_validator.check_logic(
@@ -141,7 +179,7 @@ class ContentGenerator:
                     f"\n需要修改: {'是' if needs_logic_revision else '否'}"
                 )
 
-                # 4. 一致性验证（新增场景切换检查）
+                # 4. 一致性验证（传入计算好的 previous_scene）
                 logger.info(f"[Chapter {chapter_num}] 开始一致性检查...")
                 final_content = self.consistency_checker.ensure_chapter_consistency(
                     chapter_content=raw_content,
@@ -153,7 +191,9 @@ class ContentGenerator:
 
                 # 5. 重复文字验证
                 duplicate_report, needs_duplicate_revision = self.duplicate_validator.check_duplicates(
-                    raw_content, previous_scene, self._load_adjacent_chapter(chapter_num + 1) if chapter_num < len(self.chapter_outlines) else ""
+                    final_content,
+                    self._load_adjacent_chapter(chapter_num - 1),
+                    self._load_adjacent_chapter(chapter_num + 1) if chapter_num < len(self.chapter_outlines) else ""
                 )
                 logger.info(
                     f"[Chapter {chapter_num}] 重复文字验证报告 (摘要): {duplicate_report[:200]}..."
@@ -162,20 +202,41 @@ class ContentGenerator:
 
                 # 6. 保存最终内容
                 if self._save_chapter_content(chapter_num, final_content):
-                    logger.info(f"[Chapter {chapter_num}] 处理成功")
+                    logger.info(f"[Chapter {chapter_num}] 内容保存成功")
+
+                    # 7. 调用 Finalizer (如果提供了)
+                    if self.finalizer:
+                        logger.info(f"[Chapter {chapter_num}] 开始调用 Finalizer 进行定稿...")
+                        finalize_success = self.finalizer.finalize_chapter(
+                            chapter_num=chapter_num,
+                            update_summary=True
+                        )
+                        if finalize_success:
+                            logger.info(f"[Chapter {chapter_num}] 定稿成功")
+                            # 更新当前章节进度
+                            self.current_chapter = chapter_num  # 确保在定稿成功后更新进度
+                        else:
+                            logger.error(f"[Chapter {chapter_num}] 定稿失败")
+                    else:
+                        logger.warning(f"[Chapter {chapter_num}] Finalizer 未提供，跳过定稿步骤。")
+                        # 即使没有 Finalizer，也要更新进度
+                        self.current_chapter = chapter_num
+
+                    # 8. 检查并更新缓存/同步信息
+                    self._check_and_update_cache(chapter_num)
+
                     success = True
                     break
-                raise Exception("保存最终内容失败")
+                else:
+                    raise Exception("保存最终内容失败")
 
             except Exception as e:
                 logger.error(f"[Chapter {chapter_num}] 处理出错: {str(e)}", exc_info=True)
+                success = False
                 if attempt >= max_retries - 1:
                     logger.error(f"[Chapter {chapter_num}] 达到最大重试次数")
                     return False
                 time.sleep(self.config.generation_config.get("retry_delay", 10))
-
-        if success and update_sync_info:
-            self._check_and_update_cache(chapter_num)
 
         return success
 
@@ -192,25 +253,34 @@ class ContentGenerator:
             logger.warning(f"加载第 {chapter_num} 章内容失败: {str(e)}")
         return ""
 
-    def _generate_remaining_chapters(self, update_sync_info: bool = True) -> bool:
+    def _generate_remaining_chapters(self) -> bool:
         """生成从 current_chapter 开始的所有剩余章节"""
         logger.info(f"开始生成剩余章节，从索引 {self.current_chapter} (即第 {self.current_chapter + 1} 章) 开始...")
 
+        initial_start_chapter_index = self.current_chapter
+
         while self.current_chapter < len(self.chapter_outlines):
             current_chapter_num = self.current_chapter + 1
-            success = self._process_single_chapter(current_chapter_num, update_sync_info=update_sync_info)
+            success = self._process_single_chapter(current_chapter_num)
 
-            if success:
-                # 处理成功，更新进度并继续下一章
-                self.current_chapter += 1
-                self._save_progress()
-            else:
+            if not success:
                 # 处理失败，中止整个流程
                 logger.error(f"处理第 {current_chapter_num} 章失败，中止剩余章节生成。")
                 return False
 
-        logger.info("所有剩余章节处理完成。")
-        return True
+            # 处理成功，继续下一章
+            self._save_progress()
+
+        # Check if any chapters were processed in this run
+        if self.current_chapter > initial_start_chapter_index:
+            logger.info("所有剩余章节处理完成。")
+            return True
+        elif self.current_chapter == len(self.chapter_outlines):
+            logger.info("所有章节均已处理完成。")
+            return True
+        else: # No chapters were processed (already at the end)
+            logger.info(f"没有需要生成的剩余章节（当前进度索引: {self.current_chapter}）。")
+            return True
 
     def _regenerate_specific_chapter(self, chapter_num: int, external_prompt: Optional[str] = None) -> bool:
          """重新生成指定章节的入口"""
@@ -225,7 +295,13 @@ class ContentGenerator:
             context = self._get_context_for_chapter(chapter_num)
             references = self._get_references_for_chapter(chapter_outline)
 
-            prompt = self._create_chapter_prompt(chapter_outline, references, context, extra_prompt)
+            # 使用 prompts.py 中的方法
+            prompt = get_chapter_prompt(
+                outline=chapter_outline.__dict__,
+                references=references,
+                extra_prompt=extra_prompt or "",
+                context_info=context
+            )
             logger.debug(f"完整提示词: {prompt}")
 
             # 调用模型生成内容
@@ -291,36 +367,49 @@ class ContentGenerator:
             return False
 
     def _get_context_for_chapter(self, chapter_num: int) -> str:
-        """获取章节的上下文信息（尝试使用 ConsistencyChecker 获取摘要）"""
+        """获取章节的上下文信息（包括前一章摘要和内容）"""
         if chapter_num > 1:
+            context_parts = []
+            
+            # 1. 尝试获取前一章摘要
             try:
                 prev_summary = self.consistency_checker._get_previous_summary(chapter_num - 1)
                 if prev_summary:
-                     logger.debug(f"使用 ConsistencyChecker 获取到第 {chapter_num-1} 章摘要作为上下文。")
-                     return f"前文摘要：\n{prev_summary}"
-                else:
-                     logger.warning(f"ConsistencyChecker 未能获取第 {chapter_num-1} 章摘要，尝试读取文件。")
+                    context_parts.append(f"前一章摘要：\n{prev_summary}")
+                    logger.debug(f"获取到第 {chapter_num-1} 章摘要")
             except Exception as e:
-                logger.warning(f"调用 ConsistencyChecker 获取摘要时出错: {e}，尝试读取文件。")
+                logger.warning(f"获取第 {chapter_num-1} 章摘要时出错: {e}")
 
-            prev_chapter_file = os.path.join(self.output_dir, f"chapter_{chapter_num-1}.txt")
+            # 2. 获取前一章内容
             try:
-                if os.path.exists(prev_chapter_file):
-                    with open(prev_chapter_file, 'r', encoding='utf-8') as f:
-                        prev_content = f.read()
-                        max_prev_content_length = self.config.generation_config.get("context_length", 2000)
-                        if len(prev_content) > max_prev_content_length:
-                            return f"前一章结尾部分：\n...{prev_content[-max_prev_content_length:]}"
-                        else:
-                            return f"前一章内容：\n{prev_content}"
-                else:
-                     logger.warning(f"无法获取上下文：上一章文件 {prev_chapter_file} 不存在。")
-                     return "（无上一章文件可作上下文）"
+                prev_chapter_num = chapter_num - 1
+                if 0 <= prev_chapter_num - 1 < len(self.chapter_outlines):
+                    prev_chapter_title = self.chapter_outlines[prev_chapter_num - 1].title
+                    cleaned_prev_title = self._clean_filename(prev_chapter_title)
+                    prev_chapter_filename = f"第{prev_chapter_num}章_{cleaned_prev_title}.txt"
+                    prev_chapter_file = os.path.join(self.output_dir, prev_chapter_filename)
+                    
+                    if os.path.exists(prev_chapter_file):
+                        with open(prev_chapter_file, 'r', encoding='utf-8') as f:
+                            prev_content = f.read()
+                            # 如果内容太长，只取最后一部分
+                            max_prev_content_length = self.config.generation_config.get("context_length", 2000)
+                            if len(prev_content) > max_prev_content_length:
+                                context_parts.append(f"前一章结尾部分：\n...{prev_content[-max_prev_content_length:]}")
+                            else:
+                                context_parts.append(f"前一章内容：\n{prev_content}")
+                            logger.debug(f"获取到第 {prev_chapter_num} 章内容")
+                    else:
+                        logger.warning(f"未找到前一章文件 {prev_chapter_file}")
             except Exception as e:
-                logger.warning(f"读取前一章内容 ({prev_chapter_file}) 作为上下文时出错: {str(e)}")
-                return "（读取前文出错）"
+                logger.warning(f"读取第 {prev_chapter_num} 章内容时出错: {str(e)}")
+
+            # 返回所有上下文信息
+            if context_parts:
+                return "\n\n".join(context_parts)
+            return "（无法获取前一章信息）"
         else:
-             return "（这是第一章，无前文）"
+            return "（这是第一章，无前文）"
 
     def _get_references_for_chapter(self, chapter_outline: ChapterOutline) -> dict:
         """获取章节的参考信息（从知识库）"""
@@ -362,57 +451,6 @@ class ContentGenerator:
 
         return references
 
-    def _create_chapter_prompt(self, outline: ChapterOutline, references: dict,
-                             context: str, extra_prompt: Optional[str] = None) -> str:
-        """创建章节生成的提示词"""
-        outline_dict = outline.__dict__ if outline else {}
-
-        key_points = outline_dict.get('key_points', []) if isinstance(outline_dict.get('key_points'), list) else []
-        characters = outline_dict.get('characters', []) if isinstance(outline_dict.get('characters'), list) else []
-        settings = outline_dict.get('settings', []) if isinstance(outline_dict.get('settings'), list) else []
-        conflicts = outline_dict.get('conflicts', []) if isinstance(outline_dict.get('conflicts'), list) else []
-
-        prompt = f"""请根据以下大纲和参考信息，生成小说章节内容：
-
-**章节大纲 (第 {outline_dict.get('chapter_number', '未知')} 章: {outline_dict.get('title', '无标题')})**
-关键情节点：
-{chr(10).join(f"- {point}" for point in key_points)}
-
-出场角色：
-{chr(10).join(f"- {character}" for character in characters)}
-
-场景设定：
-{chr(10).join(f"- {setting}" for setting in settings)}
-
-主要冲突：
-{chr(10).join(f"- {conflict}" for conflict in conflicts)}
-
-**上下文信息（前文内容/摘要）：**
-{context}
-
-**参考信息（来自知识库）：**
-剧情参考：
-{chr(10).join(f"- {ref}" for ref in references.get("plot_references", []))}
-
-角色参考：
-{chr(10).join(f"- {ref}" for ref in references.get("character_references", []))}
-
-场景参考：
-{chr(10).join(f"- {ref}" for ref in references.get("setting_references", []))}
-
-**生成要求：**
-1. 严格按照大纲的关键情节点、角色、场景和冲突进行创作。
-2. 确保内容与上下文信息（前文）流畅衔接。
-3. 自然地融入参考信息，丰富世界观和细节。
-4. 章节字数控制在 {self.config.novel_config.get("chapter_length", 2500)} 字左右。
-5. 保持 {self.config.novel_config.get("style", "默认")} 的写作风格。
-"""
-
-        if extra_prompt:
-            prompt += f"\n**额外要求：**\n{extra_prompt}"
-
-        return prompt
-
     def _init_knowledge_base(self):
         """初始化知识库，确保在使用前已构建"""
         try:
@@ -444,6 +482,8 @@ class ContentGenerator:
         # 修改判断逻辑，检查是否是第5/10/15...章
         logger.info(f"检查是否需要更新缓存，当前章节: {chapter_num}, 缓存条件: (chapter_num % 5) == 0, 结果: {(chapter_num % 5) == 0}")
         if (chapter_num % 5) == 0:  # 正好是5的倍数章节
+            # 先更新当前章节进度，确保包含当前章节
+            self.current_chapter = chapter_num
             logger.info(f"已完成第 {chapter_num} 章，开始更新缓存...")
             self._update_content_cache()
             logger.info(f"开始更新同步信息文件: {self.sync_info_file}")
@@ -456,8 +496,9 @@ class ContentGenerator:
     def _update_content_cache(self) -> None:
         """更新正文知识库缓存"""
         try:
-            # 获取所有已完成章节的内容
+            # 获取所有已完成章节的内容（包括当前章节）
             chapter_contents = []
+            # 修改这里，使用 self.current_chapter + 1 确保包含当前章节
             for chapter_num in range(1, self.current_chapter + 1):
                 filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
                 filepath = os.path.join(self.output_dir, filename)
@@ -465,6 +506,7 @@ class ContentGenerator:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         content = f.read()
                         chapter_contents.append(content)
+                        logger.debug(f"已读取第 {chapter_num} 章内容，长度: {len(content)}")
 
             if chapter_contents:
                 # 使用嵌入模型对内容进行向量化
@@ -482,9 +524,11 @@ class ContentGenerator:
     def _trigger_sync_info_update(self) -> None:
         """触发同步信息更新"""
         os.makedirs(os.path.dirname(self.sync_info_file), exist_ok=True)
+        # 使用 self.current_chapter 而不是其他变量
         logger.info(f"准备更新同步信息，当前章节进度: {self.current_chapter}，同步信息文件: {self.sync_info_file}")
         try:
             all_content = ""
+            # 使用 self.current_chapter + 1 确保包含当前章节
             for chapter_num in range(1, self.current_chapter + 1):
                 filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
                 filepath = os.path.join(self.output_dir, filename)
@@ -543,31 +587,11 @@ class ContentGenerator:
             except Exception as e:
                 logger.warning(f"读取现有同步信息时出错: {str(e)}")
 
-        return f"""根据故事进展整理相关信息，具体要求：
-1. 合理细化使得相关信息逻辑完整，但不扩展不存在的设定，未尽之处可参考 [同步信息]
-2. 精简表达，去除一切不必要的修饰，确保信息有效的同时使用最少tokens
-3. 你在整理信息的时候，只保留对后续故事发展有参考借鉴意义的内容，如果是对后续故事不再有影响的人和事，可以不再归纳出来
-4. 非常重要：你必须仅返回标准的JSON格式，不要添加任何前后缀、说明或标记
-
-现有同步信息：
-{existing_sync_info}
-
-故事内容：
-{story_content}
-
-你必须严格按以下JSON格式输出，不要添加任何文字说明或其他标记：
-{{
-    "世界观": {{
-        "世界背景": [],
-        "阵营势力": []
-    }},
-    "人物设定": {{
-        "人物设定": [],
-        "人物关系": []
-    }},
-    "其他设定": [],
-    "前情提要": []
-}}"""
+        return get_sync_info_prompt(
+            story_content=story_content,
+            existing_sync_info=existing_sync_info,
+            current_chapter=self.current_chapter
+        )
 
 if __name__ == "__main__":
     import argparse
