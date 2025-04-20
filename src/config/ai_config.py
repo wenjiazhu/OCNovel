@@ -12,10 +12,10 @@ class AIConfig:
         # Gemini 配置
         self.gemini_config = {
             "api_key": os.getenv("GEMINI_API_KEY", ""),
-            "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "10")),  # 默认 10 秒
+            "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
             "models": {
                 "outline": {
-                    "name": "gemini-2.0-flash-thinking-exp-01-21",
+                    "name": "gemini-2.5-flash-preview-04-17",
                     "temperature": 1.0
                 },
                 "content": {
