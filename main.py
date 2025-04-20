@@ -211,9 +211,8 @@ def main():
                     novel_type=config.novel_config.get("type"),
                     theme=config.novel_config.get("theme"),
                     style=config.novel_config.get("style"),
-                    mode='append', # Use append mode more reliably
-                    # replace_range=(current_outline_count + 1, end_chapter), # replace_range might be less robust
-                    num_chapters=end_chapter - current_outline_count, # Specify number of chapters to add
+                    mode='replace',
+                    replace_range=(current_outline_count + 1, end_chapter),
                     extra_prompt=args.extra_prompt
                 )
                 if not outline_success:

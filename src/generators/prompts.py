@@ -297,6 +297,50 @@ def get_chapter_prompt(
     else:
         filtered_reference_content = "\n[知识库参考内容]\n暂无参考内容，将仅基于设定生成章节。\n"
     
+    # 获取下一章大纲信息（如果存在）
+    next_chapter_info = ""
+    try:
+        # 假设可以通过以下方式获取下一章大纲
+        # 实际实现中需要从chapter_outlines中获取下一章信息
+        next_chapter_num = novel_number + 1
+        
+        # 这里应该根据实际项目结构获取chapter_outlines
+        # 可以从配置或其他地方获取
+        # 以下是示例代码，实际使用时需要根据项目结构调整
+        from src.generators.common.utils import load_json_file
+        outline_file = os.path.join(config.output_config["output_dir"], "outline.json")
+        outlines_data = load_json_file(outline_file, default_value=[])
+        
+        # 获取下一章大纲（如果存在）
+        next_chapter_outline = None
+        for ch in outlines_data:
+            if isinstance(ch, dict) and ch.get('chapter_number') == next_chapter_num:
+                next_chapter_outline = ch
+                break
+
+        if next_chapter_outline:
+            next_chapter_title = next_chapter_outline.get('title', f'第{next_chapter_num}章')
+            next_chapter_key_points = chr(10).join([f"- {point}" for point in next_chapter_outline.get('key_points', [])])
+            next_chapter_characters = ', '.join(next_chapter_outline.get('characters', []))
+            next_chapter_settings = ', '.join(next_chapter_outline.get('settings', []))
+            next_chapter_conflicts = ', '.join(next_chapter_outline.get('conflicts', []))
+            
+            next_chapter_info = f"""
+[下一章大纲]
+章节号: {next_chapter_num}
+标题: {next_chapter_title}
+关键情节点: 
+{next_chapter_key_points}
+涉及角色: {next_chapter_characters}
+场景设定: {next_chapter_settings}
+核心冲突: {next_chapter_conflicts}
+"""
+        else:
+            next_chapter_info = "\n[下一章信息]\n暂无下一章大纲信息。\n"
+    except Exception as e:
+        logging.warning(f"获取下一章大纲信息时出错: {str(e)}")
+        next_chapter_info = "\n[下一章信息]\n获取下一章大纲信息时出错。\n"
+    
     # 根据章节号选择提示词模板
     if is_first_chapter:
         # 第一章使用 first_chapter_draft_prompt
@@ -324,6 +368,8 @@ def get_chapter_prompt(
 - 核心人物：{characters}
 - 关键场景：{settings}
 - 核心冲突：{conflicts}
+
+{next_chapter_info}
 
 [知识库参考内容]
 {filtered_reference_content}
@@ -389,6 +435,8 @@ def get_chapter_prompt(
 场景设定: {settings}
 核心冲突: {conflicts}
 
+{next_chapter_info}
+
 [知识库参考内容]
 {filtered_reference_content}
 
@@ -434,9 +482,17 @@ def get_chapter_prompt(
 [连贯性要求]
 1. 请确保本章情节与上一章摘要中描述的情节有明确的连接
 2. 章节开头应自然承接上一章的结尾，避免跳跃感
-3. 章节结尾应为下一章大纲中的情节埋下伏笔
+3. 章节结尾应为下一章大纲中的情节埋下伏笔，为下一章做自然过渡
 4. 确保人物情感和行为的连续性，避免角色表现前后矛盾
 5. 时间线和场景转换要清晰流畅
+"""
+    # 即使是第一章，也需要为下一章做铺垫
+    else:
+        base_prompt += f"""
+[下一章铺垫]
+1. 在章节结尾为下一章大纲中的情节埋下伏笔
+2. 为下一章的场景和人物做自然过渡
+3. 留下一定的悬念引导读者继续阅读
 """
 
     # 最终检查部分（两种模板都需要）
@@ -446,6 +502,7 @@ def get_chapter_prompt(
 2. 检查所有指定的角色是否都出现在了章节中
 3. 检查你描述的场景是否与场景设定一致
 4. 确保核心冲突被合理地展开和刻画
+5. 确保章节结尾与下一章大纲的开头能够自然衔接
 """
     return base_prompt
 
