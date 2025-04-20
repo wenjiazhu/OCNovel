@@ -38,7 +38,8 @@ class ConsistencyChecker:
         chapter_outline: Dict[str, Any],
         chapter_idx: int,
         characters: Dict[str, Any] = None,
-        previous_scene: str = ""
+        previous_scene: str = "",
+        sync_info: Optional[str] = None
     ) -> Tuple[str, bool, int]:
         """
         检查章节内容一致性，并返回检查报告和是否需要修改
@@ -47,31 +48,29 @@ class ConsistencyChecker:
             chapter_content: 待检查章节内容
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
-            characters: 角色信息字典 (如果需要，应由调用者处理并传入，这里暂时忽略)
-            previous_scene: 前一章的场景信息 (由调用者传入)
+            characters: 角色信息字典（可选）
+            previous_scene: 前一章的场景信息（可选）
+            sync_info: 同步信息（替代 global_summary）
             
         Returns:
             tuple: (检查报告, 是否需要修改, 评分)
         """
         logging.info(f"第 {chapter_idx + 1} 章: 开始一致性检查...")
         
-        # 获取前文摘要
-        global_summary = self._get_global_summary(chapter_idx)
-        
-        # 获取上一章摘要
+        # 获取上一章摘要（保留）
         previous_summary = self._get_previous_summary(chapter_idx)
         
         # 角色信息获取已注释掉，使用空字符串
         character_info = ""
         
-        # 生成一致性检查的提示词 - 使用传入的 previous_scene
+        # 生成一致性检查的提示词 - 移除 global_summary，仅传递 sync_info
         prompt = prompts.get_consistency_check_prompt(
             chapter_content=chapter_content,
             chapter_outline=chapter_outline,
             previous_summary=previous_summary,
-            global_summary=global_summary,
             character_info=character_info,
-            previous_scene=previous_scene # <--- 使用传入的参数
+            previous_scene=previous_scene,
+            sync_info=sync_info  # 使用 sync_info 替代 global_summary
         )
         
         # 调用模型进行检查
@@ -114,9 +113,6 @@ class ConsistencyChecker:
         """
         logging.info(f"第 {chapter_idx + 1} 章: 开始根据一致性检查报告修正内容...")
         
-        # 获取前文摘要
-        global_summary = self._get_global_summary(chapter_idx)
-        
         # 获取上一章摘要
         previous_summary = self._get_previous_summary(chapter_idx)
         
@@ -125,8 +121,7 @@ class ConsistencyChecker:
             original_content=chapter_content,
             consistency_report=consistency_report,
             chapter_outline=chapter_outline,
-            previous_summary=previous_summary,
-            global_summary=global_summary
+            previous_summary=previous_summary
         )
         
         # 调用模型进行修正
@@ -144,7 +139,8 @@ class ConsistencyChecker:
         chapter_outline: Dict[str, Any],
         chapter_idx: int,
         characters: Dict[str, Any] = None,
-        previous_scene: str = ""
+        previous_scene: str = "",
+        sync_info: Optional[str] = None
     ) -> str:
         """
         确保章节内容的一致性，进行必要的检查和修正
@@ -153,17 +149,15 @@ class ConsistencyChecker:
             chapter_content: 章节内容
             chapter_outline: 章节大纲
             chapter_idx: 章节索引
-            characters: 角色信息字典 (暂时忽略)
-            previous_scene: 前一章的场景信息 (传递给 check_chapter_consistency)
-            
-        Returns:
-            str: 修正后的章节内容
+            characters: 角色信息字典（可选）
+            previous_scene: 前一章的场景信息（可选）
+            sync_info: 同步信息（可选）
         """
         # 进行一致性检查和修正的循环
         for attempt in range(self.max_revision_attempts):
-            # 进行一致性检查 - 传递 previous_scene
+            # 进行一致性检查 - 传递 previous_scene 和 sync_info
             consistency_report, needs_revision, score = self.check_chapter_consistency(
-                chapter_content, chapter_outline, chapter_idx, characters, previous_scene
+                chapter_content, chapter_outline, chapter_idx, characters, previous_scene, sync_info
             )
             
             # 如果分数达标或不需要修改，则跳出循环
@@ -180,7 +174,7 @@ class ConsistencyChecker:
             # 如果是最后一次尝试，再次检查但不再修改
             if attempt == self.max_revision_attempts - 1:
                 final_report, _, final_score = self.check_chapter_consistency(
-                    chapter_content, chapter_outline, chapter_idx, characters, previous_scene
+                    chapter_content, chapter_outline, chapter_idx, characters, previous_scene, sync_info
                 )
                 logging.info(f"第 {chapter_idx + 1} 章: 完成所有修正尝试，最终分数: {final_score}")
         

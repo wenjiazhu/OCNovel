@@ -145,48 +145,27 @@ class ContentGenerator:
                 if not raw_content:
                     raise Exception("原始内容生成失败，返回为空。")
 
-                # 2. 加载前一章的场景信息 (移到这里计算)
-                previous_scene = ""
-                if chapter_num > 1:
-                    prev_chapter_num = chapter_num - 1
-                    if 0 <= prev_chapter_num - 1 < len(self.chapter_outlines):
-                        try:
-                            prev_chapter_title = self.chapter_outlines[prev_chapter_num - 1].title
-                            cleaned_prev_title = self._clean_filename(prev_chapter_title)
-                            prev_chapter_filename = f"第{prev_chapter_num}章_{cleaned_prev_title}.txt"
-                            prev_chapter_file = os.path.join(self.output_dir, prev_chapter_filename)
-                            if os.path.exists(prev_chapter_file):
-                                with open(prev_chapter_file, 'r', encoding='utf-8') as f:
-                                    # 简单示例：取第一行或固定字符数作为场景
-                                    # 你可以根据需要调整如何定义 "场景信息"
-                                    first_line = f.readline().strip()
-                                    # 或许取前 N 个字符更稳定？
-                                    # content = f.read(100) # 读取前100个字符
-                                    previous_scene = first_line # 使用第一行
-                                    logger.debug(f"[Chapter {chapter_num}] 获取到前一章场景: {previous_scene}")
-                            else:
-                                logger.warning(f"[Chapter {chapter_num}] 未找到前一章文件 {prev_chapter_file} 以获取场景")
-                        except Exception as e:
-                            logger.warning(f"[Chapter {chapter_num}] 获取前一章场景信息时出错: {str(e)}")
-                    else:
-                        logger.warning(f"[Chapter {chapter_num}] 无法获取前一章大纲以获取场景")
-
-                # 3. 逻辑验证
+                # 2. 加载同步信息
+                sync_info = self._load_sync_info()
+                
+                # 3. 逻辑验证（加入同步信息）
                 logic_report, needs_logic_revision = self.logic_validator.check_logic(
-                    raw_content, chapter_outline.__dict__
+                    raw_content, 
+                    chapter_outline.__dict__,
+                    sync_info  # 新增参数
                 )
                 logger.info(
                     f"[Chapter {chapter_num}] 逻辑验证报告 (摘要): {logic_report[:200]}..."
                     f"\n需要修改: {'是' if needs_logic_revision else '否'}"
                 )
 
-                # 4. 一致性验证（传入计算好的 previous_scene）
+                # 4. 一致性验证（加入同步信息）
                 logger.info(f"[Chapter {chapter_num}] 开始一致性检查...")
                 final_content = self.consistency_checker.ensure_chapter_consistency(
                     chapter_content=raw_content,
                     chapter_outline=chapter_outline.__dict__,
-                    chapter_idx=chapter_num - 1,
-                    previous_scene=previous_scene
+                    sync_info=sync_info,  # 新增参数
+                    chapter_idx=chapter_num - 1
                 )
                 logger.info(f"[Chapter {chapter_num}] 一致性检查完成")
 
@@ -587,6 +566,15 @@ class ContentGenerator:
             existing_sync_info=existing_sync_info,
             current_chapter=self.current_chapter
         )
+
+    def _load_sync_info(self) -> str:
+        """加载同步信息"""
+        if os.path.exists(self.sync_info_file):
+            with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        else:
+            logger.warning("同步信息文件不存在，将返回空字符串。")
+            return ""
 
 if __name__ == "__main__":
     import argparse

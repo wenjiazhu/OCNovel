@@ -7,7 +7,7 @@
 """
 
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import re
 from .. import prompts
 
@@ -17,20 +17,27 @@ class LogicValidator:
     def __init__(self, content_model):
         self.content_model = content_model
     
-    def check_logic(self, chapter_content: str, chapter_outline: Dict) -> Tuple[str, bool]:
+    def check_logic(
+        self, 
+        chapter_content: str, 
+        chapter_outline: Dict, 
+        sync_info: Optional[str] = None
+    ) -> Tuple[str, bool]:
         """
         检查章节内容的逻辑严密性
         
         Args:
             chapter_content: 章节内容
             chapter_outline: 章节大纲
+            sync_info: 同步信息（可选）
             
         Returns:
             tuple: (验证报告, 是否需要修改)
         """
         prompt = prompts.get_logic_check_prompt(
             chapter_content=chapter_content,
-            chapter_outline=chapter_outline
+            chapter_outline=chapter_outline,
+            sync_info=sync_info
         )
         
         try:

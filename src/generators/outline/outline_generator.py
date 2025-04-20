@@ -5,7 +5,7 @@ import time
 from typing import List, Tuple, Optional
 from ..common.data_structures import ChapterOutline
 from ..common.utils import load_json_file, save_json_file, validate_directory
-from ..prompts import get_outline_prompt
+from ..prompts import get_outline_prompt, get_sync_info_prompt
 
 class OutlineGenerator:
     def __init__(self, config, outline_model, knowledge_base):
@@ -14,6 +14,10 @@ class OutlineGenerator:
         self.knowledge_base = knowledge_base
         self.output_dir = config.output_config["output_dir"]
         self.chapter_outlines = []
+        
+        # 同步信息相关
+        self.sync_info_file = os.path.join(self.output_dir, "sync_info.json")
+        self.sync_info = self._load_sync_info()
         
         # 验证并创建输出目录
         validate_directory(self.output_dir)
@@ -284,9 +288,116 @@ class OutlineGenerator:
         logging.error(f"处理第 {batch_start_num} 到 {batch_end_num} 章的大纲时，所有尝试均失败。")
         return False # 所有尝试都失败了
 
+    def _load_sync_info(self) -> dict:
+        """加载同步信息文件"""
+        try:
+            if os.path.exists(self.sync_info_file):
+                with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {
+                "世界观": {
+                    "世界背景": [],
+                    "阵营势力": [],
+                    "重要规则": [],
+                    "关键场所": []
+                },
+                "人物设定": {
+                    "人物信息": [],
+                    "人物关系": []
+                },
+                "剧情发展": {
+                    "主线梗概": "",
+                    "重要事件": [],
+                    "悬念伏笔": [],
+                    "已解决冲突": [],
+                    "进行中冲突": []
+                },
+                "前情提要": [],
+                "当前章节": 0,
+                "最后更新时间": ""
+            }
+        except Exception as e:
+            logging.error(f"加载同步信息文件时出错: {str(e)}", exc_info=True)
+            return self._get_default_sync_info()
+
+    def _save_sync_info(self) -> bool:
+        """保存同步信息到文件"""
+        try:
+            with open(self.sync_info_file, 'w', encoding='utf-8') as f:
+                json.dump(self.sync_info, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            logging.error(f"保存同步信息文件时出错: {str(e)}", exc_info=True)
+            return False
+
+    def _update_sync_info(self, batch_start: int, batch_end: int) -> bool:
+        """更新同步信息"""
+        try:
+            # 获取本批次的章节内容
+            batch_outlines = []
+            for chapter_num in range(batch_start, batch_end + 1):
+                if chapter_num - 1 < len(self.chapter_outlines):
+                    outline = self.chapter_outlines[chapter_num - 1]
+                    if outline:
+                        batch_outlines.append(outline)
+
+            if not batch_outlines:
+                logging.warning("没有找到需要更新的章节大纲")
+                return False
+
+            # 构建章节内容文本
+            chapter_texts = []
+            for outline in batch_outlines:
+                chapter_text = f"第{outline.chapter_number}章 {outline.title}\n"
+                chapter_text += f"关键情节：{', '.join(outline.key_points)}\n"
+                chapter_text += f"涉及角色：{', '.join(outline.characters)}\n"
+                chapter_text += f"场景：{', '.join(outline.settings)}\n"
+                chapter_text += f"冲突：{', '.join(outline.conflicts)}"
+                chapter_texts.append(chapter_text)
+
+            # 生成更新提示词
+            prompt = get_sync_info_prompt(
+                "\n\n".join(chapter_texts),
+                json.dumps(self.sync_info, ensure_ascii=False),
+                batch_end
+            )
+
+            # 调用模型更新同步信息
+            new_sync_info = self.outline_model.generate(prompt)
+            
+            try:
+                # 解析并更新同步信息
+                updated_sync_info = json.loads(new_sync_info)
+                updated_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                self.sync_info = updated_sync_info
+                return self._save_sync_info()
+            except json.JSONDecodeError as e:
+                logging.error(f"解析更新后的同步信息失败: {str(e)}")
+                return False
+
+        except Exception as e:
+            logging.error(f"更新同步信息时出错: {str(e)}", exc_info=True)
+            return False
+
     def _get_context_for_batch(self, batch_start_num: int) -> str:
-        """获取批次的上下文信息 (基于 self.chapter_outlines)"""
+        """获取批次的上下文信息"""
         context_parts = []
+        
+        # 添加同步信息到上下文
+        if self.sync_info:
+            context_parts.append("[全局信息]")
+            # 添加主线梗概
+            if self.sync_info.get("剧情发展", {}).get("主线梗概"):
+                context_parts.append(f"主线发展：{self.sync_info['剧情发展']['主线梗概']}")
+            
+            # 添加最近的前情提要
+            if self.sync_info.get("前情提要"):
+                recent_summary = self.sync_info["前情提要"][-3:]  # 最近3条
+                context_parts.append("最近剧情：\n" + "\n".join(recent_summary))
+            
+            # 添加进行中的冲突
+            if self.sync_info.get("剧情发展", {}).get("进行中冲突"):
+                context_parts.append("当前冲突：\n- " + "\n- ".join(self.sync_info["剧情发展"]["进行中冲突"]))
         
         # 获取前 N 章的大纲信息 (例如前3章)
         context_chapters_count = 3
