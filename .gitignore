@@ -34,6 +34,7 @@ data/reference/*
 data/marketing/*
 config.json
 config2.json
+config3.json
 cookies.json
 .cursor/rules/*
 /chapters/*

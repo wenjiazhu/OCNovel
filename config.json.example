@@ -5,10 +5,10 @@
     ],
     "chunk_size": 1000,
     "chunk_overlap": 200,
-    "cache_dir": "<path/to/cache>"
+    "cache_dir": "data/cache"
   },
   "log_config": {
-    "log_dir": "<path/to/logs>",
+    "log_dir": "data/logs",
     "log_level": "INFO",
     "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   },
@@ -123,7 +123,7 @@
     "format": "txt",
     "encoding": "utf-8",
     "save_outline": true,
-    "save_character_states": true,
-    "output_dir": "<path/to/output>"
+    "save_character_states": false,
+    "output_dir": "data/output"
   }
 }
