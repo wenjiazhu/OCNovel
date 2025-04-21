@@ -567,14 +567,38 @@ class ContentGenerator:
             current_chapter=self.current_chapter
         )
 
-    def _load_sync_info(self) -> str:
-        """加载同步信息"""
+    def _load_sync_info(self) -> dict:
+        """加载同步信息并解析为字典"""
         if os.path.exists(self.sync_info_file):
-            with open(self.sync_info_file, 'r', encoding='utf-8') as f:
-                return f.read()
+            try:
+                with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # 处理空文件的情况
+                    if not content.strip():
+                         logger.warning(f"同步信息文件 {self.sync_info_file} 为空，返回空字典。")
+                         return {}
+                    # 解析 JSON 内容
+                    return json.loads(content)
+            except json.JSONDecodeError as e:
+                # 处理 JSON 解析错误
+                logger.error(f"解析同步信息文件 {self.sync_info_file} 失败: {e}。返回空字典。")
+                # 可以选择保存错误内容以便调试
+                # try:
+                #     with open(self.sync_info_file + ".error", 'w', encoding='utf-8') as f_err:
+                #         f_err.write(content)
+                # except NameError: # Handle case where 'content' might not be defined if open failed
+                #     logger.error(f"无法写入错误日志，因为读取 {self.sync_info_file} 可能已失败。")
+                # except Exception as write_err:
+                #     logger.error(f"写入 sync_info.error 文件失败: {write_err}")
+                return {}
+            except Exception as e:
+                 # 处理其他可能的读取错误
+                 logger.error(f"读取同步信息文件 {self.sync_info_file} 时发生其他错误: {e}。返回空字典。")
+                 return {}
         else:
-            logger.warning("同步信息文件不存在，将返回空字符串。")
-            return ""
+            # 文件不存在，返回空字典
+            logger.warning(f"同步信息文件 {self.sync_info_file} 不存在，返回空字典。")
+            return {}
 
 if __name__ == "__main__":
     import argparse

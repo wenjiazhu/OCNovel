@@ -59,9 +59,13 @@ class OutlineGenerator:
         """保存大纲到文件"""
         outline_file = os.path.join(self.output_dir, "outline.json")
         try:
-            # 确保 self.chapter_outlines 中的元素是 ChapterOutline 实例
+            # 修改：只收集有效的 ChapterOutline 对象
             outline_data = []
             for outline in self.chapter_outlines:
+                # 增加检查，明确跳过 None 值，避免警告
+                if outline is None:
+                    continue
+                
                 if isinstance(outline, ChapterOutline):
                     # 将 ChapterOutline 对象转换为字典
                     outline_dict = {
@@ -73,8 +77,8 @@ class OutlineGenerator:
                         "conflicts": outline.conflicts
                     }
                     outline_data.append(outline_dict)
-                else:
-                    logging.warning(f"尝试保存非 ChapterOutline 对象: {outline}")
+                else: # 如果不是 None 但也不是 ChapterOutline，才发出警告
+                    logging.warning(f"尝试保存非 ChapterOutline 对象: {type(outline)} - {outline}")
 
             if not outline_data:
                 logging.warning("没有有效的大纲数据可以保存。")

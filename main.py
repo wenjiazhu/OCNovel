@@ -88,7 +88,7 @@ def main():
         # 创建模型实例
         logging.info("正在初始化AI模型...")
         content_model = create_model(config.model_config["content_model"])
-        outline_model = content_model
+        outline_model = create_model(config.model_config["outline_model"])
         embedding_model = create_model(config.model_config["embedding_model"])
         logging.info("AI模型初始化完成")
         
