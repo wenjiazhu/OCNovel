@@ -434,9 +434,12 @@ class OutlineGenerator:
 
 if __name__ == "__main__":
     import argparse
+    import re # For mock model parsing
     # 假设 Config, OutlineModel, KnowledgeBase 可以正确导入或用 Mock 替代
     try:
-        from ..config.config import Config
+        # Change to absolute import assuming script is run from project root
+        # or src is in PYTHONPATH
+        from src.config.config import Config
         # Mock or import actual models
         class MockModel:
              def generate(self, prompt):
@@ -482,7 +485,6 @@ if __name__ == "__main__":
     except ImportError as e:
         logging.error(f"无法导入必要的模块: {e}")
         exit(1)
-    import re # For mock model parsing
 
 
     parser = argparse.ArgumentParser(description='生成小说大纲')
