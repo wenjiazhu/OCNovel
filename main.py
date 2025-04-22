@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import shutil
+import subprocess
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import logging
@@ -78,31 +79,82 @@ def main():
     
     args = parser.parse_args()
     
+    # --- 检查并可能生成默认配置文件 ---
+    config_path = args.config
+    if config_path == "config.json" and not os.path.exists(config_path):
+        print(f"默认配置文件 '{config_path}' 不存在。")
+        try:
+            user_theme = input("请输入您的小说主题以生成新的配置文件: ")
+            if not user_theme:
+                print("未输入主题，无法生成配置文件。程序退出。")
+                sys.exit(1)
+
+            # 获取 generate_config.py 脚本的绝对路径
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            generate_script_path = os.path.join(script_dir, "src", "tools", "generate_config.py")
+
+            if not os.path.exists(generate_script_path):
+                print(f"错误: 配置文件生成脚本 '{generate_script_path}' 未找到。程序退出。")
+                sys.exit(1)
+
+            print(f"正在调用脚本 '{os.path.basename(generate_script_path)}' 生成配置文件 '{config_path}'...")
+            # 使用 sys.executable 确保使用当前环境的 Python 解释器
+            # 将主题通过 stdin 传递给脚本
+            process = subprocess.run(
+                [sys.executable, generate_script_path],
+                input=user_theme,
+                text=True,
+                capture_output=True,
+                check=False # 手动检查返回码
+            )
+
+            # 打印脚本的输出 (stdout 和 stderr) 以便调试
+            print("\n--- 配置文件生成脚本输出 ---")
+            if process.stdout:
+                print(process.stdout.strip())
+            if process.stderr:
+                print(f"错误输出:\n{process.stderr.strip()}")
+            print("--- 脚本输出结束 ---\n")
+
+
+            if process.returncode != 0:
+                print(f"自动生成配置文件失败。请检查上述错误信息。程序退出。")
+                sys.exit(1)
+            elif not os.path.exists(config_path):
+                 print(f"脚本执行成功，但配置文件 '{config_path}' 仍然不存在。请检查脚本逻辑。程序退出。")
+                 sys.exit(1)
+            else:
+                print(f"配置文件 '{config_path}' 已成功生成。")
+                # 继续执行程序，将使用新生成的配置文件
+
+        except Exception as e:
+            print(f"尝试生成配置文件时发生意外错误: {e}")
+            sys.exit(1)
+
+    elif not os.path.exists(config_path):
+         print(f"错误: 指定的配置文件 '{config_path}' 未找到。程序退出。")
+         sys.exit(1)
+
+
+    # 后续代码保持不变，加载配置等
     try:
-        # 加载配置
-        config = Config(args.config)
+        # 加载配置 (现在确保 config_path 存在，无论是原有的还是新生成的)
+        config = Config(config_path)
         
         # 设置日志
         setup_logging(config.log_config["log_dir"])
-        logging.info(f"配置 {args.config} 加载完成")
+        logging.info(f"配置 {config_path} 加载完成") # 使用 config_path 而非 args.config
         
         # --- 获取小说标题并创建专属备份目录 ---
         novel_title = config.novel_config.get("title")
         if not novel_title:
             logging.error("配置文件 'novel_config' 中缺少 'title' 键，无法创建专属输出目录。")
-            # 可以选择退出或使用默认目录
-            # sys.exit(1)
-            # 或者使用一个默认名称，但这可能不是期望的行为
             novel_title = "default_novel"
             logging.warning(f"将使用默认小说标题: {novel_title}")
 
-        # 安全地创建文件名（可选，移除或替换非法字符）
-        # safe_novel_title = "".join(c for c in novel_title if c.isalnum() or c in (' ', '_')).rstrip()
-        # safe_novel_title = safe_novel_title.replace(' ', '_') # 示例替换空格
-        # 使用原始标题，如果路径创建失败会报错
         safe_novel_title = novel_title
 
-        base_output_dir = config.output_config.get("output_dir", "data/output") # 从配置获取或使用默认值
+        base_output_dir = config.output_config.get("output_dir", "data/output")
         novel_output_dir = os.path.join(base_output_dir, safe_novel_title)
         os.makedirs(novel_output_dir, exist_ok=True)
         logging.info(f"小说专属输出目录已创建/确认存在: {novel_output_dir}")
@@ -110,11 +162,11 @@ def main():
         # 复制配置文件快照
         config_snapshot_path = os.path.join(novel_output_dir, "config_snapshot.json")
         try:
-            shutil.copy2(args.config, config_snapshot_path) # copy2 保留元数据
+            # 复制加载时使用的 config_path
+            shutil.copy2(config_path, config_snapshot_path)
             logging.info(f"配置文件快照已保存至: {config_snapshot_path}")
         except Exception as e:
             logging.error(f"复制配置文件快照失败: {e}", exc_info=True)
-            # 根据需要决定是否继续执行
         
         # 创建模型实例
         logging.info("正在初始化AI模型...")
