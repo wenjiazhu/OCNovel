@@ -32,8 +32,8 @@ class ContentGenerator:
         
         # 新增：缓存计数器和同步信息生成器
         self.chapters_since_last_cache = 0
-        self.content_kb_dir = os.path.join("data", "cache", "content_kb")
-        self.sync_info_file = os.path.join("data", "cache", "sync_info.json")
+        self.content_kb_dir = os.path.join(self.output_dir, "content_kb")
+        self.sync_info_file = os.path.join(self.output_dir, "sync_info.json")
         
         # 验证并创建缓存目录
         os.makedirs(self.content_kb_dir, exist_ok=True)

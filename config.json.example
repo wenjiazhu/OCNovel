@@ -16,6 +16,7 @@
     "type": "示例类型",
     "theme": "示例主题",
     "style": "示例风格",
+    "title": "示例标题",
     "target_chapters": 100,
     "chapter_length": 2000,
     "writing_guide": {

@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import shutil
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import logging
@@ -84,6 +85,36 @@ def main():
         # 设置日志
         setup_logging(config.log_config["log_dir"])
         logging.info(f"配置 {args.config} 加载完成")
+        
+        # --- 获取小说标题并创建专属备份目录 ---
+        novel_title = config.novel_config.get("title")
+        if not novel_title:
+            logging.error("配置文件 'novel_config' 中缺少 'title' 键，无法创建专属输出目录。")
+            # 可以选择退出或使用默认目录
+            # sys.exit(1)
+            # 或者使用一个默认名称，但这可能不是期望的行为
+            novel_title = "default_novel"
+            logging.warning(f"将使用默认小说标题: {novel_title}")
+
+        # 安全地创建文件名（可选，移除或替换非法字符）
+        # safe_novel_title = "".join(c for c in novel_title if c.isalnum() or c in (' ', '_')).rstrip()
+        # safe_novel_title = safe_novel_title.replace(' ', '_') # 示例替换空格
+        # 使用原始标题，如果路径创建失败会报错
+        safe_novel_title = novel_title
+
+        base_output_dir = config.output_config.get("output_dir", "data/output") # 从配置获取或使用默认值
+        novel_output_dir = os.path.join(base_output_dir, safe_novel_title)
+        os.makedirs(novel_output_dir, exist_ok=True)
+        logging.info(f"小说专属输出目录已创建/确认存在: {novel_output_dir}")
+
+        # 复制配置文件快照
+        config_snapshot_path = os.path.join(novel_output_dir, "config_snapshot.json")
+        try:
+            shutil.copy2(args.config, config_snapshot_path) # copy2 保留元数据
+            logging.info(f"配置文件快照已保存至: {config_snapshot_path}")
+        except Exception as e:
+            logging.error(f"复制配置文件快照失败: {e}", exc_info=True)
+            # 根据需要决定是否继续执行
         
         # 创建模型实例
         logging.info("正在初始化AI模型...")
@@ -176,7 +207,7 @@ def main():
             # finalizer is already instantiated
             
             # 从 summary.json 获取当前章节进度
-            summary_file = os.path.join(config.output_config["output_dir"], "summary.json")
+            summary_file = os.path.join(base_output_dir, "summary.json")
             start_chapter_index = 0  # Default to 0 (start from chapter 1)
             if os.path.exists(summary_file):
                 try:
@@ -185,7 +216,7 @@ def main():
                         # 获取最大的章节号作为当前进度
                         chapter_numbers = [int(k) for k in summary_data.keys() if k.isdigit()]
                         start_chapter_index = max(chapter_numbers) if chapter_numbers else 0
-                except (json.JSONDecodeError, ValueError) as e:
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
                     logging.warning(f"读取或解析摘要文件 {summary_file} 失败: {e}. 将从头开始。")
                     start_chapter_index = 0  # Reset on error
             
