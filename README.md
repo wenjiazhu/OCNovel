@@ -181,47 +181,60 @@ OCNovel/
 
 ## 配置说明 (`config.json`)
 
-配置文件是指导小说生成的核心。如果 `config.json` 不存在，首次运行 `main.py` 时会尝试自动生成。
+配置文件是指导小说生成的核心。如果 `config.json` 不存在，首次运行 `main.py` 时会尝试自动调用 `src/tools/generate_config.py` 生成一个基础文件。
 
 主要配置项分为以下部分：
 
-### 1. 小说配置 (`novel_config`)
-
-定义小说的基本信息和写作指南。
-
-```json
-{
-  "title": "我的第一部AI小说",    // 小说标题，【重要】用于创建专属输出目录 data/output/<novel_title>/
-  "type": "玄幻",               // 小说类型: 如 玄幻, 都市, 科幻
-  "theme": "成长与冒险",          // 小说主题: 如 成长, 复仇, 探索
-  "style": "轻松幽默",           // 写作风格: 如 热血, 轻松, 悬疑
-  "target_chapters": 100,     // 目标生成章节数
-  "chapter_length": 2000,     // 每章目标字数 (AI会尽量靠近此目标)
-  "writing_guide": {          // 详细的写作指南，包含世界观、角色、情节结构、风格等方面的详细设定
-    // ... 详细配置见 config.json.example ...
-  },
-  "extra_guidance": {         // 额外的写作指导，包括具体写作风格、内容规则、章节结构和情节修正等
-    // ... 详细配置见 config.json.example ...
-  }
-}
-```
-**注意**: `title` 字段非常重要，它决定了你的小说内容（大纲、章节、摘要等）存储在 `data/output/` 下的哪个子目录。
-
-### 2. 知识库配置 (`knowledge_base_config`)
+### 1. 知识库配置 (`knowledge_base_config`)
 
 控制知识库的行为。
 
 ```json
 {
-  "reference_dir": "data/reference", // 参考资料目录
-  "cache_dir": "data/cache/kb_cache",// 知识库缓存目录
+  "reference_files": [
+    "data/reference/example_novel.txt" // 参考资料文件列表
+  ],
   "chunk_size": 1000,              // 文本分块大小
-  "chunk_overlap": 100,            // 文本分块重叠大小
-  "force_rebuild": false           // 是否强制重新构建知识库，即使缓存存在
+  "chunk_overlap": 200,            // 文本分块重叠大小
+  "cache_dir": "data/cache"        // 知识库缓存目录
 }
 ```
 
-### 3. 生成配置 (`generation_config`)
+### 2. 日志配置 (`log_config`)
+
+控制日志记录。
+
+```json
+{
+    "log_dir": "data/logs",    // 日志文件存放目录
+    "log_level": "INFO",     // 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s" // 日志格式
+}
+```
+
+### 3. 小说配置 (`novel_config`)
+
+定义小说的基本信息和写作指南。
+
+```json
+{
+  "type": "示例类型",          // 小说类型: 如 玄幻, 都市, 科幻
+  "theme": "示例主题",         // 小说主题: 如 成长, 复仇, 探索
+  "style": "示例风格",         // 写作风格: 如 热血, 轻松, 悬疑
+  "title": "示例标题",         // 小说标题，通常用于创建专属输出目录 data/output/<novel_title>/
+  "target_chapters": 100,    // 目标生成章节数
+  "chapter_length": 2000,    // 每章目标字数 (AI会尽量靠近此目标)
+  "writing_guide": {         // 详细的写作指南，包含世界观、角色、情节结构、风格等方面的详细设定
+    // ... 详细配置见 config.json.example ...
+  },
+  "extra_guidance": {        // 额外的写作指导，包括具体写作风格、内容规则、章节结构和情节修正等
+    // ... 详细配置见 config.json.example ...
+  }
+}
+```
+**注意**: 实际的章节文本文件、大纲、摘要等会保存在由 `output_config.output_dir` 和 `novel_config.title` 决定的专属目录中，例如 `data/output/示例标题/`。
+
+### 4. 生成配置 (`generation_config`)
 
 控制小说生成过程的行为。
 
@@ -229,7 +242,7 @@ OCNovel/
 {
   "max_retries": 3,          // 单个任务（如生成章节）失败时的最大重试次数
   "retry_delay": 10,         // 重试之间的延迟时间（秒）
-  // "force_rebuild_kb" 已移至 knowledge_base_config
+  "force_rebuild_kb": false, // 是否强制重新构建知识库，即使缓存存在
   "validation": {            // 内容验证选项 (部分可能未完全实现)
     "check_logic": true,
     "check_consistency": true,
@@ -244,29 +257,10 @@ OCNovel/
 
 ```json
 {
-  "output_dir": "data/output",     // 【重要】生成文件的根目录，实际输出会在 data/output/<novel_title>/ 下
-  "format": "txt",                 // 章节内容输出文件格式 (目前主要影响 process_novel.py)
-  "encoding": "utf-8",             // 输出文件编码
-  "save_outline": true,            // 是否保存生成的小说大纲 (outline.json)
-  "save_summary": true,            // 是否保存章节摘要 (summary.json)
-  "save_progress": true            // 是否保存生成进度 (progress.json)
-  // "save_character_states": true // 角色状态保存 (待实现)
+  "format": "txt",               // 输出文件格式 (目前主要影响 process_novel.py)
+  "encoding": "utf-8",           // 输出文件编码
+  "save_outline": true,          // 是否保存生成的小说大纲 (outline.json)
+  "save_character_states": false, // 是否保存角色状态信息 (待移除)
+  "output_dir": "data/output"    // 生成文件的根目录，实际输出会在 data/output/<novel_title>/ 下
 }
 ```
-**注意**: 实际的章节文本文件、大纲、摘要等会保存在由 `output_dir` 和 `novel_config.title` 决定的专属目录中，例如 `data/output/我的第一部AI小说/`。同时，每次运行时使用的配置文件快照也会保存到该目录 (`config_snapshot.json`)。
-
-### 6. 日志配置 (`log_config`)
-
-控制日志记录。
-
-```json
-{
-    "log_dir": "data/logs",    // 日志文件存放目录
-    "log_level": "INFO",     // 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    "log_to_console": true   // 是否同时输出日志到控制台
-}
-```
-
----
-
-*后面的 "番茄小说网自动发布工具" 部分保持不变，因为它似乎是一个独立的脚本功能。*
