@@ -185,58 +185,39 @@ OCNovel/
 
 主要配置项分为以下部分：
 
-### 1. 知识库配置 (`knowledge_base_config`)
+### 1. AI 模型配置（.env 文件）
 
-控制知识库的行为。
+在项目根目录创建 `.env` 文件，配置 AI 模型相关参数：
+
+```
+# Gemini API配置
+GEMINI_API_KEY=你的Gemini API密钥
+
+# OpenAI API配置
+OPENAI_API_KEY=你的OpenAI API密钥
+OPENAI_API_BASE=你的OpenAI API基础URL（可选）
+```
+
+### 2. 项目配置（config.json）
+
+将`config.json.example`的文件名改为`config.json`，编辑 `config.json` 文件，设置项目相关参数。详细配置说明如下：
+
+#### 2.1 知识库配置 (knowledge_base_config)
+
+用于管理和处理参考小说的配置项。
 
 ```json
 {
-  "reference_files": [
-    "data/reference/example_novel.txt" // 参考资料文件列表
-  ],
-  "chunk_size": 1000,              // 文本分块大小
-  "chunk_overlap": 200,            // 文本分块重叠大小
-  "cache_dir": "data/cache"        // 知识库缓存目录
+  "reference_files": ["data/reference/my_novel.txt"],  // 参考小说文件路径列表，支持多个文件
+  "chunk_size": 1000,                                  // 文本分块大小，用于将长文本分割成小块进行处理
+  "chunk_overlap": 200,                                // 分块重叠大小，确保上下文连贯性
+  "cache_dir": "data/cache"                            // 知识库缓存目录，用于存储处理后的文本块
 }
 ```
 
-### 2. 日志配置 (`log_config`)
+#### 2.2 日志配置 (log_config)
 
-控制日志记录。
-
-```json
-{
-    "log_dir": "data/logs",    // 日志文件存放目录
-    "log_level": "INFO",     // 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s" // 日志格式
-}
-```
-
-### 3. 小说配置 (`novel_config`)
-
-定义小说的基本信息和写作指南。
-
-```json
-{
-  "type": "示例类型",          // 小说类型: 如 玄幻, 都市, 科幻
-  "theme": "示例主题",         // 小说主题: 如 成长, 复仇, 探索
-  "style": "示例风格",         // 写作风格: 如 热血, 轻松, 悬疑
-  "title": "示例标题",         // 小说标题，通常用于创建专属输出目录 data/output/<novel_title>/
-  "target_chapters": 100,    // 目标生成章节数
-  "chapter_length": 2000,    // 每章目标字数 (AI会尽量靠近此目标)
-  "writing_guide": {         // 详细的写作指南，包含世界观、角色、情节结构、风格等方面的详细设定
-    // ... 详细配置见 config.json.example ...
-  },
-  "extra_guidance": {        // 额外的写作指导，包括具体写作风格、内容规则、章节结构和情节修正等
-    // ... 详细配置见 config.json.example ...
-  }
-}
-```
-**注意**: 实际的章节文本文件、大纲、摘要等会保存在由 `output_config.output_dir` 和 `novel_config.title` 决定的专属目录中，例如 `data/output/示例标题/`。
-
-### 4. 生成配置 (`generation_config`)
-
-控制小说生成过程的行为。
+用于记录系统运行状态的配置项。
 
 ```json
 {
