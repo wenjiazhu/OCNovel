@@ -24,6 +24,7 @@ class KnowledgeBase:
         self.chunks: List[TextChunk] = []
         self.index = None
         self.cache_dir = config["cache_dir"]
+        self.is_built = False  # 添加构建状态标志
         os.makedirs(self.cache_dir, exist_ok=True)
         
     def _get_cache_path(self, text: str) -> str:
@@ -117,6 +118,28 @@ class KnowledgeBase:
         logging.info(f"总共创建了 {len(chunks)} 个文本块")
         return chunks
         
+    def _find_latest_temp_file(self, cache_path: str) -> Optional[Tuple[str, int]]:
+        """查找最新的临时文件"""
+        temp_files = []
+        for f in os.listdir(self.cache_dir):
+            if f.startswith(os.path.basename(cache_path) + ".temp_"):
+                try:
+                    progress = int(f.split("_")[-1])
+                    temp_files.append((os.path.join(self.cache_dir, f), progress))
+                except ValueError:
+                    continue
+        return max(temp_files, key=lambda x: x[1]) if temp_files else None
+
+    def _load_from_temp(self, temp_file: str) -> Tuple[List[TextChunk], List]:
+        """从临时文件加载进度"""
+        try:
+            with open(temp_file, 'rb') as f:
+                temp_data = pickle.load(f)
+                return temp_data['chunks'], temp_data['vectors']
+        except Exception as e:
+            logging.error(f"加载临时文件失败: {str(e)}")
+            return [], []
+
     def build(self, text: str, force_rebuild: bool = False):
         """构建知识库"""
         cache_path = self._get_cache_path(text)
@@ -128,20 +151,37 @@ class KnowledgeBase:
                     cached_data = pickle.load(f)
                 self.index = cached_data['index']
                 self.chunks = cached_data['chunks']
+                self.is_built = True  # 标记为已构建
                 logging.info("成功从缓存加载知识库")
                 return
             except Exception as e:
                 logging.warning(f"加载缓存失败: {e}")
-                
-        # 分块
-        self.chunks = self._chunk_text(text)
+        
+        # 检查是否有临时文件可以恢复
+        temp_file_info = None if force_rebuild else self._find_latest_temp_file(cache_path)
+        start_idx = 0
+        vectors = []
+        
+        if temp_file_info:
+            temp_file, progress = temp_file_info
+            logging.info(f"发现临时文件，尝试从进度 {progress} 恢复...")
+            self.chunks, vectors = self._load_from_temp(temp_file)
+            if self.chunks and vectors:
+                start_idx = progress
+                logging.info(f"成功恢复到进度 {progress}，继续处理剩余内容")
+            else:
+                logging.warning("临时文件加载失败，将从头开始处理")
+                self.chunks = self._chunk_text(text)
+        else:
+            # 分块
+            self.chunks = self._chunk_text(text)
+        
         logging.info(f"创建了 {len(self.chunks)} 个文本块")
         
         # 分批获取嵌入向量
-        vectors = []
         batch_size = 100  # 每批处理100个文本块
         
-        for i in range(0, len(self.chunks), batch_size):
+        for i in range(start_idx, len(self.chunks), batch_size):
             batch_chunks = self.chunks[i:i+batch_size]
             batch_vectors = []
             
@@ -188,30 +228,49 @@ class KnowledgeBase:
         logging.info("知识库构建完成并已缓存")
         
         # 清理临时文件
-        for f in os.listdir(self.cache_dir):
-            if f.startswith(os.path.basename(cache_path) + ".temp_"):
-                os.remove(os.path.join(self.cache_dir, f))
-        
-    def search(self, query: str, k: int = 5) -> List[Tuple[TextChunk, float]]:
+        if not self.config.get("keep_temp_files", False):  # 添加配置选项来控制是否保留临时文件
+            for f in os.listdir(self.cache_dir):
+                if f.startswith(os.path.basename(cache_path) + ".temp_"):
+                    try:
+                        os.remove(os.path.join(self.cache_dir, f))
+                    except Exception as e:
+                        logging.warning(f"清理临时文件 {f} 失败: {e}")
+
+    def search(self, query: str, k: int = 5) -> List[str]:
         """搜索相关内容"""
         if not self.index:
             raise ValueError("Knowledge base not built yet")
             
         query_vector = self.embedding_model.embed(query)
+        if query_vector is None:
+            return []
+            
+        # 搜索最相似的文本块
+        query_vector_array = np.array([query_vector]).astype('float32')
+        distances, indices = self.index.search(query_vector_array, k)
         
-        # 搜索最相似的向量
-        distances, indices = self.index.search(
-            np.array([query_vector]).astype('float32'), 
-            k
-        )
-        
-        # 返回结果
+        # 返回相关文本内容
         results = []
-        for distance, idx in zip(distances[0], indices[0]):
+        for idx in indices[0]:
             if idx < len(self.chunks):
-                results.append((self.chunks[idx], float(distance)))
-                
+                results.append(self.chunks[idx].content)
         return results
+
+    def get_all_references(self) -> Dict[str, str]:
+        """获取所有参考内容"""
+        if not self.chunks:
+            return {}
+            
+        references = {}
+        for i, chunk in enumerate(self.chunks):
+            key = f"ref_{i+1}"
+            references[key] = chunk.content
+            
+            # 为了避免返回过多数据，只返回前10个参考
+            if i >= 9:
+                break
+                
+        return references
         
     def get_context(self, chunk: TextChunk, window_size: int = 2) -> Dict:
         """获取文本块的上下文"""
@@ -238,3 +297,50 @@ class KnowledgeBase:
         context["next_chunks"] = relevant_chunks[chunk_idx + 1:end_idx]
         
         return context 
+
+    def build_from_files(self, file_paths: List[str], force_rebuild: bool = False):
+        """从多个文件构建知识库"""
+        combined_text = ""
+        for file_path in file_paths:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    combined_text += f.read() + "\n\n"
+                logging.info(f"已加载文件: {file_path}")
+            except Exception as e:
+                logging.error(f"加载文件 {file_path} 失败: {str(e)}")
+                continue
+        
+        if not combined_text.strip():
+            raise ValueError("所有参考文件加载失败，知识库内容为空")
+            
+        return self.build(combined_text, force_rebuild) 
+
+    def build_from_texts(self, texts: List[str], cache_dir: Optional[str] = None) -> None:
+        """从文本列表构建知识库
+        
+        Args:
+            texts: 文本列表，例如章节内容列表
+            cache_dir: 缓存目录，如果提供则使用该目录，否则使用默认缓存目录
+        """
+        if cache_dir:
+            old_cache_dir = self.cache_dir
+            self.cache_dir = cache_dir
+            os.makedirs(self.cache_dir, exist_ok=True)
+        
+        try:
+            # 合并所有文本，加上章节标记
+            combined_text = ""
+            for i, text in enumerate(texts, 1):
+                combined_text += f"第{i}章\n{text}\n\n"
+                
+            # 使用现有的构建方法
+            self.build(combined_text)
+            logging.info(f"从 {len(texts)} 个文本构建知识库成功")
+            
+        except Exception as e:
+            logging.error(f"从文本构建知识库时出错: {str(e)}", exc_info=True)
+            raise
+        finally:
+            # 恢复原始缓存目录
+            if cache_dir:
+                self.cache_dir = old_cache_dir 

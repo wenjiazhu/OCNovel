@@ -7,7 +7,7 @@ from opencc import OpenCC
 cc = OpenCC('t2s')
 
 def standardize_punctuation(text):
-    """将常用半角标点替换为全角中文标点"""
+    """将常用半角标点替换为全角中文标点，并将单省略号替换为双省略号"""
     replacements = {
         ',': '，',
         '.': '。', # 注意：英文句点统一转为中文句号
@@ -15,38 +15,124 @@ def standardize_punctuation(text):
         '!': '！',
         ':': '：',
         ';': '；',
-        '"': '”', # 简单替换，不区分前后引号，可根据需要调整
+        # '"': '”', # 移除此规则，避免破坏 "..." 结构
         "'": '’', # 简单替换，不区分前后引号
         '(': '（',
         ')': '）',
+        # 添加省略号替换规则
+        '…': '……', # 将单个省略号替换为双省略号
+        '...': '……' # 也处理三个点的英文省略号
     }
+    # 先执行省略号替换，避免三个点被先替换成句号
+    text = text.replace('...', '……')
+    text = text.replace('…', '……')
+
     for half, full in replacements.items():
+        # 跳过已经处理的省略号规则
+        if half == '…' or half == '...':
+            continue
+        # 跳过移除的 " 规则
+        if half == '"':
+            continue
         text = text.replace(half, full)
-    # 移除所有空格（包括全角和半角）
+    # 移除所有其他类型的空白字符，保留换行符用于可能的初始段落结构
+    # 但通常在处理前会合并成一个长字符串，所以移除所有 \s+ 是合适的
     text = re.sub(r'\s+', '', text)
     return text
 
 def split_sentences_to_paragraphs(text):
-    """将每个句子拆分为单独的段落，并正确处理句末标点后的引号和括号"""
-    # 修改正则表达式：匹配非结束标点+结束标点+[可选的后引号/括号]
-    # [^。？！]     匹配任何不是句末标点的字符
-    # +            匹配前面的字符一次或多次
-    # [。？！]     匹配句末标点（。、？、！）
-    # [”'）]*    匹配零个或多个后引号（"）、单引号（'）或右括号（）
-    sentences = re.findall(r"[^。？！]+[。？！][”'）]*", text)
-    # 如果原文末尾没有标点，可能最后一部分未被匹配，需要加上
-    if text and text[-1] not in '。？！':
-        # 找到最后一个标点后的内容
-        last_part_start = 0
-        for i in range(len(text) - 1, -1, -1):
-            if text[i] in '。？！':
-                last_part_start = i + 1
-                break
-        if last_part_start < len(text):
-             sentences.append(text[last_part_start:])
+    """
+    将文本拆分为段落。引号("...")内的内容视为一个整体，不按其内部标点拆分。
+    仅根据引号外部的句末标点(。？！)进行拆分。
+    在相邻的结束引号(")和开始引号(")之间强制分段。
+    段落不以 】、）、，、。、！、？、； 开头。
+    段落之间不保留空行。
+    """
+    if not text:
+        return ""
 
-    # 用双换行符连接句子，形成段落
-    return '\n\n'.join(filter(None, sentences)) # filter(None, ...) 移除可能的空字符串
+    quotes = {}
+    placeholder_template = "__QUOTE_{}__"
+    quote_index = 0
+
+    def replace_quote(match):
+        nonlocal quote_index
+        placeholder = placeholder_template.format(quote_index)
+        quotes[re.escape(placeholder)] = match.group(0)
+        quote_index += 1
+        return placeholder
+
+    # 1. 保护引号内容: 替换所有 "..." 为占位符
+    quote_pattern = r'\u201C[^\u201D]*\u201D' # "..."
+    text_with_placeholders = re.sub(quote_pattern, replace_quote, text)
+
+    # 2. 按句末标点分割 (仅在引号外部)
+    sentence_enders_pattern = r'[\u3002\uFF1F\uFF01]' # .?!
+    split_points = [0] # Start of text
+    for match in re.finditer(sentence_enders_pattern, text_with_placeholders):
+        split_points.append(match.end()) # End of punctuation is a split point
+
+    # 如果文本末尾没有句末标点，确保包含最后一部分
+    if split_points[-1] < len(text_with_placeholders):
+         split_points.append(len(text_with_placeholders))
+
+    # 根据分割点创建初步的段落列表
+    initial_segments_with_placeholders = []
+    for i in range(len(split_points) - 1):
+        segment = text_with_placeholders[split_points[i]:split_points[i+1]].strip()
+        if segment:
+            initial_segments_with_placeholders.append(segment)
+
+    # 如果没有有效的分割（例如，文本不包含句末标点），则处理整个文本块
+    if not initial_segments_with_placeholders and text_with_placeholders.strip():
+        initial_segments_with_placeholders = [text_with_placeholders.strip()]
+
+    # 3. Refine Split: 在相邻占位符之间分割
+    refined_segments_with_placeholders = []
+    delimiter = "@@ADJACENT_QUOTE_SPLIT@@"
+    adjacency_pattern = r'(\b__QUOTE_\d+__\b)\s*(?=\b__QUOTE_\d+__\b)'
+
+    for segment in initial_segments_with_placeholders:
+        modified_segment = re.sub(adjacency_pattern, r'\1' + delimiter, segment)
+        sub_segments = modified_segment.split(delimiter)
+        refined_segments_with_placeholders.extend([s.strip() for s in sub_segments if s.strip()])
+
+    # 4. 恢复引号内容
+    restored_segments = []
+    for segment in refined_segments_with_placeholders:
+        restored_segment = segment
+        for placeholder_escaped, original_quote in quotes.items():
+             restored_segment = re.sub(placeholder_escaped, original_quote, restored_segment)
+        if restored_segment:
+             restored_segments.append(restored_segment)
+
+    # 5. 后处理：合并以特定标点开头的段落
+    if not restored_segments:
+        return ""
+
+    processed_paragraphs = []
+    if restored_segments:
+        processed_paragraphs.append(restored_segments[0])
+
+        forbidden_leading_chars = (
+            '\u3011', # 】
+            '\uFF09', # ）
+            '\uFF0C', # ，
+            '\u3002', # 。
+            '\uFF01', # ！
+            '\uFF1F', # ？
+            '\uFF1B'  # ；
+        )
+
+        for i in range(1, len(restored_segments)):
+            current_segment = restored_segments[i]
+            if current_segment.startswith(forbidden_leading_chars):
+                processed_paragraphs[-1] += current_segment
+            else:
+                processed_paragraphs.append(current_segment)
+
+    # 使用单个换行符连接段落，而不是双换行符
+    return '\n'.join(processed_paragraphs)
 
 def count_chinese_chars(text):
     """统计文本中汉字的数量"""
@@ -62,6 +148,9 @@ def process_chapter(input_path, output_dir, split_sentences):
     try:
         with open(input_path, 'r', encoding='utf-8') as f_in:
             content = f_in.read()
+
+        # 移除文件末尾的字数统计
+        content = re.sub(r'（字数：\d+字）\s*$', '', content)
 
         # 1. 繁转简
         simplified_content = cc.convert(content)

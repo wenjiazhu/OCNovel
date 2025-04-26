@@ -5,10 +5,10 @@
     ],
     "chunk_size": 1000,
     "chunk_overlap": 200,
-    "cache_dir": "<path/to/cache>"
+    "cache_dir": "data/cache"
   },
   "log_config": {
-    "log_dir": "<path/to/logs>",
+    "log_dir": "data/logs",
     "log_level": "INFO",
     "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   },
@@ -16,6 +16,7 @@
     "type": "示例类型",
     "theme": "示例主题",
     "style": "示例风格",
+    "title": "示例标题",
     "target_chapters": 100,
     "chapter_length": 2000,
     "writing_guide": {
@@ -123,7 +124,7 @@
     "format": "txt",
     "encoding": "utf-8",
     "save_outline": true,
-    "save_character_states": true,
-    "output_dir": "<path/to/output>"
+    "save_character_states": false,
+    "output_dir": "data/output"
   }
 }

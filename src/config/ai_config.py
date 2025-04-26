@@ -12,9 +12,10 @@ class AIConfig:
         # Gemini 配置
         self.gemini_config = {
             "api_key": os.getenv("GEMINI_API_KEY", ""),
+            "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
             "models": {
                 "outline": {
-                    "name": "gemini-2.0-flash-thinking-exp-01-21",
+                    "name": "gemini-2.5-flash-preview-04-17",
                     "temperature": 1.0
                 },
                 "content": {
@@ -28,6 +29,7 @@ class AIConfig:
         self.openai_config = {
             "api_key": os.getenv("OPENAI_API_KEY", ""),
             "base_url": os.getenv("OPENAI_API_BASE", "https://api.siliconflow.cn/v1"),
+            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "5")),  # 默认 5 秒
             "models": {
                 "embedding": {
                     "name": "Pro/BAAI/bge-m3",
@@ -62,7 +64,8 @@ class AIConfig:
             "type": "gemini",
             "api_key": self.gemini_config["api_key"],
             "model_name": self.gemini_config["models"][model_type]["name"],
-            "temperature": self.gemini_config["models"][model_type]["temperature"]
+            "temperature": self.gemini_config["models"][model_type]["temperature"],
+            "retry_delay": self.gemini_config["retry_delay"]  # 新增重试间隔
         }
     
     def get_openai_config(self, model_type: str = "embedding") -> Dict[str, Any]:
@@ -76,7 +79,8 @@ class AIConfig:
             "base_url": self.openai_config["base_url"],
             "model_name": self.openai_config["models"][model_type]["name"],
             "temperature": self.openai_config["models"][model_type]["temperature"],
-            "dimension": self.openai_config["models"][model_type].get("dimension", 1024)
+            "dimension": self.openai_config["models"][model_type].get("dimension", 1024),
+            "retry_delay": self.openai_config["retry_delay"]  # 新增重试间隔
         }
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
