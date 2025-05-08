@@ -21,17 +21,8 @@ build/
 *.swo
 
 # 项目特定文件
-data/cache/*
-data/output/*
-data/output2/*
-data/output3/*
-data/logs/*
-data/reference/*
-!data/cache/.gitkeep
-!data/output/.gitkeep
-!data/output2/.gitkeep
-!data/logs/.gitkeep
-data/marketing/*
+data/*/*
+!data/*/.gitkeep
 config.json
 config2.json
 config3.json
