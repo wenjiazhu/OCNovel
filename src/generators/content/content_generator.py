@@ -16,6 +16,7 @@ from ..prompts import (
     get_sync_info_prompt,
     get_knowledge_search_prompt
 )
+import numpy as np
 
 # Get a logger specific to this module
 logger = logging.getLogger(__name__)
@@ -413,15 +414,32 @@ class ContentGenerator:
                 short_summary="",  # 可根据实际需求补充
             )
 
+            # 添加日志，记录搜索提示词
+            logger.info(f"搜索提示词: {search_prompt[:100]}...，长度: {len(search_prompt)}")
+            
+            # 检查知识库对象
+            logger.info(f"知识库对象类型: {type(self.knowledge_base)}")
+            logger.info(f"知识库是否已构建: {getattr(self.knowledge_base, 'is_built', False)}")
+            logger.info(f"知识库索引类型: {type(getattr(self.knowledge_base, 'index', None))}")
+            
             # 调用知识库检索
+            logger.info("开始调用知识库搜索方法...")
             relevant_knowledge = self.knowledge_base.search(search_prompt)
+            
+            # 检查返回结果
+            logger.info(f"知识库搜索返回结果类型: {type(relevant_knowledge)}")
+            logger.info(f"知识库搜索返回结果长度: {len(relevant_knowledge) if relevant_knowledge else 0}")
+            
             if relevant_knowledge and isinstance(relevant_knowledge, list):
                 references["plot_references"] = relevant_knowledge[:3]  # 限制数量
                 references["character_references"] = relevant_knowledge[3:6]
                 references["setting_references"] = relevant_knowledge[6:9]
+                logger.info(f"成功分配参考信息，共 {len(relevant_knowledge)} 项")
+            else:
+                logger.warning(f"知识库返回结果无效或为空: {relevant_knowledge}")
 
         except Exception as e:
-            logging.error(f"优化检索章节参考信息时出错: {str(e)}")
+            logger.error(f"优化检索章节参考信息时出错: {str(e)}", exc_info=True)  # 添加exc_info获取完整堆栈
 
         return references
 
@@ -634,9 +652,47 @@ if __name__ == "__main__":
 
     class MockKB:
         # Correct indentation for methods
-        def search(self, query):
+        def search(self, query: str, k: int = 5) -> List[str]:
+            """搜索相关内容"""
             logger.debug(f"[MockKB] Searching for: {query}")
-            return [f"知识库参考1 for {query}", f"知识库参考2 for {query}"]
+            
+            if not self.index:
+                logger.error("知识库索引未构建")
+                raise ValueError("Knowledge base not built yet")
+            
+            # 安全地记录索引类型，不访问.d属性
+            logger.info(f"知识库索引类型: {type(self.index)}")
+            
+            query_vector = self.embedding_model.embed(query)
+            
+            if query_vector is None:
+                logger.error("嵌入模型返回空向量")
+                return []
+            
+            logger.info(f"查询向量类型: {type(query_vector)}, 长度: {len(query_vector)}")
+            
+            # 搜索最相似的文本块
+            query_vector_array = np.array([query_vector]).astype('float32')
+            logger.info(f"处理后的查询向量数组形状: {query_vector_array.shape}")
+            
+            try:
+                logger.info(f"调用faiss搜索，参数: 向量形状={query_vector_array.shape}, k={k}")
+                distances, indices = self.index.search(query_vector_array, k)
+                logger.info(f"搜索结果: 距离形状={distances.shape}, 索引形状={indices.shape}")
+            except Exception as e:
+                logger.error(f"faiss搜索失败: {str(e)}", exc_info=True)
+                raise
+            
+            # 返回相关文本内容
+            results = []
+            for idx in indices[0]:
+                if idx < len(self.chunks):
+                    results.append(self.chunks[idx].content)
+                else:
+                    logger.warning(f"索引越界: idx={idx}, chunks长度={len(self.chunks)}")
+            
+            logger.info(f"返回结果数量: {len(results)}")
+            return results
 
     class MockConsistencyChecker:
         # Correct indentation for methods
