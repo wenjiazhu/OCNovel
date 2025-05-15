@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>OCNovel 智能小说生成助手</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: #f5f6fa;
+            color: #222;
+        }
+        .sidebar {
+            width: 220px;
+            background: #fff;
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            border-right: 1px solid #e6e6e6;
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+        }
+        .sidebar .profile {
+            padding: 32px 0 16px 0;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+        }
+        .sidebar .profile img {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            margin-bottom: 8px;
+        }
+        .sidebar .profile .name {
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .sidebar nav {
+            flex: 1;
+            padding: 16px 0;
+        }
+        .sidebar nav a {
+            display: block;
+            padding: 12px 32px;
+            color: #333;
+            text-decoration: none;
+            font-size: 15px;
+            border-left: 4px solid transparent;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .sidebar nav a.active, .sidebar nav a:hover {
+            background: #f0f4ff;
+            border-left: 4px solid #4e7fff;
+            color: #4e7fff;
+        }
+        .main {
+            margin-left: 220px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .topbar {
+            height: 56px;
+            background: #fff;
+            border-bottom: 1px solid #e6e6e6;
+            display: flex;
+            align-items: center;
+            padding: 0 32px;
+            justify-content: space-between;
+        }
+        .topbar .logo {
+            font-size: 22px;
+            font-weight: bold;
+            color: #4e7fff;
+        }
+        .topbar .user {
+            font-size: 15px;
+            color: #888;
+        }
+        .content {
+            display: flex;
+            flex: 1;
+            padding: 24px 32px;
+            gap: 32px;
+        }
+        .works-list {
+            width: 320px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px #0001;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            height: fit-content;
+        }
+        .works-list h2 {
+            font-size: 18px;
+            margin: 0 0 16px 0;
+        }
+        .work-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .work-item:last-child {
+            border-bottom: none;
+        }
+        .work-cover {
+            width: 48px;
+            height: 64px;
+            background: #eee;
+            border-radius: 4px;
+            object-fit: cover;
+        }
+        .work-info {
+            flex: 1;
+        }
+        .work-title {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .work-meta {
+            font-size: 13px;
+            color: #888;
+        }
+        .editor-area {
+            flex: 1;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px #0001;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .editor-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .editor-header h2 {
+            font-size: 18px;
+            margin: 0;
+        }
+        .editor-header .chapter-select {
+            font-size: 15px;
+            padding: 4px 8px;
+        }
+        .editor-content {
+            flex: 1;
+            min-height: 400px;
+            border: 1px solid #e6e6e6;
+            border-radius: 4px;
+            padding: 16px;
+            font-size: 16px;
+            line-height: 1.8;
+            background: #fafbff;
+            resize: vertical;
+            outline: none;
+        }
+        .editor-footer {
+            margin-top: 12px;
+            text-align: right;
+            color: #888;
+            font-size: 13px;
+        }
+        .sidebar-right {
+            width: 220px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px #0001;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            height: fit-content;
+        }
+        .sidebar-right h3 {
+            font-size: 16px;
+            margin: 0 0 8px 0;
+        }
+        .character-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .character-list li {
+            padding: 6px 0;
+            font-size: 15px;
+            color: #555;
+        }
+        @media (max-width: 1100px) {
+            .content {
+                flex-direction: column;
+                gap: 16px;
+            }
+            .sidebar-right, .works-list {
+                width: 100%;
+            }
+            .main {
+                margin-left: 0;
+            }
+        }
+        /* 预览弹窗样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3);
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .modal-content {
+            background: #fff;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90vw;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 24px #0003;
+            padding: 32px 32px 24px 32px;
+            position: relative;
+            animation: fadeIn 0.2s;
+        }
+        @keyframes fadeIn {
+            from { transform: translateY(40px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-close {
+            position: absolute;
+            right: 20px;
+            top: 16px;
+            font-size: 22px;
+            color: #888;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+        .preview-title {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 18px;
+            color: #4e7fff;
+        }
+        .preview-content {
+            font-size: 17px;
+            line-height: 2;
+            color: #222;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧导航栏 -->
+    <aside class="sidebar">
+        <div class="logo">OCNovel</div>
+        <nav>
+            <a href="#" class="active" data-section="dashboard">仪表盘</a>
+            <a href="#" data-section="outline">大纲生成</a>
+            <a href="#" data-section="chapter">章节生成</a>
+            <a href="#" data-section="finalize">章节定稿</a>
+            <a href="#" data-section="knowledge">知识库管理</a>
+            <a href="#" data-section="characters">角色管理</a>
+            <a href="#" data-section="preview">内容预览</a>
+            <a href="#" data-section="settings">系统设置</a>
+        </nav>
+    </aside>
+
+    <!-- 主体内容区 -->
+    <div class="main">
+        <!-- 顶部栏 -->
+        <header class="topbar">
+            <div class="project-title">当前项目：<span id="novel-title">牧神记之外卖天尊传</span></div>
+            <div class="user-info">
+                <span>已同步</span>
+                <img src="https://cdn.jsdelivr.net/gh/edent/SuperTinyIcons/images/svg/user.svg" alt="头像" class="avatar">
+            </div>
+        </header>
+
+        <!-- 动态内容区 -->
+        <section class="content" id="content-area">
+            <!-- 仪表盘（默认） -->
+            <div class="dashboard section">
+                <h2>欢迎使用 OCNovel 智能小说生成助手</h2>
+                <ul>
+                    <li>当前小说：<b>牧神记之外卖天尊传</b></li>
+                    <li>总章节数：<b>5</b></li>
+                    <li>已生成章节：<b>5</b></li>
+                    <li>上次生成时间：2024-05-15</li>
+                </ul>
+            </div>
+
+            <!-- 大纲生成 -->
+            <div class="outline section" style="display:none;">
+                <h2>大纲生成</h2>
+                <form id="outline-form">
+                    <label>起始章节：<input type="number" name="start" min="1" value="1"></label>
+                    <label>结束章节：<input type="number" name="end" min="1" value="5"></label>
+                    <label>小说类型：<input type="text" name="type" value="玄幻"></label>
+                    <label>主题：<input type="text" name="theme" value="天庭权谋"></label>
+                    <label>风格：<input type="text" name="style" value="热血"></label>
+                    <button type="submit">生成大纲</button>
+                </form>
+                <div id="outline-result">
+                    <!-- 展示大纲内容 -->
+                </div>
+            </div>
+
+            <!-- 章节生成 -->
+            <div class="chapter section" style="display:none;">
+                <h2>章节生成</h2>
+                <form id="chapter-form">
+                    <label>起始章节号：<input type="number" name="start_chapter" min="1" value="1"></label>
+                    <label>目标章节号：<input type="number" name="target_chapter" min="1"></label>
+                    <label>额外提示词：<input type="text" name="extra_prompt"></label>
+                    <button type="submit">生成章节内容</button>
+                </form>
+                <div id="chapter-result">
+                    <!-- 展示章节内容 -->
+                </div>
+            </div>
+
+            <!-- 章节定稿 -->
+            <div class="finalize section" style="display:none;">
+                <h2>章节定稿</h2>
+                <form id="finalize-form">
+                    <label>章节号：<input type="number" name="chapter" min="1"></label>
+                    <button type="submit">定稿处理</button>
+                </form>
+                <div id="finalize-result">
+                    <!-- 展示定稿结果 -->
+                </div>
+            </div>
+
+            <!-- 知识库管理 -->
+            <div class="knowledge section" style="display:none;">
+                <h2>知识库管理</h2>
+                <button id="refresh-kb">刷新知识库</button>
+                <div id="kb-status">知识库状态：已加载</div>
+                <div id="kb-list">
+                    <!-- 展示知识库文件、分块、检索等 -->
+                </div>
+            </div>
+
+            <!-- 角色管理 -->
+            <div class="characters section" style="display:none;">
+                <h2>角色管理</h2>
+                <button id="add-character">添加角色</button>
+                <div id="character-list">
+                    <!-- 展示角色信息 -->
+                </div>
+            </div>
+
+            <!-- 内容预览 -->
+            <div class="preview section" style="display:none;">
+                <h2>内容预览</h2>
+                <select id="preview-chapter">
+                    <option>第1章 都市夜骑，梦入元界</option>
+                    <option>第2章 双重灵胎，道纹星盘</option>
+                    <!-- ... -->
+                </select>
+                <button id="show-preview">预览</button>
+                <div id="preview-area">
+                    <!-- 展示章节排版效果 -->
+                </div>
+            </div>
+
+            <!-- 系统设置 -->
+            <div class="settings section" style="display:none;">
+                <h2>系统设置</h2>
+                <form id="settings-form">
+                    <label>API Key：<input type="text" name="api_key"></label>
+                    <label>输出目录：<input type="text" name="output_dir"></label>
+                    <button type="submit">保存设置</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- 右侧辅助栏 -->
+        <aside class="sidebar-right">
+            <div class="summary-block">
+                <h3>章节摘要</h3>
+                <div id="chapter-summary">
+                    <!-- 展示当前章节摘要 -->
+                </div>
+            </div>
+            <div class="character-block">
+                <h3>主要角色</h3>
+                <ul id="main-characters">
+                    <li>陆沉（主角）</li>
+                    <li>云天琴</li>
+                </ul>
+            </div>
+            <div class="kb-block">
+                <h3>知识库检索</h3>
+                <div id="kb-search-result">
+                    <!-- 展示检索结果 -->
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- 预览弹窗 -->
+    <div class="modal" id="preview-modal" style="display:none;">
+        <div class="modal-content">
+            <button class="modal-close" id="close-modal">&times;</button>
+            <div class="preview-title" id="modal-preview-title"></div>
+            <div class="preview-content" id="modal-preview-content"></div>
+        </div>
+    </div>
+
+    <script>
+        // 侧边栏切换
+        document.querySelectorAll('.sidebar nav a').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
+                this.classList.add('active');
+                let section = this.getAttribute('data-section');
+                document.querySelectorAll('.section').forEach(div => div.style.display = 'none');
+                document.querySelector('.' + section).style.display = '';
+            });
+        });
+        // 预览弹窗逻辑等可参考前述代码
+    </script>
+</body>
+</html>
