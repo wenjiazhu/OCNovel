@@ -23,9 +23,7 @@ build/
 # 项目特定文件
 data/*/*
 !data/*/.gitkeep
-config.json
-config2.json
-config3.json
+config*.json
 cookies.json
 .cursor/rules/*
 /chapters/*
