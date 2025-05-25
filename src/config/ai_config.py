@@ -19,7 +19,7 @@ class AIConfig:
                     "temperature": 1.0
                 },
                 "content": {
-                    "name": "gemini-2.5-flash-preview-04-17",
+                    "name": "gemini-2.5-flash-preview-05-20",
                     "temperature": 0.7
                 }
             }
