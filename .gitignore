@@ -29,6 +29,8 @@ config3.json
 cookies.json
 .cursor/rules/*
 /chapters/*
+auto_publish.py
+merge_chapters.py
 
 # 环境变量
 .env
