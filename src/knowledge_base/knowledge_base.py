@@ -238,22 +238,48 @@ class KnowledgeBase:
 
     def search(self, query: str, k: int = 5) -> List[str]:
         """搜索相关内容"""
+        logging.info(f"开始搜索，查询长度: {len(query)}, k={k}")
+        
         if not self.index:
+            logging.error("知识库索引未构建")
             raise ValueError("Knowledge base not built yet")
-            
+        
+        logging.info(f"知识库索引类型: {type(self.index)}, 维度: {self.index.d}")
+        
         query_vector = self.embedding_model.embed(query)
+        
         if query_vector is None:
+            logging.error("嵌入模型返回空向量")
             return []
-            
+        
+        logging.info(f"查询向量类型: {type(query_vector)}, 形状: {getattr(query_vector, 'shape', len(query_vector))}")
+        
         # 搜索最相似的文本块
         query_vector_array = np.array([query_vector]).astype('float32')
-        distances, indices = self.index.search(query_vector_array, k)
+        logging.info(f"处理后的查询向量数组形状: {query_vector_array.shape}, 类型: {query_vector_array.dtype}")
+        
+        # 确保向量维度与索引维度匹配
+        if query_vector_array.shape[1] != self.index.d:
+            logging.error(f"查询向量维度不匹配: 索引维度={self.index.d}, 查询向量维度={query_vector_array.shape[1]}")
+            return []
+        
+        try:
+            logging.info(f"调用faiss搜索，参数: 向量形状={query_vector_array.shape}, k={k}")
+            distances, indices = self.index.search(query_vector_array, k)
+            logging.info(f"搜索结果: 距离形状={distances.shape}, 索引形状={indices.shape}")
+        except Exception as e:
+            logging.error(f"faiss搜索失败: {str(e)}", exc_info=True)
+            raise
         
         # 返回相关文本内容
         results = []
         for idx in indices[0]:
             if idx < len(self.chunks):
                 results.append(self.chunks[idx].content)
+            else:
+                logging.warning(f"索引越界: idx={idx}, chunks长度={len(self.chunks)}")
+        
+        logging.info(f"返回结果数量: {len(results)}")
         return results
 
     def get_all_references(self) -> Dict[str, str]:

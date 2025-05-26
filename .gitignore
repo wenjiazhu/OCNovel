@@ -21,23 +21,14 @@ build/
 *.swo
 
 # 项目特定文件
-data/cache/*
-data/output/*
-data/output2/*
-data/output3/*
-data/logs/*
-data/reference/*
-!data/cache/.gitkeep
-!data/output/.gitkeep
-!data/output2/.gitkeep
-!data/logs/.gitkeep
-data/marketing/*
-config.json
-config2.json
-config3.json
+data/*/*
+!data/*/.gitkeep
+config*.json
 cookies.json
 .cursor/rules/*
 /chapters/*
+auto_publish.py
+merge_chapters.py
 
 # 环境变量
 .env
