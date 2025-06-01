@@ -114,6 +114,16 @@
     "max_retries": 3,
     "retry_delay": 10,
     "force_rebuild_kb": false,
+    "model_selection": {
+      "outline": {
+        "provider": "openai",
+        "model_type": "outline"
+      },
+      "content": {
+        "provider": "gemini",
+        "model_type": "content"
+      }
+    },
     "validation": {
       "check_logic": true,
       "check_consistency": true,

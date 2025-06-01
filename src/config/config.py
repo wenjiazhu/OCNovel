@@ -49,8 +49,8 @@ class Config:
                 "type": "openai",
                 "model_name": self.ai_config.openai_config["models"]["embedding"]["name"],
                 "temperature": self.ai_config.openai_config["models"]["embedding"]["temperature"],
-                "api_key": self.ai_config.openai_config["api_key"],
-                "base_url": self.ai_config.openai_config["base_url"],
+                "api_key": self.ai_config.openai_config["models"]["embedding"]["api_key"],
+                "base_url": self.ai_config.openai_config["models"]["embedding"]["base_url"],
                 "dimension": self.ai_config.openai_config["models"]["embedding"]["dimension"]
             }
         }
@@ -117,8 +117,8 @@ class Config:
                 "type": "openai",
                 "model_name": self.ai_config.openai_config["models"]["embedding"]["name"],
                 "temperature": self.ai_config.openai_config["models"]["embedding"]["temperature"],
-                "api_key": self.ai_config.openai_config["api_key"],
-                "base_url": self.ai_config.openai_config["base_url"],
+                "api_key": self.ai_config.openai_config["models"]["embedding"]["api_key"],
+                "base_url": self.ai_config.openai_config["models"]["embedding"]["base_url"],
                 "dimension": self.ai_config.openai_config["models"]["embedding"]["dimension"]
             }
         else:
