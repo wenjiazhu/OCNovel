@@ -14,8 +14,8 @@ def test_embedding():
     try:
         # 加载环境变量
         load_dotenv()
-        api_key = os.getenv("OPENAI_API_KEY")
-        api_base = os.getenv("OPENAI_API_BASE")
+        api_key = os.getenv("OPENAI_EMBEDDING_API_KEY")
+        api_base = os.getenv("OPENAI_EMBEDDING_API_BASE")
         
         if not api_key or not api_base:
             raise ValueError("未找到API密钥或基础URL")

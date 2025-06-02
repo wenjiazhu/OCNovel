@@ -15,7 +15,8 @@ class OpenAIModel(BaseModel):
         
         self.client = OpenAI(
             api_key=config["api_key"],
-            base_url=config.get("base_url", "https://api.siliconflow.cn/v1")
+            base_url=config.get("base_url", "https://api.siliconflow.cn/v1"),
+            timeout=60
         )
         logging.info(f"OpenAI model initialized with base URL: {config.get('base_url', 'https://api.siliconflow.cn/v1')}")
         
