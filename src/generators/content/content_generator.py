@@ -502,19 +502,29 @@ class ContentGenerator:
         logger.info(f"准备更新同步信息，当前章节进度: {self.current_chapter}，同步信息文件: {self.sync_info_file}")
         try:
             all_content = ""
-            # 使用 self.current_chapter + 1 确保包含当前章节
-            for chapter_num in range(1, self.current_chapter + 1):
-                filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
-                filepath = os.path.join(self.output_dir, filename)
-                logger.debug(f"尝试读取章节文件: {filepath}")
-                if os.path.exists(filepath):
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        all_content += f.read() + "\n\n"
+            # 修改：只读取最近5章的内容来更新同步信息
+            # 确保从第1章开始，且不超过当前已完成的章节
+            num_chapters_to_include = 5
+            start_chapter_for_sync = max(1, self.current_chapter - num_chapters_to_include + 1)
+            
+            logger.info(f"将读取第 {start_chapter_for_sync} 章到第 {self.current_chapter} 章的内容来生成同步信息。")
+
+            for chapter_num in range(start_chapter_for_sync, self.current_chapter + 1):
+                if chapter_num - 1 < len(self.chapter_outlines): # 确保章节索引有效
+                    filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
+                    filepath = os.path.join(self.output_dir, filename)
+                    logger.debug(f"尝试读取章节文件: {filepath}")
+                    if os.path.exists(filepath):
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            all_content += f.read() + "\n\n"
+                    else:
+                        logger.warning(f"文件不存在，无法读取: {filepath}")
                 else:
-                    logger.warning(f"文件不存在，无法读取: {filepath}")
+                    logger.warning(f"章节大纲中不存在章节 {chapter_num}，跳过读取。")
+
 
             if all_content:
-                logger.info(f"成功读取所有章节内容，总字数: {len(all_content)}，开始生成同步信息")
+                logger.info(f"成功读取最近章节内容，总字数: {len(all_content)}，开始生成同步信息")
                 prompt = self._create_sync_info_prompt(all_content)
                 sync_info = self.content_model.generate(prompt)
                 
@@ -527,6 +537,8 @@ class ContentGenerator:
                         json_content = sync_info[json_start:json_end]
                         logger.info(f"提取到JSON内容，长度: {len(json_content)}")
                         sync_info_dict = json.loads(json_content)
+                        # 在保存前，确保更新时间字段
+                        sync_info_dict["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
                         logger.info(f"成功解析同步信息JSON，准备写入文件: {self.sync_info_file}")
                         with open(self.sync_info_file, 'w', encoding='utf-8') as f:
                             json.dump(sync_info_dict, f, ensure_ascii=False, indent=2)
