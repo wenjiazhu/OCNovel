@@ -31,29 +31,23 @@ class Config:
         # 从配置文件中读取 output_dir
         config_output_dir = self.config["output_config"].get("output_dir")
         
-        # AI模型配置
-        self.model_config = {
-            "outline_model": {
-                "type": "gemini",
-                "model_name": self.ai_config.gemini_config["models"]["outline"]["name"],
-                "temperature": self.ai_config.gemini_config["models"]["outline"]["temperature"],
-                "api_key": self.ai_config.gemini_config["api_key"]
-            },
-            "content_model": {
-                "type": "gemini",
-                "model_name": self.ai_config.gemini_config["models"]["content"]["name"],
-                "temperature": self.ai_config.gemini_config["models"]["content"]["temperature"],
-                "api_key": self.ai_config.gemini_config["api_key"]
-            },
-            "embedding_model": {
-                "type": "openai",
-                "model_name": self.ai_config.openai_config["models"]["embedding"]["name"],
-                "temperature": self.ai_config.openai_config["models"]["embedding"]["temperature"],
-                "api_key": self.ai_config.openai_config["models"]["embedding"]["api_key"],
-                "base_url": self.ai_config.openai_config["models"]["embedding"]["base_url"],
-                "dimension": self.ai_config.openai_config["models"]["embedding"]["dimension"]
-            }
-        }
+        # 动态AI模型配置，根据config.json的model_selection字段
+        self.model_config = {}
+        model_selection = self.config["generation_config"].get("model_selection", {})
+        # outline_model
+        outline_sel = model_selection.get("outline", {"provider": "gemini", "model_type": "outline"})
+        if outline_sel["provider"] == "openai":
+            self.model_config["outline_model"] = self.ai_config.get_openai_config(outline_sel["model_type"])
+        else:
+            self.model_config["outline_model"] = self.ai_config.get_gemini_config(outline_sel["model_type"])
+        # content_model
+        content_sel = model_selection.get("content", {"provider": "gemini", "model_type": "content"})
+        if content_sel["provider"] == "openai":
+            self.model_config["content_model"] = self.ai_config.get_openai_config(content_sel["model_type"])
+        else:
+            self.model_config["content_model"] = self.ai_config.get_gemini_config(content_sel["model_type"])
+        # embedding_model 只支持openai
+        self.model_config["embedding_model"] = self.ai_config.get_openai_config("embedding")
         
         # 小说配置
         self.novel_config = self.config["novel_config"]
@@ -98,31 +92,9 @@ class Config:
         Returns:
             Dict[str, Any]: 模型配置
         """
-        if model_type == "outline_model":
-            return {
-                "type": "gemini",
-                "model_name": self.ai_config.gemini_config["models"]["outline"]["name"],
-                "temperature": self.ai_config.gemini_config["models"]["outline"]["temperature"],
-                "api_key": self.ai_config.gemini_config["api_key"]
-            }
-        elif model_type == "content_model":
-            return {
-                "type": "gemini",
-                "model_name": self.ai_config.gemini_config["models"]["content"]["name"],
-                "temperature": self.ai_config.gemini_config["models"]["content"]["temperature"],
-                "api_key": self.ai_config.gemini_config["api_key"]
-            }
-        elif model_type == "embedding_model":
-            return {
-                "type": "openai",
-                "model_name": self.ai_config.openai_config["models"]["embedding"]["name"],
-                "temperature": self.ai_config.openai_config["models"]["embedding"]["temperature"],
-                "api_key": self.ai_config.openai_config["models"]["embedding"]["api_key"],
-                "base_url": self.ai_config.openai_config["models"]["embedding"]["base_url"],
-                "dimension": self.ai_config.openai_config["models"]["embedding"]["dimension"]
-            }
-        else:
-            raise ValueError(f"不支持的模型类型: {model_type}")
+        if model_type in self.model_config:
+            return self.model_config[model_type]
+        raise ValueError(f"不支持的模型类型: {model_type}")
     
     def get_writing_guide(self) -> Dict:
         """获取写作指南"""

@@ -19,7 +19,7 @@ class AIConfig:
                     "temperature": 1.0
                 },
                 "content": {
-                    "name": "gemini-2.5-pro-preview-05-06",
+                    "name": "gemini-2.5-flash-preview-05-20",
                     "temperature": 0.7
                 }
             }
@@ -34,19 +34,19 @@ class AIConfig:
                     "temperature": 0.7,
                     "dimension": 1024,
                     "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.siliconflow.cn/v1")
+                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1")
                 },
                 "outline": {
-                    "name": "gpt-4-turbo-preview",
+                    "name": "deepgeminipro",
                     "temperature": 1.0,
                     "api_key": os.getenv("OPENAI_OUTLINE_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.siliconflow.cn/v1")
+                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.openai.com/v1")
                 },
                 "content": {
-                    "name": "gpt-4-turbo-preview",
+                    "name": "deepgeminiflash",
                     "temperature": 0.7,
                     "api_key": os.getenv("OPENAI_CONTENT_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.siliconflow.cn/v1")
+                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.openai.com/v1")
                 }
             }
         }
