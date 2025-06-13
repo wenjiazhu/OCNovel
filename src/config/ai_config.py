@@ -8,24 +8,8 @@ class AIConfig:
     def __init__(self):
         # 加载环境变量
         load_dotenv()
-        
-        # Gemini 配置
-        self.gemini_config = {
-            "api_key": os.getenv("GEMINI_API_KEY", ""),
-            "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
-            "models": {
-                "outline": {
-                    "name": "gemini-2.5-pro-preview-06-05",
-                    "temperature": 1.0
-                },
-                "content": {
-                    "name": "gemini-2.5-flash-preview-05-20",
-                    "temperature": 0.7
-                }
-            }
-        }
-        
-        # OpenAI 配置
+
+        # OpenAI 配置（提前定义）
         self.openai_config = {
             "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "5")),  # 默认 5 秒
             "models": {
@@ -47,10 +31,30 @@ class AIConfig:
                     "temperature": 0.7,
                     "api_key": os.getenv("OPENAI_CONTENT_API_KEY", ""),
                     "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.openai.com/v1")
+                },
+                "reranker": {
+                    "name": os.getenv("OPENAI_RERANKER_MODEL", "Pro/BAAI/bge-reranker-v2-m3"),
+                    "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
+                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
+                    "use_fp16": os.getenv("OPENAI_RERANKER_USE_FP16", "True") == "True"
                 }
             }
         }
-        
+        # Gemini 配置
+        self.gemini_config = {
+            "api_key": os.getenv("GEMINI_API_KEY", ""),
+            "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
+            "models": {
+                "outline": {
+                    "name": "gemini-2.5-pro-preview-06-05",
+                    "temperature": 1.0
+                },
+                "content": {
+                    "name": "gemini-2.5-flash-preview-05-20",
+                    "temperature": 0.7
+                }
+            }
+        }
         # 验证配置
         self._validate_config()
     
@@ -84,8 +88,17 @@ class AIConfig:
         """获取 OpenAI 模型配置"""
         if model_type not in self.openai_config["models"]:
             raise ValueError(f"不支持的 OpenAI 模型类型: {model_type}")
-            
         model_config = self.openai_config["models"][model_type]
+        # 针对reranker类型，返回专用字段
+        if model_type == "reranker":
+            return {
+                "type": "openai",
+                "api_key": model_config["api_key"],
+                "base_url": model_config["base_url"],
+                "model_name": model_config["name"],
+                "use_fp16": model_config.get("use_fp16", True),
+                "retry_delay": self.openai_config["retry_delay"]
+            }
         return {
             "type": "openai",
             "api_key": model_config["api_key"],
@@ -116,4 +129,4 @@ class AIConfig:
         elif provider == "gemini":
             return ai_config.get_model_config(f"gemini_{model_type}")
         else:
-            raise ValueError(f"不支持的模型提供商: {provider}") 
+            raise ValueError(f"不支持的模型提供商: {provider}")

@@ -29,6 +29,7 @@ cookies.json
 /chapters/*
 auto_publish.py
 merge_chapters.py
+convert_encoding.py
 
 # 环境变量
 .env

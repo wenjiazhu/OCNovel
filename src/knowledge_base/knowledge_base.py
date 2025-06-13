@@ -7,6 +7,7 @@ import jieba
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import logging
+from FlagEmbedding import FlagReranker
 
 @dataclass
 class TextChunk:
@@ -18,7 +19,7 @@ class TextChunk:
     metadata: Dict
 
 class KnowledgeBase:
-    def __init__(self, config: Dict, embedding_model):
+    def __init__(self, config: Dict, embedding_model, reranker_model_name: str = None):
         self.config = config
         self.embedding_model = embedding_model
         self.chunks: List[TextChunk] = []
@@ -26,6 +27,8 @@ class KnowledgeBase:
         self.cache_dir = config["cache_dir"]
         self.is_built = False  # 添加构建状态标志
         os.makedirs(self.cache_dir, exist_ok=True)
+        self.reranker_model_name = reranker_model_name
+        self.reranker = None
         
     def _get_cache_path(self, text: str) -> str:
         """获取缓存文件路径"""
@@ -236,25 +239,28 @@ class KnowledgeBase:
                     except Exception as e:
                         logging.warning(f"清理临时文件 {f} 失败: {e}")
 
-    def search(self, query: str, k: int = 5) -> List[str]:
-        """搜索相关内容"""
+    def search(self, query: str, k: int = 5, rerank_top_n: int = 10) -> List[str]:
+        """搜索相关内容，支持重排"""
         if not self.index:
             raise ValueError("Knowledge base not built yet")
-            
         query_vector = self.embedding_model.embed(query)
         if query_vector is None:
             return []
-            
-        # 搜索最相似的文本块
+        # 先用向量召回
         query_vector_array = np.array([query_vector]).astype('float32')
-        distances, indices = self.index.search(query_vector_array, k)
-        
-        # 返回相关文本内容
-        results = []
-        for idx in indices[0]:
-            if idx < len(self.chunks):
-                results.append(self.chunks[idx].content)
-        return results
+        distances, indices = self.index.search(query_vector_array, max(k, rerank_top_n))
+        candidate_chunks = [self.chunks[idx] for idx in indices[0] if idx < len(self.chunks)]
+        candidate_texts = [chunk.content for chunk in candidate_chunks]
+        # 动态加载重排模型
+        if self.reranker is None and self.reranker_model_name:
+            self.reranker = FlagReranker(self.reranker_model_name, use_fp16=True)
+        # 用重排模型对召回结果排序
+        if self.reranker and len(candidate_texts) > 1:
+            pairs = [[query, text] for text in candidate_texts]
+            scores = self.reranker.compute_score(pairs, normalize=True)
+            reranked = sorted(zip(scores, candidate_texts), key=lambda x: x[0], reverse=True)
+            return [text for _, text in reranked[:k]]
+        return candidate_texts[:k]
 
     def get_all_references(self) -> Dict[str, str]:
         """获取所有参考内容"""
@@ -344,3 +350,16 @@ class KnowledgeBase:
             # 恢复原始缓存目录
             if cache_dir:
                 self.cache_dir = old_cache_dir 
+
+    def get_openai_config(self, model_type: str) -> Dict:
+        """获取OpenAI配置"""
+        if model_type == "reranker":
+            return {
+                "model_name": self.reranker_model_name,
+                "api_key": "",
+                "base_url": "",
+                "use_fp16": True,
+                "retry_delay": 5
+            }
+        else:
+            return {} 

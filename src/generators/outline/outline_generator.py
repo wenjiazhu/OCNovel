@@ -112,7 +112,7 @@ class OutlineGenerator:
                 self.chapter_outlines.extend([None] * (end_chapter - len(self.chapter_outlines)))
                 logging.info(f"扩展大纲列表以容纳目标章节 {end_chapter}")
 
-            batch_size = 10 # 减少批次大小，降低单次请求失败的影响，更容易调试
+            batch_size = 100 # 修改为100章一个批次
             successful_outlines_in_run = [] # 存储本次运行成功生成的
 
             num_batches = (total_chapters_to_generate + batch_size - 1) // batch_size
@@ -157,10 +157,13 @@ class OutlineGenerator:
         logging.info(f"开始生成第 {batch_start_num} 到 {batch_end_num} 章的大纲（共 {current_batch_size} 章）")
 
         # 获取当前批次的上下文
-        existing_context = self._get_context_for_batch(batch_start_num) # 修改：不再传入 successful_outlines_in_run
+        existing_context = self._get_context_for_batch(batch_start_num)
         
-        # 使用导入的 get_outline_prompt 生成提示词
-        prompt = get_outline_prompt( # 直接调用导入的函数
+        # 获取前文大纲用于一致性检查
+        previous_outlines = [o for o in self.chapter_outlines[:batch_start_num-1] if isinstance(o, ChapterOutline)]
+        
+        # 生成提示词
+        prompt = get_outline_prompt(
             novel_type=novel_type,
             theme=theme,
             style=style,
@@ -169,128 +172,72 @@ class OutlineGenerator:
             existing_context=existing_context,
             extra_prompt=extra_prompt
         )
-        logging.debug(f"为章节 {batch_start_num}-{batch_end_num} 生成的提示词:\n{prompt[:500]}...") # 记录部分提示词
 
         max_retries = self.config.generation_config.get("max_retries", 3)
         retry_delay = self.config.generation_config.get("retry_delay", 10)
 
         for attempt in range(max_retries):
-            logging.info(f"章节 {batch_start_num}-{batch_end_num}，尝试 {attempt + 1}/{max_retries}")
             try:
                 response = self.outline_model.generate(prompt)
-                logging.debug(f"模型原始响应 (尝试 {attempt + 1}):\n{response}") # 添加日志记录
+                outline_data = self._parse_model_response(response)
                 
-                # 尝试清理响应，移除可能的 ```json ... ``` 或前后缀文本
-                json_start = response.find('[')
-                json_end = response.rfind(']') + 1
-                if json_start == -1 or json_end == 0:
-                    json_start = response.find('{') # 有些模型可能会返回单个对象而非列表
-                    json_end = response.rfind('}') + 1
-
-                if json_start != -1 and json_end > json_start:
-                    json_string = response[json_start:json_end]
-                    logging.debug(f"提取到的 JSON 字符串:\n{json_string}")
-                else:
-                    json_string = response # 如果找不到 JSON 括号，尝试直接解析
-                    logging.warning("未在响应中找到 '[' 或 '{'，将尝试直接解析完整响应。")
-
-                try:
-                    # 解析 JSON
-                    outline_data = json.loads(json_string)
-                except json.JSONDecodeError as e:
-                    logging.error(f"解析模型响应失败 (尝试 {attempt + 1}): {e}\n处理后的字符串: {json_string[:500]}...")
-                    # 如果失败，记录完整原始响应以便分析
-                    error_log_path = os.path.join(self.output_dir, f"outline_error_response_{batch_start_num}-{batch_end_num}_attempt_{attempt+1}.txt")
-                    with open(error_log_path, 'w', encoding='utf-8') as f_err:
-                        f_err.write(response)
-                    logging.info(f"已将失败的原始响应保存到: {error_log_path}")
-                    # 根据错误决定是否继续重试
-                    if attempt < max_retries - 1:
-                         time.sleep(retry_delay * (attempt + 1)) # 增加等待时间
-                         continue
-                    else:
-                         return False # 重试次数耗尽
-
-                # 验证解析结果
-                if not isinstance(outline_data, list):
-                    # 兼容返回单个对象的情况
-                    if isinstance(outline_data, dict) and current_batch_size == 1:
-                         outline_data = [outline_data]
-                    else:
-                        logging.error(f"生成的大纲格式不正确，期望列表但得到 {type(outline_data)} (尝试 {attempt + 1})")
-                        if attempt < max_retries - 1:
-                             time.sleep(retry_delay)
-                             continue
-                        else:
-                             return False
-
-                if len(outline_data) != current_batch_size:
-                     logging.error(f"生成的大纲数量 ({len(outline_data)}) 与要求 ({current_batch_size}) 不符 (尝试 {attempt + 1})")
-                     if attempt < max_retries - 1:
-                         time.sleep(retry_delay)
-                         continue
-                     else:
-                         return False
-
-                # 验证通过，处理大纲数据
+                if not outline_data:
+                    continue
+                    
+                # 验证并处理大纲数据
                 new_outlines_batch = []
                 valid_count = 0
+                
                 for i, chapter_data in enumerate(outline_data):
                     expected_chapter_num = batch_start_num + i
-                    # 验证单个章节数据的类型和必要字段
-                    if not isinstance(chapter_data, dict):
-                        logging.warning(f"批次内第 {i+1} 个章节数据不是字典: {chapter_data}")
-                        new_outlines_batch.append(None) # 添加占位符
-                        continue
-                    
-                    actual_chapter_num = chapter_data.get('chapter_number')
-                    if actual_chapter_num != expected_chapter_num:
-                         logging.warning(f"章节号不匹配：期望 {expected_chapter_num}，实际 {actual_chapter_num}。将使用期望值。")
-                         # chapter_data['chapter_number'] = expected_chapter_num # 可以强制修正，但需谨慎
-
                     try:
                         new_outline = ChapterOutline(
-                            chapter_number=expected_chapter_num, # 使用期望值
+                            chapter_number=expected_chapter_num,
                             title=chapter_data.get('title', f'第{expected_chapter_num}章'),
                             key_points=chapter_data.get('key_points', []),
                             characters=chapter_data.get('characters', []),
                             settings=chapter_data.get('settings', []),
                             conflicts=chapter_data.get('conflicts', [])
                         )
-                        new_outlines_batch.append(new_outline)
-                        valid_count += 1
+                        
+                        # 检查一致性
+                        if self._check_outline_consistency(new_outline, previous_outlines):
+                            new_outlines_batch.append(new_outline)
+                            valid_count += 1
+                            previous_outlines.append(new_outline)  # 更新前文列表
+                        else:
+                            logging.warning(f"第 {expected_chapter_num} 章大纲未通过一致性检查")
+                            new_outlines_batch.append(None)
+                            
                     except Exception as e:
-                         logging.error(f"根据章节数据创建 ChapterOutline 对象时出错 (章节 {expected_chapter_num}): {e} - 数据: {chapter_data}", exc_info=True)
-                         new_outlines_batch.append(None) # 添加占位符
-
-
-                logging.info(f"批次解析完成，成功转换 {valid_count}/{current_batch_size} 个章节大纲。")
-
-                # 替换指定范围的章节 (使用索引)
-                start_index = batch_start_num - 1
-                end_index = batch_end_num # Python 切片不包含 end_index
+                        logging.error(f"处理章节 {expected_chapter_num} 大纲时出错: {str(e)}")
+                        new_outlines_batch.append(None)
                 
-                # 确保列表足够长
-                if end_index > len(self.chapter_outlines):
-                     self.chapter_outlines.extend([None] * (end_index - len(self.chapter_outlines)))
-
-                self.chapter_outlines[start_index:end_index] = new_outlines_batch
-                
-                # 将本次批次成功生成的有效大纲添加到运行记录中
-                successful_outlines_in_run.extend([o for o in new_outlines_batch if isinstance(o, ChapterOutline)])
-                logging.info(f"成功处理第 {batch_start_num} 到 {batch_end_num} 章的大纲")
-                return True # 当前批次成功
-
-            except Exception as e:
-                logging.error(f"处理大纲数据或调用模型时发生未预期错误 (尝试 {attempt + 1})：{str(e)}", exc_info=True) # 添加 exc_info
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay * (attempt + 1)) # 指数退避
+                if valid_count == current_batch_size:
+                    # 更新大纲列表
+                    start_index = batch_start_num - 1
+                    end_index = batch_end_num
+                    self.chapter_outlines[start_index:end_index] = new_outlines_batch
+                    
+                    # 更新同步信息
+                    self._update_sync_info(batch_start_num, batch_end_num)
+                    
+                    # 保存成功生成的大纲
+                    successful_outlines_in_run.extend([o for o in new_outlines_batch if isinstance(o, ChapterOutline)])
+                    return True
                 else:
-                    logging.error(f"章节 {batch_start_num}-{batch_end_num} 重试次数耗尽，生成失败。")
-                    return False # 重试次数耗尽
-
-        logging.error(f"处理第 {batch_start_num} 到 {batch_end_num} 章的大纲时，所有尝试均失败。")
-        return False # 所有尝试都失败了
+                    logging.warning(f"批次生成的大纲中只有 {valid_count}/{current_batch_size} 个通过验证")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    
+            except Exception as e:
+                logging.error(f"生成批次大纲时出错: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+        
+        return False
 
     def _load_sync_info(self) -> dict:
         """加载同步信息文件"""
@@ -387,50 +334,110 @@ class OutlineGenerator:
         """获取批次的上下文信息"""
         context_parts = []
         
-        # 添加同步信息到上下文
+        # 1. 获取更全面的前文信息
+        context_chapters_count = 10  # 增加到10章以提供更多上下文
+        start_index = max(0, batch_start_num - 1 - context_chapters_count)
+        end_index = max(0, batch_start_num - 1)
+        
+        # 2. 添加故事发展脉络
         if self.sync_info:
-            context_parts.append("[全局信息]")
-            # 添加主线梗概
+            context_parts.append("[故事发展脉络]")
+            # 主线发展
             if self.sync_info.get("剧情发展", {}).get("主线梗概"):
                 context_parts.append(f"主线发展：{self.sync_info['剧情发展']['主线梗概']}")
             
-            # 添加最近的前情提要
-            if self.sync_info.get("前情提要"):
-                recent_summary = self.sync_info["前情提要"][-3:]  # 最近3条
-                context_parts.append("最近剧情：\n" + "\n".join(recent_summary))
+            # 重要事件时间线
+            if self.sync_info.get("剧情发展", {}).get("重要事件"):
+                context_parts.append("重要事件时间线：")
+                for event in self.sync_info["剧情发展"]["重要事件"][-10:]:  # 增加到最近10个重要事件
+                    context_parts.append(f"- {event}")
             
-            # 添加进行中的冲突
+            # 进行中的冲突
             if self.sync_info.get("剧情发展", {}).get("进行中冲突"):
-                context_parts.append("当前冲突：\n- " + "\n- ".join(self.sync_info["剧情发展"]["进行中冲突"]))
+                context_parts.append("\n当前主要冲突：")
+                for conflict in self.sync_info["剧情发展"]["进行中冲突"]:
+                    context_parts.append(f"- {conflict}")
         
-        # 获取前 N 章的大纲信息 (例如前3章)
-        context_chapters_count = 3
-        start_index = max(0, batch_start_num - 1 - context_chapters_count)
-        end_index = max(0, batch_start_num - 1)
-
-        previous_outlines_text = []
-        if end_index > start_index:
-             previous_outlines = [o for o in self.chapter_outlines[start_index:end_index] if isinstance(o, ChapterOutline)] # 只使用有效的大纲
-             if previous_outlines:
-                 context_parts.append(f"[前 {len(previous_outlines)} 章大纲概要]")
-                 for prev_outline in previous_outlines:
-                    previous_outlines_text.append(f"第 {prev_outline.chapter_number} 章: {prev_outline.title}\n  关键点: {', '.join(prev_outline.key_points[:2])}...") # 限制长度
-                 context_parts.append("\n".join(previous_outlines_text))
-             else:
-                 context_parts.append("[前文大纲]\n（无有效的前文章节大纲可供参考）")
-        elif batch_start_num == 1:
-            context_parts.append("[前文大纲]\n（这是第一批生成的大纲，无前文）")
-        else:
-             context_parts.append("[前文大纲]\n（未找到有效的前文章节大纲）")
-
-        # 获取相关的知识库内容 (如果需要，但 get_outline_prompt 已包含此逻辑)
-        # query_text = " ".join(previous_outlines_text) # 可以基于概要查询
-        # if query_text:
-        #     relevant_knowledge = self.knowledge_base.search(query_text, top_k=3) # 限制数量
-        #     if relevant_knowledge:
-        #         context_parts.append("\n[相关参考内容]\n" + "\n".join([f"- {r[:150]}..." for r in relevant_knowledge])) # 限制长度
-
+        # 3. 获取前文大纲的详细信息（只显示最近5章的详细信息）
+        previous_outlines = [o for o in self.chapter_outlines[start_index:end_index] if isinstance(o, ChapterOutline)]
+        if previous_outlines:
+            context_parts.append(f"\n[前 {len(previous_outlines)} 章详细大纲]")
+            # 只显示最近5章的详细信息
+            recent_outlines = previous_outlines[-5:]
+            for prev_outline in recent_outlines:
+                context_parts.append(f"\n第 {prev_outline.chapter_number} 章: {prev_outline.title}")
+                context_parts.append(f"关键点: {', '.join(prev_outline.key_points)}")
+                context_parts.append(f"涉及角色: {', '.join(prev_outline.characters)}")
+                context_parts.append(f"场景: {', '.join(prev_outline.settings)}")
+                context_parts.append(f"冲突: {', '.join(prev_outline.conflicts)}")
+        
+            # 对于更早的章节，只显示标题和关键点
+            if len(previous_outlines) > 5:
+                context_parts.append("\n[更早章节概要]")
+                for prev_outline in previous_outlines[:-5]:
+                    context_parts.append(f"第 {prev_outline.chapter_number} 章: {prev_outline.title}")
+                    context_parts.append(f"关键点: {', '.join(prev_outline.key_points[:2])}...")
+        
+        # 4. 添加人物关系网络
+        if self.sync_info.get("人物设定", {}).get("人物关系"):
+            context_parts.append("\n[关键人物关系]")
+            for relation in self.sync_info["人物设定"]["人物关系"][-10:]:  # 增加到最近10个关系
+                context_parts.append(f"- {relation}")
+        
+        # 5. 添加世界观关键信息
+        if self.sync_info.get("世界观"):
+            context_parts.append("\n[世界观关键信息]")
+            for key, value in self.sync_info["世界观"].items():
+                if value:  # 只添加非空信息
+                    context_parts.append(f"{key}: {', '.join(value)}")
+        
         return "\n\n".join(context_parts)
+
+    def _check_outline_consistency(self, new_outline: ChapterOutline, previous_outlines: List[ChapterOutline]) -> bool:
+        """检查新生成的大纲与已有大纲的一致性"""
+        try:
+            # 1. 检查与前文的关联
+            if previous_outlines:
+                last_outline = previous_outlines[-1]
+                # 检查是否有角色延续
+                character_overlap = set(new_outline.characters) & set(last_outline.characters)
+                if not character_overlap:
+                    logging.warning(f"第 {new_outline.chapter_number} 章与前一章没有共同角色")
+                    return False
+                
+                # 检查场景延续性
+                setting_overlap = set(new_outline.settings) & set(last_outline.settings)
+                if not setting_overlap:
+                    logging.warning(f"第 {new_outline.chapter_number} 章与前一章没有共同场景")
+                    return False
+            
+            # 2. 检查与同步信息的一致性
+            if self.sync_info:
+                # 检查角色是否在人物设定中
+                all_characters = set()
+                for char_info in self.sync_info.get("人物设定", {}).get("人物信息", []):
+                    all_characters.add(char_info.get("名称", ""))
+                
+                unknown_characters = set(new_outline.characters) - all_characters
+                if unknown_characters:
+                    logging.warning(f"第 {new_outline.chapter_number} 章包含未定义的角色: {unknown_characters}")
+                    return False
+                
+                # 检查场景是否在世界观中
+                all_settings = set()
+                for setting in self.sync_info.get("世界观", {}).get("关键场所", []):
+                    all_settings.add(setting)
+                
+                unknown_settings = set(new_outline.settings) - all_settings
+                if unknown_settings:
+                    logging.warning(f"第 {new_outline.chapter_number} 章包含未定义的场景: {unknown_settings}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"检查大纲一致性时出错: {str(e)}")
+            return False
 
 if __name__ == "__main__":
     import argparse

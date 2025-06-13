@@ -31,89 +31,59 @@ def get_outline_prompt(
     existing_context: str = "",
     extra_prompt: Optional[str] = None
 ) -> str:
-    """生成用于创建小说大纲的提示词，应用知识库内容过滤"""
+    """生成用于创建小说大纲的提示词"""
     
-    # 基础提示词框架
     base_prompt = f"""
 你是 StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。
 
-[叙事维度]
-- 时间维度：{{
-    "线性": "传统时间流",
-    "循环": "命运轮回",
-    "分形": "多重时间线",
-    "量子": "可能性叠加"
-}}
-- 视角维度：{{
-    "全知": "上帝视角",
-    "限制": "单一视角",
-    "不可靠": "主观视角",
-    "集体": "多重视角"
-}}
-- 现实维度：{{
-    "具体": "现实世界",
-    "魔幻": "超自然元素",
-    "超现实": "意识流",
-    "元小说": "自我指涉"
-}}
-- 情感维度：{{
-    "表层": "直接情感",
-    "潜文本": "隐含情感",
-    "原型": "集体无意识",
-    "超越": "精神升华"
-}}
+[上下文信息]
+{existing_context}
 
-[小说设定]
-类型: {novel_type}
-主题: {theme}
-风格: {style}
+[叙事要求]
+1. 情节连贯性：
+   - 必须基于前文发展，保持故事逻辑的连贯性
+   - 每个新章节都要承接前文伏笔，并为后续发展埋下伏笔
+   - 确保人物行为符合其性格设定和发展轨迹
 
-[世界观设定]
-{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("magic_system", "")}
-{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("social_system", "")}
-{config.novel_config.get("writing_guide", {}).get("world_building", {}).get("background", "")}
+2. 结构完整性：
+   - 每章必须包含起承转合四个部分
+   - 每3章形成一个完整的故事单元
+   - 每10章形成一个大的故事弧
 
-[角色设定]
-主角: {config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("protagonist", {}).get("background", "")}
-配角: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("supporting_roles", [])])}
-反派: {', '.join([role.get("role_type", "") for role in config.novel_config.get("writing_guide", {}).get("character_guide", {}).get("antagonists", [])])}
+3. 人物发展：
+   - 确保主要人物的性格和动机保持一致性
+   - 根据前文发展合理推进人物关系
+   - 适时引入新角色，但需与现有角色产生关联
 
-[任务要求]
-1. 生成从第 {current_start_chapter_num} 章开始的，共 {current_batch_size} 个章节的大纲。
-2. 每章必须包含：
-   - 情感炼金：将人类体验转化为共鸣的文字
-   - 意识编织：在读者心智中植入活生生的世界
-   - 可能性探索：发现故事中未被讲述的维度
-3. 每章设计一个小高潮，每3章设计一个大高潮
-4. 确保情节的连贯性和设定的一致性
-5. 推动主线发展，引入新的冲突和看点
+4. 世界观一致性：
+   - 严格遵守已建立的世界规则
+   - 新设定必须与现有设定兼容
+   - 保持场景和环境的连贯性
 
-[输出格式要求]
+[输出要求]
 1. 直接输出JSON数组，包含 {current_batch_size} 个章节对象
 2. 每个章节对象必须包含：
    - chapter_number: 章节号
    - title: 章节标题
-   - key_points: 关键剧情点列表（至少2个）
-   - characters: 涉及角色列表（至少1个）
+   - key_points: 关键剧情点列表（至少3个）
+   - characters: 涉及角色列表（至少2个）
    - settings: 场景列表（至少1个）
    - conflicts: 核心冲突列表（至少1个）
    - emotion: 情感基调
    - narrative_style: 叙事风格
-   - foreshadowing: 伏笔设置
+   - foreshadowing: 伏笔设置（至少1个）
    - plot_twist: 情节转折
+   - connection_to_previous: 与前文的关联点
+   - setup_for_future: 为后续章节的铺垫
 
-[质量要求]
-1. 每个章节必须：
-   - 第一句就抓住灵魂
-   - 每个段落都推进或深化
-   - 人物对话揭示性格
-   - 描写创造沉浸式体验
-   - 结尾留下永恒回响
-2. 所有文本内容必须使用简体中文
-3. 确保生成的是有效的JSON格式
+[质量检查]
+1. 是否与前文保持连贯？
+2. 人物行为是否符合设定？
+3. 是否遵循世界观规则？
+4. 情节发展是否合理？
+5. 是否包含足够的伏笔和悬念？
 """
 
-    # 添加额外要求
     if extra_prompt:
         base_prompt += f"\n[额外要求]\n{extra_prompt}"
 
