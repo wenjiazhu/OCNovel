@@ -239,6 +239,36 @@ class OutlineGenerator:
         
         return False
 
+    def _parse_model_response(self, response: str):
+        """解析模型返回的 JSON 响应，兼容 markdown 包裹和多余前后缀"""
+        import json
+        import re
+        try:
+            # 去除 markdown 代码块包裹
+            response = response.strip()
+            if response.startswith('```'):
+                response = re.sub(r'^```[a-zA-Z]*', '', response)
+                response = response.strip('`\n')
+            # 查找第一个 [ 和最后一个 ]
+            json_start = response.find('[')
+            json_end = response.rfind(']') + 1
+            if json_start == -1 or json_end == 0:
+                # 尝试查找 { ... }
+                json_start = response.find('{')
+                json_end = response.rfind('}') + 1
+            if json_start != -1 and json_end > json_start:
+                json_str = response[json_start:json_end]
+            else:
+                json_str = response
+            try:
+                return json.loads(json_str)
+            except Exception as e:
+                logging.error(f"_parse_model_response: JSON 解析失败: {e}\n原始内容: {json_str[:500]}...")
+                return None
+        except Exception as e:
+            logging.error(f"_parse_model_response: 处理响应时出错: {e}")
+            return None
+
     def _load_sync_info(self) -> dict:
         """加载同步信息文件"""
         try:
