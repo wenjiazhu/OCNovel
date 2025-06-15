@@ -24,13 +24,21 @@ class OutlineGenerator:
         # 加载现有大纲
         self._load_outline()
 
+    def _get_hashable_item(self, item):
+        """Returns a hashable representation of an item for uniqueness checks."""
+        if isinstance(item, dict):
+            # For dictionaries, we'll try to find a '名称' key, otherwise use its string representation
+            return item.get('名称', str(item))
+        return item
+
     def _merge_list_unique(self, target_list: list, source_list: list):
         """将 source_list 中的唯一元素添加到 target_list 中"""
-        existing_elements = set(target_list)
+        existing_elements_set = set(self._get_hashable_item(i) for i in target_list)
         for item in source_list:
-            if item not in existing_elements:
+            hashable_item = self._get_hashable_item(item)
+            if hashable_item not in existing_elements_set:
                 target_list.append(item)
-                existing_elements.add(item) # Add to set for efficiency
+                existing_elements_set.add(hashable_item)
         
     def _load_outline(self):
         """加载大纲文件"""
@@ -270,30 +278,62 @@ class OutlineGenerator:
         return False
 
     def _parse_model_response(self, response: str):
-        """解析模型返回的 JSON 响应，兼容 markdown 包裹和多余前后缀"""
+        """解析模型返回的 JSON 响应，兼容 markdown 包裹和多余前后缀，并处理 JSON 内部的换行符"""
         import json
         import re
         try:
-            # 去除 markdown 代码块包裹
+            # 1. 去除 markdown 代码块包裹
             response = response.strip()
             if response.startswith('```'):
-                response = re.sub(r'^```[a-zA-Z]*', '', response)
+                response = re.sub(r'^```[a-zA-Z]*\n?', '', response)
                 response = response.strip('`\n')
-            # 查找第一个 [ 和最后一个 ]
-            json_start = response.find('[')
-            json_end = response.rfind(']') + 1
-            if json_start == -1 or json_end == 0:
-                # 尝试查找 { ... }
-                json_start = response.find('{')
-                json_end = response.rfind('}') + 1
-            if json_start != -1 and json_end > json_start:
-                json_str = response[json_start:json_end]
+
+            # 2. 健壮地转义字符串内部内容：确保所有双引号字符串内部的特殊字符都被正确转义。
+            #    使用 json.dumps 来进行健壮的转义，然后移除其添加的外部引号。
+            def escape_inner_content_for_json(match):
+                inner_content = match.group(0)[1:-1] # 获取双引号内的内容
+                # 使用 json.dumps 转义内容，然后移除 json.dumps 自动添加的首尾引号
+                escaped_inner_content = json.dumps(inner_content)[1:-1]
+                return f'"{escaped_inner_content}"'
+
+            # 这个正则表达式匹配双引号包围的字符串，包括内部已转义的引号和反斜杠
+            response = re.sub(r'(\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\")', escape_inner_content_for_json, response)
+
+            # 3. Aggressively flatten the entire response into a single line
+            # This handles any unescaped newlines that prematurely terminate strings or break JSON structure.
+            processed_json_str = response.replace('\n', '').replace('\r', '')
+
+            # 4. Remove multiple consecutive commas (e.g., `,,` to `,`)
+            processed_json_str = re.sub(r',+', ',', processed_json_str)
+
+            # 5. Remove trailing commas before `}` or `]` (e.g., `],` -> `]`, `},` -> `}`)
+            processed_json_str = re.sub(r',\s*([}\]])', r'\\1', processed_json_str)
+
+            # 6. Try to fix missing commas: if `]` or `}` is followed directly by a new JSON element's start character (not a comma), insert a comma.
+            # This regex is specifically for inserting a comma between a closing bracket/brace and an opening new JSON element.
+            # It looks for a closing bracket/brace (Group 1) followed by optional whitespace, AND NOT followed by a comma (?!,).
+            # Then it asserts (positive lookahead) that the next character is the start of a valid JSON value.
+            processed_json_str = re.sub(r'([}\\]])\\s*(?!,)(?=[\\\[{\\\"-0123456789tfnal])', r'\\1,', processed_json_str)
+
+            # 7. Find the first `[` or `{` and the last `]` or `}` to extract the outermost JSON
+            json_start_square = processed_json_str.find('[')
+            json_end_square = processed_json_str.rfind(']') + 1
+            json_start_curly = processed_json_str.find('{')
+            json_end_curly = processed_json_str.rfind('}') + 1
+
+            # Prefer the outermost array or object
+            if json_start_square != -1 and json_end_square > json_start_square and \
+               (json_start_curly == -1 or json_start_square < json_start_curly):
+                final_json_str = processed_json_str[json_start_square:json_end_square]
+            elif json_start_curly != -1 and json_end_curly > json_start_curly:
+                final_json_str = processed_json_str[json_start_curly:json_end_curly]
             else:
-                json_str = response
+                final_json_str = processed_json_str # If no clear JSON boundary found, try to parse the entire string
+
             try:
-                return json.loads(json_str)
-            except Exception as e:
-                logging.error(f"_parse_model_response: JSON 解析失败: {e}\n原始内容: {json_str[:500]}...")
+                return json.loads(final_json_str)
+            except json.JSONDecodeError as e:
+                logging.error(f"_parse_model_response: JSON 解析失败: {e}\n原始内容: {final_json_str[:500]}...")
                 return None
         except Exception as e:
             logging.error(f"_parse_model_response: 处理响应时出错: {e}")

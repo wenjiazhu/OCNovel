@@ -126,12 +126,6 @@ def get_outline_prompt(
    - characters: 涉及角色列表（至少2个）
    - settings: 场景列表（至少1个）
    - conflicts: 核心冲突列表（至少1个）
-   - emotion: 情感基调
-   - narrative_style: 叙事风格
-   - foreshadowing: 伏笔设置（至少1个）
-   - plot_twist: 情节转折
-   - connection_to_previous: 与前文的关联点
-   - setup_for_future: 为后续章节的铺垫
 
 [质量检查]
 1. 是否严格遵循世界观设定？
