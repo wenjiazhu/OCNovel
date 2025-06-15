@@ -347,15 +347,40 @@ class OutlineGenerator:
             new_sync_info = self.outline_model.generate(prompt)
             
             try:
-                # 解析并更新同步信息
+                # 1. 首先尝试直接解析
                 updated_sync_info = json.loads(new_sync_info)
-                updated_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                self.sync_info = updated_sync_info
-                return self._save_sync_info()
-            except json.JSONDecodeError as e:
-                logging.error(f"解析更新后的同步信息失败: {str(e)}")
+            except json.JSONDecodeError:
+                # 2. 如果直接解析失败，尝试提取 JSON 部分
+                json_start = new_sync_info.find('{')
+                json_end = new_sync_info.rfind('}') + 1
+                
+                if json_start >= 0 and json_end > json_start:
+                    json_content = new_sync_info[json_start:json_end]
+                    try:
+                        updated_sync_info = json.loads(json_content)
+                    except json.JSONDecodeError as e:
+                        logging.error(f"提取的 JSON 内容解析失败: {str(e)}")
+                        # 保存原始输出以供调试
+                        debug_file = os.path.join(os.path.dirname(self.sync_info_file), "sync_info_raw.txt")
+                        with open(debug_file, 'w', encoding='utf-8') as f:
+                            f.write(new_sync_info)
+                        logging.info(f"已保存原始输出到 {debug_file} 以供调试")
+                        return False
+                else:
+                    logging.error("无法在生成的内容中找到 JSON 格式数据")
+                    return False
+            
+            # 3. 验证 JSON 结构
+            required_keys = ["世界观", "人物设定", "剧情发展", "前情提要", "当前章节", "最后更新时间"]
+            if not all(key in updated_sync_info for key in required_keys):
+                logging.error(f"同步信息缺少必要的键: {[k for k in required_keys if k not in updated_sync_info]}")
                 return False
-
+            
+            # 4. 更新时间和保存
+            updated_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            self.sync_info = updated_sync_info
+            return self._save_sync_info()
+            
         except Exception as e:
             logging.error(f"更新同步信息时出错: {str(e)}", exc_info=True)
             return False
@@ -424,7 +449,7 @@ class OutlineGenerator:
         return "\n\n".join(context_parts)
 
     def _check_outline_consistency(self, new_outline: ChapterOutline, previous_outlines: List[ChapterOutline]) -> bool:
-        """检查新生成的大纲与已有大纲的一致性"""
+        """检查新生成的大纲与已有大纲的一致性，仅添加新角色和新场景"""
         try:
             # 1. 检查与前文的关联
             if previous_outlines:
@@ -433,38 +458,52 @@ class OutlineGenerator:
                 character_overlap = set(new_outline.characters) & set(last_outline.characters)
                 if not character_overlap:
                     logging.warning(f"第 {new_outline.chapter_number} 章与前一章没有共同角色")
-                    return False
-                
+                    # 允许通过，不强制返回 False
                 # 检查场景延续性
                 setting_overlap = set(new_outline.settings) & set(last_outline.settings)
                 if not setting_overlap:
                     logging.warning(f"第 {new_outline.chapter_number} 章与前一章没有共同场景")
-                    return False
-            
-            # 2. 检查与同步信息的一致性
+                    # 允许通过，不强制返回 False
+
+            # 2. 检查与同步信息的一致性，仅添加新内容
             if self.sync_info:
                 # 检查角色是否在人物设定中
                 all_characters = set()
-                for char_info in self.sync_info.get("人物设定", {}).get("人物信息", []):
+                char_info_list = self.sync_info.get("人物设定", {}).get("人物信息", [])
+                for char_info in char_info_list:
                     all_characters.add(char_info.get("名称", ""))
                 
+                # 只添加新角色
                 unknown_characters = set(new_outline.characters) - all_characters
                 if unknown_characters:
-                    logging.warning(f"第 {new_outline.chapter_number} 章包含未定义的角色: {unknown_characters}")
-                    return False
-                
+                    for char_name in unknown_characters:
+                        if char_name:
+                            # 自动添加新角色，保持其他角色信息不变
+                            new_char = {"名称": char_name, "身份": "", "特点": "", "发展历程": "", "当前状态": ""}
+                            char_info_list.append(new_char)
+                            logging.info(f"自动添加新角色到人物设定: {char_name}")
+                    # 更新 sync_info 中的人物信息列表
+                    self.sync_info["人物设定"]["人物信息"] = char_info_list
+                    self._save_sync_info()
+
                 # 检查场景是否在世界观中
                 all_settings = set()
-                for setting in self.sync_info.get("世界观", {}).get("关键场所", []):
+                setting_list = self.sync_info.get("世界观", {}).get("关键场所", [])
+                for setting in setting_list:
                     all_settings.add(setting)
                 
+                # 只添加新场景
                 unknown_settings = set(new_outline.settings) - all_settings
                 if unknown_settings:
-                    logging.warning(f"第 {new_outline.chapter_number} 章包含未定义的场景: {unknown_settings}")
-                    return False
-            
+                    for setting_name in unknown_settings:
+                        if setting_name:
+                            setting_list.append(setting_name)
+                            logging.info(f"自动添加新场景到世界观关键场所: {setting_name}")
+                    # 更新 sync_info 中的场景列表
+                    self.sync_info["世界观"]["关键场所"] = setting_list
+                    self._save_sync_info()
+
             return True
-            
         except Exception as e:
             logging.error(f"检查大纲一致性时出错: {str(e)}")
             return False

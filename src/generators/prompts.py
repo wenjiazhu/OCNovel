@@ -33,8 +33,64 @@ def get_outline_prompt(
 ) -> str:
     """生成用于创建小说大纲的提示词"""
     
+    # 从 config.json 中获取故事设定
+    novel_config = config.novel_config
+    writing_guide = novel_config.get("writing_guide", {})
+    
+    # 提取关键设定
+    world_building = writing_guide.get("world_building", {})
+    character_guide = writing_guide.get("character_guide", {})
+    plot_structure = writing_guide.get("plot_structure", {})
+    style_guide = writing_guide.get("style_guide", {})
+    
     base_prompt = f"""
 你是 StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。
+
+[世界观设定]
+1. 神道体系：
+{world_building.get('magic_system', '')}
+
+2. 社会结构：
+{world_building.get('social_system', '')}
+
+3. 时代背景：
+{world_building.get('background', '')}
+
+[人物设定]
+1. 主角设定：
+- 背景：{character_guide.get('protagonist', {}).get('background', '')}
+- 性格：{character_guide.get('protagonist', {}).get('initial_personality', '')}
+- 成长路径：{character_guide.get('protagonist', {}).get('growth_path', '')}
+
+2. 重要配角：
+{chr(10).join([f"- {role.get('role_type', '')}：{role.get('personality', '')} - {role.get('relationship', '')}" for role in character_guide.get('supporting_roles', [])])}
+
+3. 主要对手：
+{chr(10).join([f"- {role.get('role_type', '')}：{role.get('personality', '')} - {role.get('conflict_point', '')}" for role in character_guide.get('antagonists', [])])}
+
+[剧情结构]
+1. 第一幕：
+- 铺垫：{plot_structure.get('act_one', {}).get('setup', '')}
+- 触发事件：{plot_structure.get('act_one', {}).get('inciting_incident', '')}
+- 第一情节点：{plot_structure.get('act_one', {}).get('first_plot_point', '')}
+
+2. 第二幕：
+- 上升行动：{plot_structure.get('act_two', {}).get('rising_action', '')}
+- 中点：{plot_structure.get('act_two', {}).get('midpoint', '')}
+- 复杂化：{plot_structure.get('act_two', {}).get('complications', '')}
+- 最黑暗时刻：{plot_structure.get('act_two', {}).get('darkest_moment', '')}
+- 第二情节点：{plot_structure.get('act_two', {}).get('second_plot_point', '')}
+
+3. 第三幕：
+- 高潮：{plot_structure.get('act_three', {}).get('climax', '')}
+- 结局：{plot_structure.get('act_three', {}).get('resolution', '')}
+- 尾声：{plot_structure.get('act_three', {}).get('denouement', '')}
+
+[写作风格]
+1. 基调：{style_guide.get('tone', '')}
+2. 节奏：{style_guide.get('pacing', '')}
+3. 描写重点：
+{chr(10).join([f"- {item}" for item in style_guide.get('description_focus', [])])}
 
 [上下文信息]
 {existing_context}
@@ -77,10 +133,10 @@ def get_outline_prompt(
    - setup_for_future: 为后续章节的铺垫
 
 [质量检查]
-1. 是否与前文保持连贯？
-2. 人物行为是否符合设定？
-3. 是否遵循世界观规则？
-4. 情节发展是否合理？
+1. 是否严格遵循世界观设定？
+2. 人物行为是否符合其设定和发展轨迹？
+3. 情节是否符合整体剧情结构？
+4. 是否保持写作风格的一致性？
 5. 是否包含足够的伏笔和悬念？
 """
 
