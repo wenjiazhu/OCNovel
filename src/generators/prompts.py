@@ -29,7 +29,8 @@ def get_outline_prompt(
     current_start_chapter_num: int,
     current_batch_size: int,
     existing_context: str = "",
-    extra_prompt: Optional[str] = None
+    extra_prompt: Optional[str] = None,
+    reference_info: str = ""
 ) -> str:
     """生成用于创建小说大纲的提示词"""
     
@@ -142,6 +143,9 @@ def get_outline_prompt(
 
     if extra_prompt:
         base_prompt += f"\n[额外要求]\n{extra_prompt}"
+
+    if reference_info:
+        base_prompt += f"\n[知识库参考信息]\n{reference_info}\n"
 
     return base_prompt
 

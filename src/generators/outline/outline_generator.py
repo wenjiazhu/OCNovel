@@ -24,6 +24,14 @@ class OutlineGenerator:
         # 加载现有大纲
         self._load_outline()
 
+    def _merge_list_unique(self, target_list: list, source_list: list):
+        """将 source_list 中的唯一元素添加到 target_list 中"""
+        existing_elements = set(target_list)
+        for item in source_list:
+            if item not in existing_elements:
+                target_list.append(item)
+                existing_elements.add(item) # Add to set for efficiency
+        
     def _load_outline(self):
         """加载大纲文件"""
         outline_file = os.path.join(self.output_dir, "outline.json")
@@ -174,16 +182,34 @@ class OutlineGenerator:
         )
 
         max_retries = self.config.generation_config.get("max_retries", 3)
-        retry_delay = self.config.generation_config.get("retry_delay", 10)
+        retry_delay = self.config.generation_config.get("retry_delay", 20)
+        batch_size = self.config.generation_config.get("batch_size", 5)  # 默认每批5章
+
+        # 如果批次太大，尝试分批处理
+        if current_batch_size > batch_size:
+            logging.info(f"批次大小 ({current_batch_size}) 超过限制 ({batch_size})，将分批处理")
+            success = True
+            for sub_batch_start in range(batch_start_num, batch_end_num + 1, batch_size):
+                sub_batch_end = min(sub_batch_start + batch_size - 1, batch_end_num)
+                if not self._generate_batch(sub_batch_start, sub_batch_end, novel_type, theme, style, extra_prompt, successful_outlines_in_run):
+                    success = False
+                    break
+            return success
 
         for attempt in range(max_retries):
             try:
-                response = self.outline_model.generate(prompt)
-                outline_data = self._parse_model_response(response)
+                logging.info(f"尝试 {attempt + 1}/{max_retries} 生成大纲")
                 
+                # 调用模型生成内容
+                response = self.outline_model.generate(prompt)
+                if not response:
+                    raise Exception("模型返回为空")
+
+                # 解析响应
+                outline_data = self._parse_model_response(response)
                 if not outline_data:
-                    continue
-                    
+                    raise Exception("解析模型响应失败")
+
                 # 验证并处理大纲数据
                 new_outlines_batch = []
                 valid_count = 0
@@ -204,7 +230,7 @@ class OutlineGenerator:
                         if self._check_outline_consistency(new_outline, previous_outlines):
                             new_outlines_batch.append(new_outline)
                             valid_count += 1
-                            previous_outlines.append(new_outline)  # 更新前文列表
+                            previous_outlines.append(new_outline)
                         else:
                             logging.warning(f"第 {expected_chapter_num} 章大纲未通过一致性检查")
                             new_outlines_batch.append(None)
@@ -236,6 +262,10 @@ class OutlineGenerator:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay * (attempt + 1))
                     continue
+                else:
+                    # 保存当前进度
+                    self._save_outline()
+                    return False
         
         return False
 
@@ -373,12 +403,46 @@ class OutlineGenerator:
             # 3. 验证 JSON 结构
             required_keys = ["世界观", "人物设定", "剧情发展", "前情提要", "当前章节", "最后更新时间"]
             if not all(key in updated_sync_info for key in required_keys):
-                logging.error(f"同步信息缺少必要的键: {[k for k in required_keys if k not in updated_sync_info]}")
-                return False
+                logging.warning(f"模型返回的同步信息缺少一些必要顶层键: {[k for k in required_keys if k not in updated_sync_info]}")
             
-            # 4. 更新时间和保存
-            updated_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            self.sync_info = updated_sync_info
+            # 4. 合并新的同步信息到现有信息中
+            
+            # 世界观
+            if "世界观" in updated_sync_info and isinstance(updated_sync_info["世界观"], dict):
+                world_view_updates = updated_sync_info["世界观"]
+                self.sync_info.setdefault("世界观", {}) # Ensure "世界观" exists in self.sync_info
+                for key in ["世界背景", "阵营势力", "重要规则"]: # Exclude "关键场所" as it's handled in _check_outline_consistency
+                    if key in world_view_updates and isinstance(world_view_updates[key], list):
+                        self._merge_list_unique(self.sync_info["世界观"].setdefault(key, []), world_view_updates[key])
+
+            # 人物设定
+            if "人物设定" in updated_sync_info and isinstance(updated_sync_info["人物设定"], dict):
+                character_updates = updated_sync_info["人物设定"]
+                self.sync_info.setdefault("人物设定", {}) # Ensure "人物设定" exists
+                # "人物信息" 已在 _check_outline_consistency 统一处理，此处不重复添加
+                if "人物关系" in character_updates and isinstance(character_updates["人物关系"], list):
+                    self._merge_list_unique(self.sync_info["人物设定"].setdefault("人物关系", []), character_updates["人物关系"])
+
+            # 剧情发展、前情提要 不在章节大纲生成阶段更新，仅在生成章节内容时按照当前进度进行更新
+            # if "剧情发展" in updated_sync_info and isinstance(updated_sync_info["剧情发展"], dict):
+            #     plot_updates = updated_sync_info["剧情发展"]
+            #     self.sync_info.setdefault("剧情发展", {}) # Ensure "剧情发展" exists
+            #     # 主线梗概：如果模型返回了新的非空梗概，则更新（覆盖）
+            #     if plot_updates.get("主线梗概"): # Check if it's not None or empty string
+            #         self.sync_info["剧情发展"]["主线梗概"] = plot_updates["主线梗概"]
+            #     
+            #     for key in ["重要事件", "悬念伏笔", "已解决冲突", "进行中冲突"]:
+            #         if key in plot_updates and isinstance(plot_updates[key], list):
+            #             self._merge_list_unique(self.sync_info["剧情发展"].setdefault(key, []), plot_updates[key])
+            
+            # # 前情提要
+            # if "前情提要" in updated_sync_info and isinstance(updated_sync_info["前情提要"], list):
+            #     self._merge_list_unique(self.sync_info.setdefault("前情提要", []), updated_sync_info["前情提要"])
+
+            # 当前章节和最后更新时间由内部逻辑设定，不依赖模型输出
+            self.sync_info["当前章节"] = batch_end
+            self.sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            
             return self._save_sync_info()
             
         except Exception as e:
@@ -507,6 +571,55 @@ class OutlineGenerator:
         except Exception as e:
             logging.error(f"检查大纲一致性时出错: {str(e)}")
             return False
+
+    def _get_knowledge_references(self, batch_start: int, batch_end: int, 
+                                previous_outlines: List[ChapterOutline]) -> str:
+        """从知识库获取相关参考信息"""
+        try:
+            # 构建搜索查询
+            search_queries = []
+            
+            # 1. 基于前文大纲的关键信息
+            for outline in previous_outlines[-5:]:  # 只使用最近5章
+                search_queries.extend(outline.key_points)
+                search_queries.extend(outline.characters)
+                search_queries.extend(outline.settings)
+            
+            # 2. 基于同步信息的关键信息
+            if self.sync_info:
+                # 添加世界观相关查询
+                world_building = self.sync_info.get("世界观", {})
+                for key, values in world_building.items():
+                    if values:
+                        search_queries.extend(values)
+                
+                # 添加人物相关查询
+                character_info = self.sync_info.get("人物设定", {}).get("人物信息", [])
+                for char in character_info:
+                    if isinstance(char, dict):
+                        search_queries.append(char.get("名称", ""))
+            
+            # 3. 基于当前章节范围的查询
+            search_queries.append(f"第{batch_start}章到第{batch_end}章")
+            
+            # 去重并过滤空值
+            search_queries = list(set(q for q in search_queries if q))
+            
+            # 从知识库搜索相关信息
+            reference_texts = []
+            for query in search_queries:
+                results = self.knowledge_base.search(query, top_k=3)
+                if results:
+                    reference_texts.extend(results)
+            
+            # 格式化参考信息
+            if reference_texts:
+                return "\n".join([f"- {text}" for text in reference_texts])
+            return ""
+            
+        except Exception as e:
+            logging.error(f"获取知识库参考信息时出错: {str(e)}")
+            return ""
 
 if __name__ == "__main__":
     import argparse
