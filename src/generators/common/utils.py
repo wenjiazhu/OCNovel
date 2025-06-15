@@ -51,11 +51,14 @@ def load_json_file(file_path: str, default_value: Any = None) -> Any:
 def save_json_file(file_path: str, data: Any) -> bool:
     """保存数据到JSON文件"""
     try:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info(f"成功保存JSON文件: {file_path}") # 添加成功保存日志
         return True
     except Exception as e:
-        logging.error(f"保存JSON文件 {file_path} 时出错: {str(e)}")
+        logging.error(f"保存JSON文件 {file_path} 时出错: {str(e)}", exc_info=True) # 增加 exc_info 以打印完整堆栈信息
         return False
 
 def clean_text(text: str) -> str:

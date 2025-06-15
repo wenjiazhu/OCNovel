@@ -101,6 +101,10 @@ class OutlineGenerator:
                 # 根据需要决定是否保存空文件或返回False
                 # return save_json_file(outline_file, []) # 保存空列表
                 return False # 或者认为没有数据则保存失败
+            
+            logging.info(f"尝试保存 {len(outline_data)} 章大纲到 {outline_file}")
+            if outline_data:
+                logging.info(f"即将保存的大纲前5章示例: {outline_data[:5]}")
 
             return save_json_file(outline_file, outline_data)
         except Exception as e:
@@ -247,24 +251,31 @@ class OutlineGenerator:
                         logging.error(f"处理章节 {expected_chapter_num} 大纲时出错: {str(e)}")
                         new_outlines_batch.append(None)
                 
+                # 无论是否全部通过验证，都将当前批次结果更新到大纲列表
+                start_index = batch_start_num - 1
+                end_index = batch_end_num
+                self.chapter_outlines[start_index:end_index] = new_outlines_batch
+                
+                # 立即保存当前大纲，以确保部分成功的进度也被持久化
+                if not self._save_outline():
+                    logging.error(f"在生成批次 {batch_start_num}-{batch_end_num} 后保存大纲失败。")
+                    return False # 保存失败则认为批次生成失败
+
                 if valid_count == current_batch_size:
-                    # 更新大纲列表
-                    start_index = batch_start_num - 1
-                    end_index = batch_end_num
-                    self.chapter_outlines[start_index:end_index] = new_outlines_batch
-                    
-                    # 更新同步信息
+                    # 只有在整个批次都成功并通过验证时才更新同步信息
                     self._update_sync_info(batch_start_num, batch_end_num)
-                    
-                    # 保存成功生成的大纲
                     successful_outlines_in_run.extend([o for o in new_outlines_batch if isinstance(o, ChapterOutline)])
                     return True
                 else:
-                    logging.warning(f"批次生成的大纲中只有 {valid_count}/{current_batch_size} 个通过验证")
+                    logging.warning(f"批次生成的大纲中只有 {valid_count}/{current_batch_size} 个通过验证。尝试重新生成...")
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay * (attempt + 1))
                         continue
-                    
+                    else:
+                        logging.error(f"批次 {batch_start_num}-{batch_end_num} 在 {max_retries} 次尝试后仍未完全通过验证。")
+                        # 即使未完全通过，但有效部分已经保存
+                        return False
+
             except Exception as e:
                 logging.error(f"生成批次大纲时出错: {str(e)}")
                 if attempt < max_retries - 1:
@@ -548,7 +559,8 @@ class OutlineGenerator:
             context_parts.append("\n[世界观关键信息]")
             for key, value in self.sync_info["世界观"].items():
                 if value:  # 只添加非空信息
-                    context_parts.append(f"{key}: {', '.join(value)}")
+                    # 确保所有元素都被转换为字符串，以防列表中包含非字符串元素（如字典）
+                    context_parts.append(f"{key}: {', '.join(str(item) for item in value)}")
         
         return "\n\n".join(context_parts)
 
