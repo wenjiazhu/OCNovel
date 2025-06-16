@@ -15,6 +15,8 @@ class GeminiModel(BaseModel):
         self.model_name = config.get('model_name', 'gemini-2.0-flash')
         # 获取温度参数，默认为0.7
         self.temperature = config.get('temperature', 0.7)
+        # 获取超时参数，默认为60秒
+        self.timeout = config.get('timeout', 60)
         self.model = genai.GenerativeModel(self.model_name)
         
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(10))
@@ -29,7 +31,8 @@ class GeminiModel(BaseModel):
                 
             response = self.model.generate_content(
                 prompt,
-                generation_config=generation_config
+                generation_config=generation_config,
+                request_options={"timeout": self.timeout}
             )
             return response.text
         except Exception as e:
