@@ -22,7 +22,7 @@ def test_gemini():
         genai.configure(api_key=api_key)
         
         # 创建模型实例
-        model = genai.GenerativeModel('gemini-2.5-flash-preview')
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         
         # 准备测试提示词
         prompt = """

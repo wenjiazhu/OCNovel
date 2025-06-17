@@ -461,7 +461,7 @@ class ContentGenerator:
             logger.info(f"已完成第 {chapter_num} 章，开始更新缓存...")
             self._update_content_cache()
             logger.info(f"开始更新同步信息文件: {self.sync_info_file}")
-            self._trigger_sync_info_update()
+            self._trigger_sync_info_update(self.content_model)
             self.chapters_since_last_cache = 0
         else:
             self.chapters_since_last_cache += 1
@@ -495,7 +495,7 @@ class ContentGenerator:
         except Exception as e:
             logger.error(f"更新正文知识库缓存时出错: {str(e)}")
 
-    def _trigger_sync_info_update(self) -> None:
+    def _trigger_sync_info_update(self, sync_model=None) -> None:
         """触发同步信息更新"""
         os.makedirs(os.path.dirname(self.sync_info_file), exist_ok=True)
         # 使用 self.current_chapter 而不是其他变量
@@ -526,7 +526,38 @@ class ContentGenerator:
             if all_content:
                 logger.info(f"成功读取最近章节内容，总字数: {len(all_content)}，开始生成同步信息")
                 prompt = self._create_sync_info_prompt(all_content)
-                sync_info = self.content_model.generate(prompt)
+                
+                # 使用指定的模型或默认使用content_model
+                model_to_use = sync_model if sync_model is not None else self.content_model
+                
+                # 增加重试机制和错误处理
+                max_retries = 5  # 增加重试次数
+                sync_info = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        sync_info = model_to_use.generate(prompt)
+                        if sync_info:
+                            break
+                        else:
+                            logger.warning(f"模型返回空的同步信息，尝试 {attempt + 1}/{max_retries}")
+                            if attempt == max_retries - 1:
+                                logger.warning("模型返回空的同步信息，使用降级方案")
+                                self._fallback_sync_info_update()
+                                return
+                    except Exception as e:
+                        logger.error(f"模型调用失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                        if attempt == max_retries - 1:
+                            logger.error("所有重试都失败了，使用降级方案")
+                            self._fallback_sync_info_update()
+                            return
+                        # 等待一段时间后重试
+                        time.sleep(10 * (attempt + 1))  # 递增等待时间
+                
+                if not sync_info:
+                    logger.warning("模型返回空的同步信息，使用降级方案")
+                    self._fallback_sync_info_update()
+                    return
                 
                 try:
                     # 尝试提取JSON部分 - 有时模型会生成额外文本
@@ -550,6 +581,7 @@ class ContentGenerator:
                         with open(debug_file, 'w', encoding='utf-8') as f:
                             f.write(sync_info)
                         logger.info(f"已保存原始输出到 {debug_file} 以供调试")
+                        self._fallback_sync_info_update()
                 except json.JSONDecodeError as e:
                     logger.error(f"生成的同步信息不是有效的JSON格式: {e}")
                     logger.debug(f"无效的JSON内容前200个字符: {sync_info[:200]}...")
@@ -558,10 +590,59 @@ class ContentGenerator:
                     with open(debug_file, 'w', encoding='utf-8') as f:
                         f.write(sync_info)
                     logger.info(f"已保存原始输出到 {debug_file} 以供调试")
+                    self._fallback_sync_info_update()
             else:
-                logger.warning("未找到任何已完成的章节内容，无法更新同步信息")
+                logger.warning("未找到任何已完成的章节内容，使用降级方案")
+                self._fallback_sync_info_update()
         except Exception as e:
             logger.error(f"更新同步信息时出错: {str(e)}", exc_info=True)
+            self._fallback_sync_info_update()
+
+    def _fallback_sync_info_update(self) -> None:
+        """降级方案：手动更新同步信息"""
+        try:
+            logger.info("使用降级方案更新同步信息")
+            
+            # 加载现有同步信息
+            existing_sync_info = {}
+            if os.path.exists(self.sync_info_file):
+                try:
+                    with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        if content.strip():
+                            existing_sync_info = json.loads(content)
+                except Exception as e:
+                    logger.warning(f"读取现有同步信息失败: {e}")
+            
+            # 更新当前章节进度
+            existing_sync_info["当前章节"] = self.current_chapter
+            existing_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 添加新的前情提要
+            if "前情提要" not in existing_sync_info:
+                existing_sync_info["前情提要"] = []
+            
+            # 获取最近完成的章节信息
+            recent_chapters = []
+            for chapter_num in range(max(1, self.current_chapter - 4), self.current_chapter + 1):
+                if chapter_num - 1 < len(self.chapter_outlines):
+                    outline = self.chapter_outlines[chapter_num - 1]
+                    if outline:
+                        recent_chapters.append(f"第{chapter_num}章：{outline.title}")
+            
+            if recent_chapters:
+                summary = f"最近完成章节：{', '.join(recent_chapters)}"
+                if summary not in existing_sync_info["前情提要"]:
+                    existing_sync_info["前情提要"].append(summary)
+            
+            # 保存更新后的同步信息
+            with open(self.sync_info_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_sync_info, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"降级方案同步信息更新完成")
+            
+        except Exception as e:
+            logger.error(f"降级方案也失败了: {str(e)}", exc_info=True)
 
     def _create_sync_info_prompt(self, story_content: str) -> str:
         """创建生成同步信息的提示词"""

@@ -11,7 +11,7 @@ class AIConfig:
 
         # OpenAI 配置（提前定义）
         self.openai_config = {
-            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "5")),  # 默认 5 秒
+            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "10")),  # 默认 5 秒
             "models": {
                 "embedding": {
                     "name": "Pro/BAAI/bge-m3",
@@ -21,13 +21,13 @@ class AIConfig:
                     "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1")
                 },
                 "outline": {
-                    "name": "deepgeminipro",
+                    "name": "gpt-4o-mini",
                     "temperature": 1.0,
                     "api_key": os.getenv("OPENAI_OUTLINE_API_KEY", ""),
                     "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.openai.com/v1")
                 },
                 "content": {
-                    "name": "deepgeminiflash",
+                    "name": "gpt-4o",
                     "temperature": 0.7,
                     "api_key": os.getenv("OPENAI_CONTENT_API_KEY", ""),
                     "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.openai.com/v1")

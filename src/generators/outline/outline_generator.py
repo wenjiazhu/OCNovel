@@ -8,9 +8,10 @@ from ..common.utils import load_json_file, save_json_file, validate_directory
 from ..prompts import get_outline_prompt, get_sync_info_prompt
 
 class OutlineGenerator:
-    def __init__(self, config, outline_model, knowledge_base):
+    def __init__(self, config, outline_model, knowledge_base, content_model=None):
         self.config = config
         self.outline_model = outline_model
+        self.content_model = content_model  # 添加备用模型
         self.knowledge_base = knowledge_base
         self.output_dir = config.output_config["output_dir"]
         self.chapter_outlines = []
@@ -193,11 +194,8 @@ class OutlineGenerator:
             extra_prompt=extra_prompt
         )
 
-        max_retries = self.config.generation_config.get("max_retries", 3)
-        retry_delay = self.config.generation_config.get("retry_delay", 20)
         batch_size = self.config.generation_config.get("batch_size", 5)  # 默认每批5章
 
-        # 如果批次太大，尝试分批处理
         if current_batch_size > batch_size:
             logging.info(f"批次大小 ({current_batch_size}) 超过限制 ({batch_size})，将分批处理")
             success = True
@@ -208,85 +206,64 @@ class OutlineGenerator:
                     break
             return success
 
-        for attempt in range(max_retries):
-            try:
-                logging.info(f"尝试 {attempt + 1}/{max_retries} 生成大纲")
-                
-                # 调用模型生成内容
-                response = self.outline_model.generate(prompt)
-                if not response:
-                    raise Exception("模型返回为空")
+        try:
+            logging.info(f"调用模型生成大纲...") 
+            
+            response = self.outline_model.generate(prompt, max_tokens=self.config.generation_config.get("max_tokens"))
+            if not response:
+                raise Exception("模型返回为空")
 
-                # 解析响应
-                outline_data = self._parse_model_response(response)
-                if not outline_data:
-                    raise Exception("解析模型响应失败")
+            outline_data = self._parse_model_response(response)
+            if not outline_data:
+                raise Exception("解析模型响应失败")
 
-                # 验证并处理大纲数据
-                new_outlines_batch = []
-                valid_count = 0
-                
-                for i, chapter_data in enumerate(outline_data):
-                    expected_chapter_num = batch_start_num + i
-                    try:
-                        new_outline = ChapterOutline(
-                            chapter_number=expected_chapter_num,
-                            title=chapter_data.get('title', f'第{expected_chapter_num}章'),
-                            key_points=chapter_data.get('key_points', []),
-                            characters=chapter_data.get('characters', []),
-                            settings=chapter_data.get('settings', []),
-                            conflicts=chapter_data.get('conflicts', [])
-                        )
-                        
-                        # 检查一致性
-                        if self._check_outline_consistency(new_outline, previous_outlines):
-                            new_outlines_batch.append(new_outline)
-                            valid_count += 1
-                            previous_outlines.append(new_outline)
-                        else:
-                            logging.warning(f"第 {expected_chapter_num} 章大纲未通过一致性检查")
-                            new_outlines_batch.append(None)
-                            
-                    except Exception as e:
-                        logging.error(f"处理章节 {expected_chapter_num} 大纲时出错: {str(e)}")
-                        new_outlines_batch.append(None)
-                
-                # 无论是否全部通过验证，都将当前批次结果更新到大纲列表
-                start_index = batch_start_num - 1
-                end_index = batch_end_num
-                self.chapter_outlines[start_index:end_index] = new_outlines_batch
-                
-                # 立即保存当前大纲，以确保部分成功的进度也被持久化
-                if not self._save_outline():
-                    logging.error(f"在生成批次 {batch_start_num}-{batch_end_num} 后保存大纲失败。")
-                    return False # 保存失败则认为批次生成失败
-
-                if valid_count == current_batch_size:
-                    # 只有在整个批次都成功并通过验证时才更新同步信息
-                    self._update_sync_info(batch_start_num, batch_end_num)
-                    successful_outlines_in_run.extend([o for o in new_outlines_batch if isinstance(o, ChapterOutline)])
-                    return True
-                else:
-                    logging.warning(f"批次生成的大纲中只有 {valid_count}/{current_batch_size} 个通过验证。尝试重新生成...")
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay * (attempt + 1))
-                        continue
+            new_outlines_batch = []
+            valid_count = 0
+            
+            for i, chapter_data in enumerate(outline_data):
+                expected_chapter_num = batch_start_num + i
+                try:
+                    new_outline = ChapterOutline(
+                        chapter_number=expected_chapter_num,
+                        title=chapter_data.get('title', f'第{expected_chapter_num}章'),
+                        key_points=chapter_data.get('key_points', []),
+                        characters=chapter_data.get('characters', []),
+                        settings=chapter_data.get('settings', []),
+                        conflicts=chapter_data.get('conflicts', [])
+                    )
+                    
+                    if self._check_outline_consistency(new_outline, previous_outlines):
+                        new_outlines_batch.append(new_outline)
+                        valid_count += 1
+                        previous_outlines.append(new_outline)
                     else:
-                        logging.error(f"批次 {batch_start_num}-{batch_end_num} 在 {max_retries} 次尝试后仍未完全通过验证。")
-                        # 即使未完全通过，但有效部分已经保存
-                        return False
+                        logging.warning(f"第 {expected_chapter_num} 章大纲未通过一致性检查")
+                        new_outlines_batch.append(None)
+                        
+                except Exception as e:
+                    logging.error(f"处理章节 {expected_chapter_num} 大纲时出错: {str(e)}")
+                    new_outlines_batch.append(None)
+            
+            start_index = batch_start_num - 1
+            end_index = batch_end_num
+            self.chapter_outlines[start_index:end_index] = new_outlines_batch
+            
+            if not self._save_outline():
+                logging.error(f"在生成批次 {batch_start_num}-{batch_end_num} 后保存大纲失败。")
+                return False 
 
-            except Exception as e:
-                logging.error(f"生成批次大纲时出错: {str(e)}")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay * (attempt + 1))
-                    continue
-                else:
-                    # 保存当前进度
-                    self._save_outline()
-                    return False
-        
-        return False
+            if valid_count == current_batch_size:
+                self._update_sync_info(batch_start_num, batch_end_num, self.outline_model)
+                successful_outlines_in_run.extend([o for o in new_outlines_batch if isinstance(o, ChapterOutline)])
+                return True
+            else:
+                logging.warning(f"批次生成的大纲中只有 {valid_count}/{current_batch_size} 个通过验证。")
+                return False
+
+        except Exception as e:
+            logging.error(f"生成批次大纲时出错: {str(e)}", exc_info=True)
+            self._save_outline()
+            return False
 
     def _parse_model_response(self, response: str):
         """解析模型返回的 JSON 响应，兼容 markdown 包裹和多余前后缀，并处理 JSON 内部的换行符"""
@@ -392,7 +369,7 @@ class OutlineGenerator:
             logging.error(f"保存同步信息文件时出错: {str(e)}", exc_info=True)
             return False
 
-    def _update_sync_info(self, batch_start: int, batch_end: int) -> bool:
+    def _update_sync_info(self, batch_start: int, batch_end: int, sync_model=None) -> bool:
         """更新同步信息"""
         try:
             # 获取本批次的章节内容
@@ -424,8 +401,24 @@ class OutlineGenerator:
                 batch_end
             )
 
+            # 使用指定的模型或默认使用outline_model
+            model_to_use = sync_model if sync_model is not None else self.outline_model
+            
             # 调用模型更新同步信息
-            new_sync_info = self.outline_model.generate(prompt)
+            logging.info(f"调用模型更新同步信息...")
+            
+            # 尝试使用主要模型
+            new_sync_info = self._try_model_generation(model_to_use, prompt, "主要模型")
+            
+            # 如果主要模型失败，尝试使用备用模型
+            if not new_sync_info and hasattr(self, 'content_model'):
+                logging.warning("主要模型失败，尝试使用备用模型...")
+                new_sync_info = self._try_model_generation(self.content_model, prompt, "备用模型")
+            
+            # 如果所有模型都失败，使用降级方案
+            if not new_sync_info:
+                logging.error("所有模型都失败了，使用降级方案")
+                return self._fallback_sync_info_update(batch_start, batch_end)
             
             try:
                 # 1. 首先尝试直接解析
@@ -446,10 +439,10 @@ class OutlineGenerator:
                         with open(debug_file, 'w', encoding='utf-8') as f:
                             f.write(new_sync_info)
                         logging.info(f"已保存原始输出到 {debug_file} 以供调试")
-                        return False
+                        return self._fallback_sync_info_update(batch_start, batch_end)
                 else:
                     logging.error("无法在生成的内容中找到 JSON 格式数据")
-                    return False
+                    return self._fallback_sync_info_update(batch_start, batch_end)
             
             # 3. 验证 JSON 结构
             required_keys = ["世界观", "人物设定", "剧情发展", "前情提要", "当前章节", "最后更新时间"]
@@ -474,21 +467,21 @@ class OutlineGenerator:
                 if "人物关系" in character_updates and isinstance(character_updates["人物关系"], list):
                     self._merge_list_unique(self.sync_info["人物设定"].setdefault("人物关系", []), character_updates["人物关系"])
 
-            # 剧情发展、前情提要 不在章节大纲生成阶段更新，仅在生成章节内容时按照当前进度进行更新
-            # if "剧情发展" in updated_sync_info and isinstance(updated_sync_info["剧情发展"], dict):
-            #     plot_updates = updated_sync_info["剧情发展"]
-            #     self.sync_info.setdefault("剧情发展", {}) # Ensure "剧情发展" exists
-            #     # 主线梗概：如果模型返回了新的非空梗概，则更新（覆盖）
-            #     if plot_updates.get("主线梗概"): # Check if it's not None or empty string
-            #         self.sync_info["剧情发展"]["主线梗概"] = plot_updates["主线梗概"]
-            #     
-            #     for key in ["重要事件", "悬念伏笔", "已解决冲突", "进行中冲突"]:
-            #         if key in plot_updates and isinstance(plot_updates[key], list):
-            #             self._merge_list_unique(self.sync_info["剧情发展"].setdefault(key, []), plot_updates[key])
+            # 剧情发展
+            if "剧情发展" in updated_sync_info and isinstance(updated_sync_info["剧情发展"], dict):
+                plot_updates = updated_sync_info["剧情发展"]
+                self.sync_info.setdefault("剧情发展", {}) # Ensure "剧情发展" exists
+                # 主线梗概：如果模型返回了新的非空梗概，则更新（覆盖）
+                if plot_updates.get("主线梗概"): # Check if it's not None or empty string
+                    self.sync_info["剧情发展"]["主线梗概"] = plot_updates["主线梗概"]
+                
+                for key in ["重要事件", "悬念伏笔", "已解决冲突", "进行中冲突"]:
+                    if key in plot_updates and isinstance(plot_updates[key], list):
+                        self._merge_list_unique(self.sync_info["剧情发展"].setdefault(key, []), plot_updates[key])
             
-            # # 前情提要
-            # if "前情提要" in updated_sync_info and isinstance(updated_sync_info["前情提要"], list):
-            #     self._merge_list_unique(self.sync_info.setdefault("前情提要", []), updated_sync_info["前情提要"])
+            # 前情提要
+            if "前情提要" in updated_sync_info and isinstance(updated_sync_info["前情提要"], list):
+                self._merge_list_unique(self.sync_info.setdefault("前情提要", []), updated_sync_info["前情提要"])
 
             # 当前章节和最后更新时间由内部逻辑设定，不依赖模型输出
             self.sync_info["当前章节"] = batch_end
@@ -498,6 +491,68 @@ class OutlineGenerator:
             
         except Exception as e:
             logging.error(f"更新同步信息时出错: {str(e)}", exc_info=True)
+            return self._fallback_sync_info_update(batch_start, batch_end)
+
+    def _try_model_generation(self, model, prompt: str, model_name: str) -> str:
+        """尝试使用指定模型生成内容"""
+        max_retries = 3  # 每个模型的重试次数
+        new_sync_info = None
+        
+        for attempt in range(max_retries):
+            try:
+                logging.info(f"使用{model_name}生成同步信息 (尝试 {attempt + 1}/{max_retries})")
+                new_sync_info = model.generate(prompt)
+                if new_sync_info:
+                    logging.info(f"{model_name}生成成功")
+                    break
+                else:
+                    logging.warning(f"{model_name}返回空的同步信息，尝试 {attempt + 1}/{max_retries}")
+                    if attempt == max_retries - 1:
+                        logging.warning(f"{model_name}返回空的同步信息")
+                        return None
+            except Exception as e:
+                logging.error(f"{model_name}调用失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt == max_retries - 1:
+                    logging.error(f"{model_name}所有重试都失败了")
+                    return None
+                # 等待一段时间后重试
+                time.sleep(10 * (attempt + 1))  # 递增等待时间
+        
+        return new_sync_info
+
+    def _fallback_sync_info_update(self, batch_start: int, batch_end: int) -> bool:
+        """降级方案：手动更新同步信息"""
+        try:
+            logging.info("使用降级方案更新同步信息")
+            
+            # 手动更新当前章节进度
+            self.sync_info["当前章节"] = batch_end
+            self.sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 添加新的前情提要
+            new_summary = f"第{batch_start}章到第{batch_end}章：完成了新章节的大纲生成"
+            if "前情提要" not in self.sync_info:
+                self.sync_info["前情提要"] = []
+            self.sync_info["前情提要"].append(new_summary)
+            
+            # 添加新的重要事件
+            if "剧情发展" not in self.sync_info:
+                self.sync_info["剧情发展"] = {}
+            if "重要事件" not in self.sync_info["剧情发展"]:
+                self.sync_info["剧情发展"]["重要事件"] = []
+            
+            for chapter_num in range(batch_start, batch_end + 1):
+                if chapter_num - 1 < len(self.chapter_outlines):
+                    outline = self.chapter_outlines[chapter_num - 1]
+                    if outline:
+                        event = f"第{chapter_num}章：{outline.title}"
+                        if event not in self.sync_info["剧情发展"]["重要事件"]:
+                            self.sync_info["剧情发展"]["重要事件"].append(event)
+            
+            return self._save_sync_info()
+            
+        except Exception as e:
+            logging.error(f"降级方案也失败了: {str(e)}", exc_info=True)
             return False
 
     def _get_context_for_batch(self, batch_start_num: int) -> str:
@@ -533,20 +588,18 @@ class OutlineGenerator:
         if previous_outlines:
             context_parts.append(f"\n[前 {len(previous_outlines)} 章详细大纲]")
             # 只显示最近5章的详细信息
-            recent_outlines = previous_outlines[-5:]
-            for prev_outline in recent_outlines:
+            for prev_outline in previous_outlines[-5:]:
                 context_parts.append(f"\n第 {prev_outline.chapter_number} 章: {prev_outline.title}")
                 context_parts.append(f"关键点: {', '.join(prev_outline.key_points)}")
                 context_parts.append(f"涉及角色: {', '.join(prev_outline.characters)}")
                 context_parts.append(f"场景: {', '.join(prev_outline.settings)}")
                 context_parts.append(f"冲突: {', '.join(prev_outline.conflicts)}")
         
-            # 对于更早的章节，只显示标题和关键点
+            # 对于更早的章节，只显示章节号和标题
             if len(previous_outlines) > 5:
                 context_parts.append("\n[更早章节概要]")
                 for prev_outline in previous_outlines[:-5]:
                     context_parts.append(f"第 {prev_outline.chapter_number} 章: {prev_outline.title}")
-                    context_parts.append(f"关键点: {', '.join(prev_outline.key_points[:2])}...")
         
         # 4. 添加人物关系网络
         if self.sync_info.get("人物设定", {}).get("人物关系"):
@@ -574,12 +627,24 @@ class OutlineGenerator:
                 character_overlap = set(new_outline.characters) & set(last_outline.characters)
                 if not character_overlap:
                     logging.warning(f"第 {new_outline.chapter_number} 章与前一章没有共同角色")
-                    # 允许通过，不强制返回 False
+                    # return False # 可以考虑在这里返回 False，如果希望严格强制角色延续性
                 # 检查场景延续性
                 setting_overlap = set(new_outline.settings) & set(last_outline.settings)
                 if not setting_overlap:
                     logging.warning(f"第 {new_outline.chapter_number} 章与前一章没有共同场景")
-                    # 允许通过，不强制返回 False
+                    # return False # 可以考虑在这里返回 False，如果希望严格强制场景延续性
+
+                # 新增：检查与所有前文大纲的标题和关键点重复性
+                for prev_outline in previous_outlines:
+                    if new_outline.title == prev_outline.title:
+                        logging.warning(f"第 {new_outline.chapter_number} 章标题 '{new_outline.title}' 与第 {prev_outline.chapter_number} 章重复。")
+                        return False
+                    
+                    # 检查关键点重复性（例如，超过50%的关键点相同）
+                    common_key_points = set(new_outline.key_points) & set(prev_outline.key_points)
+                    if len(common_key_points) / len(new_outline.key_points) > 0.5 and len(new_outline.key_points) > 0:
+                        logging.warning(f"第 {new_outline.chapter_number} 章关键点与第 {prev_outline.chapter_number} 章有大量重复。")
+                        return False
 
             # 2. 检查与同步信息的一致性，仅添加新内容
             if self.sync_info:
