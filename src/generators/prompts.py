@@ -160,7 +160,6 @@ def get_chapter_prompt(
     # 获取基本信息
     novel_number = outline.get('chapter_number', 0)
     chapter_title = outline.get('title', '未知')
-    is_first_chapter = novel_number == 1
     
     # 格式化关键情节点
     key_points_list = outline.get('key_points', [])
@@ -171,88 +170,46 @@ def get_chapter_prompt(
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
     
-    base_prompt = f"""
-你是 StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。
-
-[创作阶段]
-1. 创世阶段
-   - 捕获读者意图
-   - 挖掘潜在情感需求
-   - 识别未说出的故事渴望
-
-2. 编织阶段
-   - 多线程叙事构建
-   - 动态情节发展
-   - 涌现式创意生成
-
-3. 结晶阶段
-   - 情感达到顶点
-   - 意外但必然的转折
-   - 主题具象化
+    base_prompt = f"""你是专业小说创作AI，请基于以下信息生成章节内容：
 
 [章节信息]
 章节号: {novel_number}
 标题: {chapter_title}
-情感基调: {outline.get('emotion', '未知')}
-叙事风格: {outline.get('narrative_style', '未知')}
-伏笔设置: {outline.get('foreshadowing', '未知')}
-情节转折: {outline.get('plot_twist', '未知')}
-
-[关键情节点]
+关键情节点:
 {key_points_display}
 
-[可用元素]
-- 核心人物：{characters}
-- 关键场景：{settings}
-- 核心冲突：{conflicts}
+[核心元素]
+人物: {characters}
+场景: {settings}
+冲突: {conflicts}
 
 [写作要求]
-1. 场景设计
-   - 对话场景：潜台词冲突，权力关系变化
-   - 动作场景：环境交互细节，节奏控制
-   - 心理场景：认知失调表现，隐喻系统
-   - 环境场景：空间透视变化，非常规感官组合
-
-2. 叙事技巧
-   - 使用感官轰炸
-   - 建立情感契约
-   - 暗示深层主题
-   - 交替紧张与释放
-   - 编织多重冲突
-   - 深化人物弧线
-
-3. 情感表达
-   - 扫描人类情感光谱
-   - 识别普世共鸣点
-   - 植入情感病毒（正向）
-   - 创造cathartic moments
-
-4. 创新要求
-   - 颠覆读者预期
-   - 保持内在逻辑
-   - 制造"原来如此"时刻
-   - 平衡熟悉与陌生
+1. 场景设计：对话场景注重潜台词冲突，动作场景注重环境交互，心理场景注重认知失调
+2. 叙事技巧：使用感官描写，建立情感契约，暗示深层主题，交替紧张与释放
+3. 情感表达：识别普世共鸣点，创造情感升华时刻
+4. 创新要求：颠覆读者预期但保持内在逻辑，制造"原来如此"时刻
 
 [输出要求]
-1. 仅返回章节正文文本
-2. 不使用分章节小标题
-3. 长短句交错，增强语言节奏感
-4. 仅使用简体中文和中文标点符号
-5. 避免陈词滥调
+1. 仅返回章节正文文本，不使用分章节小标题
+2. 长短句交错，增强语言节奏感
+3. 仅使用简体中文和中文标点符号
+4. 避免陈词滥调
 
 [质量检查]
 1. 是否触及人性的核心？
 2. 是否创造了独特的阅读体验？
-3. 是否有未探索的叙事维度？
-4. 如何让这个故事成为读者的一部分？
-"""
+3. 是否有未探索的叙事维度？"""
 
     # 添加额外要求
     if extra_prompt:
         base_prompt += f"\n[额外要求]\n{extra_prompt}"
 
-    # 添加上下文信息
+    # 添加上下文信息（限制长度）
     if context_info:
+        # 限制上下文信息长度，避免过长
+        max_context_length = 2000
+        if len(context_info) > max_context_length:
+            context_info = context_info[-max_context_length:] + "...(前文已省略)"
         base_prompt += f"\n[上下文信息]\n{context_info}"
 
     return base_prompt
@@ -447,129 +404,75 @@ def get_consistency_check_prompt(
     character_info = sync_info.get("人物设定", {})
     plot_info = sync_info.get("剧情发展", {})
     
-    return f"""作为小说一致性检查专家，请基于以下信息评估章节内容的一致性，并提供详细报告：
+    # 安全处理列表字段，确保能处理字典和字符串混合的情况
+    def safe_join_list(items, default=""):
+        """安全地连接列表，处理字典和字符串混合的情况"""
+        if not items:
+            return default
+        result = []
+        for item in items:
+            if isinstance(item, dict):
+                # 如果是字典，提取名称和简介
+                name = item.get("名称", "")
+                desc = item.get("简介", item.get("说明", ""))
+                if name and desc:
+                    result.append(f"{name}: {desc}")
+                elif name:
+                    result.append(name)
+                elif desc:
+                    result.append(desc)
+            elif isinstance(item, str):
+                result.append(item)
+            else:
+                result.append(str(item))
+        return ", ".join(result) if result else default
+    
+    return f"""请检查章节内容的一致性：
 
 [同步信息]
-1. 世界观设定：
-   - 世界背景：{', '.join(world_info.get('世界背景', []))}
-   - 阵营势力：{', '.join(world_info.get('阵营势力', []))}
-   - 重要规则：{', '.join(world_info.get('重要规则', []))}
-   - 关键场所：{', '.join(world_info.get('关键场所', []))}
+世界观：{safe_join_list(world_info.get('世界背景', []))} | {safe_join_list(world_info.get('阵营势力', []))} | {safe_join_list(world_info.get('重要规则', []))}
+人物：{chr(10).join([f"- {char.get('role_type', '未知')}: {char.get('personality', '')}" for char in character_info.get('人物信息', [])])}
+剧情：{plot_info.get('主线梗概', '')} | 冲突：{safe_join_list(plot_info.get('进行中冲突', []))} | 伏笔：{safe_join_list(plot_info.get('悬念伏笔', []))}
 
-2. 人物设定：
-{chr(10).join([f"   - {char.get('role_type', '未知角色')}: {char.get('personality', '')} - {char.get('relationship', '')}" for char in character_info.get('人物信息', [])])}
-
-3. 剧情发展：
-   - 主线梗概：{plot_info.get('主线梗概', '')}
-   - 进行中冲突：{', '.join(plot_info.get('进行中冲突', []))}
-   - 悬念伏笔：{', '.join(plot_info.get('悬念伏笔', []))}
-
-[当前章节大纲]
-章节号：{chapter_outline.get('chapter_number', '未知')}
-标题：{chapter_outline.get('title', '未知')}
-关键剧情点：{', '.join(chapter_outline.get('key_points', []))}
-涉及角色：{', '.join(chapter_outline.get('characters', []))}
-场景设定：{', '.join(chapter_outline.get('settings', []))}
-核心冲突：{', '.join(chapter_outline.get('conflicts', []))}
+[章节大纲]
+{chapter_outline.get('chapter_number', '未知')}章《{chapter_outline.get('title', '未知')}》
+关键点：{', '.join(chapter_outline.get('key_points', []))}
+角色：{', '.join(chapter_outline.get('characters', []))}
+场景：{', '.join(chapter_outline.get('settings', []))}
+冲突：{', '.join(chapter_outline.get('conflicts', []))}
 
 [上一章摘要]
-{previous_summary if previous_summary else "（无上一章摘要）"}
+{previous_summary if previous_summary else "（无）"}
 
-[待检查章节内容]
+[章节内容]
 {chapter_content}
 
-===== 一致性检查标准 =====
-请从以下八个维度进行评估，各占不同分值，总分100分：
-
-1. 世界观一致性（15分）：
-   - 是否符合已建立的世界设定和规则
-   - 新增设定是否与现有世界观冲突
-   - 场景描写是否符合世界背景
-
-2. 人物一致性（15分）：
-   - 人物行为是否符合其设定和当前状态
-   - 人物关系发展是否合理
-   - 新角色是否与已有角色体系协调
-
-3. 剧情连贯性（15分）：
-   - 与主线梗概的契合度
-   - 与进行中冲突的呼应
-   - 对已有伏笔的处理
-
-4. 情节逻辑性（10分）：
-   - 事件发展是否合理
-   - 因果关系是否清晰
-   - 时间线是否连贯
-
-5. 冲突展现（10分）：
-   - 是否合理展现核心冲突
-   - 冲突发展是否符合逻辑
-   - 冲突解决方式是否恰当
-
-6. 设定延续性（10分）：
-   - 对已有设定的运用
-   - 新设定的合理性
-   - 设定间的协调性
-
-7. 细节准确性（15分）：
-   - 场景描写的准确性
-   - 专业知识的准确性
-   - 前后细节的一致性
-
-8. 节奏把控（10分）：
-   - 情节节奏是否合适
-   - 是否符合章节定位
-   - 与整体节奏的协调性
+===== 一致性检查 =====
+请从以下维度评估（总分100分）：
+1. 世界观一致性（25分）：是否符合已建立的世界设定和规则
+2. 人物一致性（25分）：人物行为是否符合其设定和当前状态
+3. 剧情连贯性（25分）：与主线梗概的契合度，对已有伏笔的处理
+4. 逻辑合理性（25分）：事件发展是否合理，因果关系是否清晰
 
 ===== 输出格式 =====
 [总体评分]: <0-100分>
 
-[世界观一致性评分]: <0-15分>
-[世界观分析]:
-<分析内容>
-
-[人物一致性评分]: <0-15分>
-[人物分析]:
-<分析内容>
-
-[剧情连贯性评分]: <0-15分>
-[剧情分析]:
-<分析内容>
-
-[情节逻辑性评分]: <0-10分>
-[情节分析]:
-<分析内容>
-
-[冲突展现评分]: <0-10分>
-[冲突分析]:
-<分析内容>
-
-[设定延续性评分]: <0-10分>
-[设定分析]:
-<分析内容>
-
-[细节准确性评分]: <0-15分>
-[细节分析]:
-<分析内容>
-
-[节奏把控评分]: <0-10分>
-[节奏分析]:
-<分析内容>
+[世界观一致性]: <0-25分>
+[人物一致性]: <0-25分>
+[剧情连贯性]: <0-25分>
+[逻辑合理性]: <0-25分>
 
 [问题清单]:
-1. <具体问题描述>
-2. <具体问题描述>
+1. <具体问题>
+2. <具体问题>
 ...
 
 [修改建议]:
-1. <具体修改建议>
-2. <具体修改建议>
+1. <具体建议>
+2. <具体建议>
 ...
 
-[修改必要性]: <"需要修改"或"无需修改">
-
-[优先级]: <"高"/"中"/"低">
-"""
+[修改必要性]: <"需要修改"或"无需修改">"""
 
 # =============== 10. 章节修正提示词 ===================
 def get_chapter_revision_prompt(
@@ -705,15 +608,14 @@ def get_logic_check_prompt(
     sync_info: Optional[str] = None
 ) -> str:
     """生成用于检查章节逻辑严密性的提示词"""
-    prompt = f"""请检查以下章节内容的逻辑严密性：
+    prompt = f"""请检查章节内容的逻辑严密性：
 
 [章节大纲]
-章节号：{chapter_outline.get('chapter_number', '未知')}
-标题：{chapter_outline.get('title', '未知')}
-关键剧情点：{', '.join(chapter_outline.get('key_points', []))}
-涉及角色：{', '.join(chapter_outline.get('characters', []))}
-场景设定：{', '.join(chapter_outline.get('settings', []))}
-核心冲突：{', '.join(chapter_outline.get('conflicts', []))}"""
+{chapter_outline.get('chapter_number', '未知')}章《{chapter_outline.get('title', '未知')}》
+关键点：{', '.join(chapter_outline.get('key_points', []))}
+角色：{', '.join(chapter_outline.get('characters', []))}
+场景：{', '.join(chapter_outline.get('settings', []))}
+冲突：{', '.join(chapter_outline.get('conflicts', []))}"""
 
     # 添加同步信息部分（如果提供）
     if sync_info:
@@ -727,56 +629,20 @@ def get_logic_check_prompt(
 [章节内容]
 {chapter_content}
 
-===== 逻辑检查标准 =====
-请从以下维度评估章节内容的逻辑严密性：
-
-1. 因果关系
-   - 事件发生是否有合理的因果关联
-   - 人物行为是否有合理的动机
-   - 情节转折是否有充分的铺垫
-
-2. 时间线
-   - 事件发生顺序是否合理
-   - 时间跨度是否合理
-   - 是否存在时间线矛盾
-
-3. 空间逻辑
-   - 场景转换是否合理
-   - 人物位置关系是否合理
-   - 是否存在空间矛盾
-
-4. 能力设定
-   - 人物能力表现是否合理
-   - 是否违反已设定的能力规则
-   - 能力提升是否有合理依据
-
-5. 世界观
-   - 是否符合已建立的世界规则
-   - 是否存在世界观矛盾
-   - 新设定是否与已有设定冲突
+===== 逻辑检查 =====
+请从以下维度评估（总分100分）：
+1. 因果关系（25分）：事件发生是否有合理的因果关联，人物行为是否有合理的动机
+2. 时间线（25分）：事件发生顺序是否合理，是否存在时间线矛盾
+3. 空间逻辑（25分）：场景转换是否合理，人物位置关系是否合理
+4. 世界观（25分）：是否符合已建立的世界规则，是否存在世界观矛盾
 
 ===== 输出格式 =====
 [总体评分]: <0-100分>
 
-[因果关系评分]: <0-20分>
-[因果关系分析]:
-<分析内容>
-
-[时间线评分]: <0-20分>
-[时间线分析]:
-<分析内容>
-
-[空间逻辑评分]: <0-20分>
-[空间逻辑分析]:
-<分析内容>
-
-[能力设定评分]: <0-20分>
-[能力设定分析]:
-<分析内容>
-
-[世界观评分]: <0-20分>
-[世界观分析]:
-<分析内容>
+[因果关系]: <0-25分>
+[时间线]: <0-25分>
+[空间逻辑]: <0-25分>
+[世界观]: <0-25分>
 
 [逻辑问题列表]:
 1. <问题描述>
@@ -786,8 +652,7 @@ def get_logic_check_prompt(
 [修改建议]:
 <针对每个逻辑问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">
-"""
+[修改必要性]: <"需要修改"或"无需修改">"""
     return prompt
 
 def get_style_check_prompt(
@@ -804,66 +669,28 @@ def get_style_check_prompt(
     narrative_style = style_guide.get("narrative_style", "")
     language_style = style_guide.get("language_style", "")
     
-    return f"""请检查以下章节内容的写作风格：
+    return f"""请检查章节内容的写作风格：
 
 [风格指南]
-语气基调：{tone}
-叙述视角：{pov}
-叙事风格：{narrative_style}
-语言风格：{language_style}
+语气：{tone} | 视角：{pov} | 叙事：{narrative_style} | 语言：{language_style}
 
 [章节内容]
 {chapter_content}
 
-===== 风格检查维度 =====
-
-1. 语气一致性
-   - 是否保持指定的语气基调
-   - 情感表达是否恰当
-   - 是否存在语气突兀转变
-
-2. 视角把控
-   - 是否严格遵守视角限制
-   - 视角切换是否自然
-   - 是否出现视角混乱
-
-3. 叙事手法
-   - 是否符合指定的叙事风格
-   - 叙事节奏是否合适
-   - 场景描写是否生动
-
-4. 语言特色
-   - 是否符合指定的语言风格
-   - 用词是否准确规范
-   - 句式是否多样流畅
-
-5. 细节处理
-   - 环境描写是否细致
-   - 人物刻画是否生动
-   - 情节铺陈是否到位
+===== 风格检查 =====
+请从以下维度评估（总分100分）：
+1. 语气一致性（25分）：是否保持指定的语气基调，情感表达是否恰当
+2. 视角把控（25分）：是否严格遵守视角限制，视角切换是否自然
+3. 叙事手法（25分）：是否符合指定的叙事风格，叙事节奏是否合适
+4. 语言特色（25分）：是否符合指定的语言风格，用词是否准确规范
 
 ===== 输出格式 =====
 [总体评分]: <0-100分>
 
-[语气一致性评分]: <0-20分>
-[语气分析]:
-<分析内容>
-
-[视角把控评分]: <0-20分>
-[视角分析]:
-<分析内容>
-
-[叙事手法评分]: <0-20分>
-[叙事分析]:
-<分析内容>
-
-[语言特色评分]: <0-20分>
-[语言分析]:
-<分析内容>
-
-[细节处理评分]: <0-20分>
-[细节分析]:
-<分析内容>
+[语气一致性]: <0-25分>
+[视角把控]: <0-25分>
+[叙事手法]: <0-25分>
+[语言特色]: <0-25分>
 
 [风格问题列表]:
 1. <问题描述>
@@ -873,75 +700,38 @@ def get_style_check_prompt(
 [修改建议]:
 <针对每个风格问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">
-"""
+[修改必要性]: <"需要修改"或"无需修改">"""
 
 def get_emotion_check_prompt(
     chapter_content: str,
     chapter_outline: Dict
 ) -> str:
     """生成用于检查章节情感表达的提示词"""
-    return f"""请检查以下章节内容的情感表达：
+    return f"""请检查章节内容的情感表达：
 
 [章节大纲]
-章节号：{chapter_outline.get('chapter_number', '未知')}
-标题：{chapter_outline.get('title', '未知')}
+{chapter_outline.get('chapter_number', '未知')}章《{chapter_outline.get('title', '未知')}》
 情感基调：{chapter_outline.get('emotion', '未知')}
-关键剧情点：{', '.join(chapter_outline.get('key_points', []))}
-涉及角色：{', '.join(chapter_outline.get('characters', []))}
+关键点：{', '.join(chapter_outline.get('key_points', []))}
+角色：{', '.join(chapter_outline.get('characters', []))}
 
 [章节内容]
 {chapter_content}
 
-===== 情感检查维度 =====
-
-1. 情感基调
-   - 是否符合章节预设基调
-   - 情感变化是否自然
-   - 是否有突兀的情绪波动
-
-2. 人物情感
-   - 情感表达是否符合人物性格
-   - 情感反应是否合理
-   - 内心活动描写是否到位
-
-3. 情感互动
-   - 人物间情感交流是否自然
-   - 情感冲突是否鲜明
-   - 群体情绪是否传染
-
-4. 场景情感
-   - 环境氛围营造是否到位
-   - 场景与情感是否呼应
-   - 是否有画面感
-
-5. 读者共鸣
-   - 是否容易引起情感共鸣
-   - 是否有感情真实性
-   - 是否有情感升华
+===== 情感检查 =====
+请从以下维度评估（总分100分）：
+1. 情感基调（25分）：是否符合章节预设基调，情感变化是否自然
+2. 人物情感（25分）：情感表达是否符合人物性格，情感反应是否合理
+3. 情感互动（25分）：人物间情感交流是否自然，情感冲突是否鲜明
+4. 读者共鸣（25分）：是否容易引起情感共鸣，是否有感情真实性
 
 ===== 输出格式 =====
 [总体评分]: <0-100分>
 
-[情感基调评分]: <0-20分>
-[基调分析]:
-<分析内容>
-
-[人物情感评分]: <0-20分>
-[人物情感分析]:
-<分析内容>
-
-[情感互动评分]: <0-20分>
-[互动分析]:
-<分析内容>
-
-[场景情感评分]: <0-20分>
-[场景分析]:
-<分析内容>
-
-[读者共鸣评分]: <0-20分>
-[共鸣分析]:
-<分析内容>
+[情感基调]: <0-25分>
+[人物情感]: <0-25分>
+[情感互动]: <0-25分>
+[读者共鸣]: <0-25分>
 
 [情感问题列表]:
 1. <问题描述>
@@ -951,5 +741,4 @@ def get_emotion_check_prompt(
 [修改建议]:
 <针对每个情感问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">
-""" 
+[修改必要性]: <"需要修改"或"无需修改">""" 

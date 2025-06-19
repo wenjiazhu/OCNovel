@@ -351,16 +351,20 @@ class ContentGenerator:
         if chapter_num > 1:
             context_parts = []
             
-            # 1. 尝试获取前一章摘要
+            # 1. 尝试获取前一章摘要（限制长度）
             try:
                 prev_summary = self.consistency_checker._get_previous_summary(chapter_num - 1)
                 if prev_summary:
-                    context_parts.append(f"前一章摘要：\n{prev_summary}")
+                    # 限制摘要长度
+                    max_summary_length = 500
+                    if len(prev_summary) > max_summary_length:
+                        prev_summary = prev_summary[:max_summary_length] + "..."
+                    context_parts.append(f"前一章摘要：{prev_summary}")
                     logger.debug(f"获取到第 {chapter_num-1} 章摘要")
             except Exception as e:
                 logger.warning(f"获取第 {chapter_num-1} 章摘要时出错: {e}")
 
-            # 2. 获取前一章内容
+            # 2. 获取前一章内容（进一步限制长度）
             try:
                 prev_chapter_num = chapter_num - 1
                 if 0 <= prev_chapter_num - 1 < len(self.chapter_outlines):
@@ -372,21 +376,26 @@ class ContentGenerator:
                     if os.path.exists(prev_chapter_file):
                         with open(prev_chapter_file, 'r', encoding='utf-8') as f:
                             prev_content = f.read()
-                            # 如果内容太长，只取最后一部分
-                            max_prev_content_length = self.config.generation_config.get("context_length", 2000)
+                            # 进一步限制内容长度，只取最后一部分
+                            max_prev_content_length = 1500  # 减少到1500字符
                             if len(prev_content) > max_prev_content_length:
-                                context_parts.append(f"前一章结尾部分：\n...{prev_content[-max_prev_content_length:]}")
+                                context_parts.append(f"前一章结尾：{prev_content[-max_prev_content_length:]}")
                             else:
-                                context_parts.append(f"前一章内容：\n{prev_content}")
+                                context_parts.append(f"前一章内容：{prev_content}")
                             logger.debug(f"获取到第 {prev_chapter_num} 章内容")
                     else:
                         logger.warning(f"未找到前一章文件 {prev_chapter_file}")
             except Exception as e:
                 logger.warning(f"读取第 {prev_chapter_num} 章内容时出错: {str(e)}")
 
-            # 返回所有上下文信息
+            # 返回所有上下文信息，并限制总长度
             if context_parts:
-                return "\n\n".join(context_parts)
+                combined_context = "\n".join(context_parts)
+                # 限制总上下文长度
+                max_total_context_length = 2000
+                if len(combined_context) > max_total_context_length:
+                    combined_context = combined_context[-max_total_context_length:] + "...(前文已省略)"
+                return combined_context
             return "（无法获取前一章信息）"
         else:
             return "（这是第一章，无前文）"
