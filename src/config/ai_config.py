@@ -11,32 +11,36 @@ class AIConfig:
 
         # OpenAI 配置（提前定义）
         self.openai_config = {
-            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "10")),  # 默认 5 秒
+            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "10")),  # 默认 10 秒
             "models": {
                 "embedding": {
                     "name": "Pro/BAAI/bge-m3",
                     "temperature": 0.7,
                     "dimension": 1024,
                     "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1")
+                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
+                    "timeout": int(os.getenv("OPENAI_EMBEDDING_TIMEOUT", "60"))
                 },
                 "outline": {
-                    "name": "gpt-4o-mini",
+                    "name": "deepgeminipro",  # 使用本地服务器支持的模型
                     "temperature": 1.0,
                     "api_key": os.getenv("OPENAI_OUTLINE_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.openai.com/v1")
+                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.openai.com/v1"),
+                    "timeout": int(os.getenv("OPENAI_OUTLINE_TIMEOUT", "120"))
                 },
                 "content": {
-                    "name": "gpt-4o",
+                    "name": "deepgeminiflash",  # 使用本地服务器支持的模型
                     "temperature": 0.7,
                     "api_key": os.getenv("OPENAI_CONTENT_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.openai.com/v1")
+                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.openai.com/v1"),
+                    "timeout": int(os.getenv("OPENAI_CONTENT_TIMEOUT", "180"))  # 内容生成需要更长时间
                 },
                 "reranker": {
                     "name": os.getenv("OPENAI_RERANKER_MODEL", "Pro/BAAI/bge-reranker-v2-m3"),
                     "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
                     "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
-                    "use_fp16": os.getenv("OPENAI_RERANKER_USE_FP16", "True") == "True"
+                    "use_fp16": os.getenv("OPENAI_RERANKER_USE_FP16", "True") == "True",
+                    "timeout": int(os.getenv("OPENAI_EMBEDDING_TIMEOUT", "60"))
                 }
             }
         }
@@ -97,7 +101,8 @@ class AIConfig:
                 "base_url": model_config["base_url"],
                 "model_name": model_config["name"],
                 "use_fp16": model_config.get("use_fp16", True),
-                "retry_delay": self.openai_config["retry_delay"]
+                "retry_delay": self.openai_config["retry_delay"],
+                "timeout": model_config.get("timeout", 60)
             }
         return {
             "type": "openai",
@@ -106,7 +111,8 @@ class AIConfig:
             "model_name": model_config["name"],
             "temperature": model_config["temperature"],
             "dimension": model_config.get("dimension", 1024),
-            "retry_delay": self.openai_config["retry_delay"]
+            "retry_delay": self.openai_config["retry_delay"],
+            "timeout": model_config.get("timeout", 60)
         }
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
