@@ -55,7 +55,7 @@ class OpenAIModel(BaseModel):
             logging.info(f"开始生成文本，模型: {self.model_name}, 提示词长度: {len(prompt)}")
             
             # 如果提示词太长，进行截断
-            max_prompt_length = 32000  # 设置最大提示词长度
+            max_prompt_length = 65536  # 设置最大提示词长度
             if len(prompt) > max_prompt_length:
                 logging.warning(f"提示词过长 ({len(prompt)} 字符)，截断到 {max_prompt_length} 字符")
                 prompt = prompt[:max_prompt_length]
