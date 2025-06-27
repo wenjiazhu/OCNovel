@@ -14,9 +14,9 @@ class AIConfig:
             "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "10")),  # 默认 10 秒
             "models": {
                 "embedding": {
-                    "name": "Pro/BAAI/bge-m3",
+                    "name": "Qwen/Qwen3-Embedding-4B",
                     "temperature": 0.7,
-                    "dimension": 1024,
+                    "dimension": 2048,
                     "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
                     "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
                     "timeout": int(os.getenv("OPENAI_EMBEDDING_TIMEOUT", "60"))
@@ -36,7 +36,7 @@ class AIConfig:
                     "timeout": int(os.getenv("OPENAI_CONTENT_TIMEOUT", "180"))  # 内容生成需要更长时间
                 },
                 "reranker": {
-                    "name": os.getenv("OPENAI_RERANKER_MODEL", "Pro/BAAI/bge-reranker-v2-m3"),
+                    "name": os.getenv("OPENAI_RERANKER_MODEL", "Qwen/Qwen3-Reranker-0.6B"),
                     "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
                     "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
                     "use_fp16": os.getenv("OPENAI_RERANKER_USE_FP16", "True") == "True",
