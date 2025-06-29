@@ -45,10 +45,10 @@ def get_outline_prompt(
     style_guide = writing_guide.get("style_guide", {})
     
     base_prompt = f"""
-你是 StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。
+你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节。你的任务是生成包含 {current_batch_size} 个章节对象的JSON数组，每个章节对象需符合特定要求，且生成的故事要遵循一系列叙事和输出规则。
 
 [世界观设定]
-1. 神道体系：
+1. 修炼体系：
 {world_building.get('magic_system', '')}
 
 2. 社会结构：
@@ -170,7 +170,7 @@ def get_chapter_prompt(
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
     
-    base_prompt = f"""你是专业小说创作AI，请基于以下信息生成章节内容：
+    base_prompt = f"""你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节，且生成的故事要遵循一系列叙事和输出规则，你的任务是基于以下信息生成章节内容：
 
 [章节信息]
 章节号: {novel_number}
