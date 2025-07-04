@@ -408,7 +408,7 @@ def get_consistency_check_prompt(
     """生成用于检查章节一致性的提示词"""
     # 从同步信息中提取相关内容
     world_info = sync_info.get("世界观", {})
-    character_info = sync_info.get("人物设定", {})
+    character_info_dict = sync_info.get("人物设定", {})
     plot_info = sync_info.get("剧情发展", {})
     
     # 安全处理列表字段，确保能处理字典和字符串混合的情况
@@ -438,7 +438,7 @@ def get_consistency_check_prompt(
 
 [同步信息]
 世界观：{safe_join_list(world_info.get('世界背景', []))} | {safe_join_list(world_info.get('阵营势力', []))} | {safe_join_list(world_info.get('重要规则', []))}
-人物：{chr(10).join([f"- {char.get('role_type', '未知')}: {char.get('personality', '')}" for char in character_info.get('人物信息', [])])}
+人物：{chr(10).join([f"- {char.get('role_type', '未知')}: {char.get('personality', '')}" for char in character_info_dict.get('人物信息', [])])}
 剧情：{plot_info.get('主线梗概', '')} | 冲突：{safe_join_list(plot_info.get('进行中冲突', []))} | 伏笔：{safe_join_list(plot_info.get('悬念伏笔', []))}
 
 [章节大纲]

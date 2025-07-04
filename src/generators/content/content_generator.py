@@ -409,6 +409,15 @@ class ContentGenerator:
         }
 
         try:
+            # 检查知识库状态
+            if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
+                logging.warning("知识库未构建，跳过检索")
+                return references
+                
+            if not hasattr(self.knowledge_base, 'index') or self.knowledge_base.index is None:
+                logging.warning("知识库索引不存在，跳过检索")
+                return references
+            
             # 生成检索关键词
             search_prompt = get_knowledge_search_prompt(
                 chapter_number=chapter_outline.chapter_number,
@@ -422,15 +431,20 @@ class ContentGenerator:
                 short_summary="",  # 可根据实际需求补充
             )
 
+            logging.debug(f"知识库检索提示词: {search_prompt}")
+            
             # 调用知识库检索
             relevant_knowledge = self.knowledge_base.search(search_prompt)
             if relevant_knowledge and isinstance(relevant_knowledge, list):
                 references["plot_references"] = relevant_knowledge[:3]  # 限制数量
                 references["character_references"] = relevant_knowledge[3:6]
                 references["setting_references"] = relevant_knowledge[6:9]
+                logging.debug(f"成功检索到 {len(relevant_knowledge)} 条相关知识")
+            else:
+                logging.debug("知识库检索返回空结果")
 
         except Exception as e:
-            logging.error(f"优化检索章节参考信息时出错: {str(e)}")
+            logging.error(f"优化检索章节参考信息时出错: {str(e)}", exc_info=True)
 
         return references
 
