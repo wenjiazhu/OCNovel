@@ -48,50 +48,60 @@ def get_outline_prompt(
 你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节。你的任务是生成包含 {current_batch_size} 个章节对象的JSON数组，每个章节对象需符合特定要求，且生成的故事要遵循一系列叙事和输出规则。
 
 [世界观设定]
-1. 修炼体系：
-{world_building.get('magic_system', '')}
+1. 修炼/魔法体系：
+{world_building.get('magic_system', '[在此处插入详细的修炼体系、等级划分、核心规则、能量来源、特殊体质设定等]')}
 
-2. 社会结构：
-{world_building.get('social_system', '')}
+2. 社会结构与地理：
+{world_building.get('social_system', '[在此处插入世界的社会结构、主要国家/地域划分、关键势力（如门派、家族、组织）及其相互关系等]')}
 
-3. 时代背景：
-{world_building.get('background', '')}
+3. 时代背景与核心矛盾：
+{world_building.get('background', '[在此处插入故事发生的时代背景、核心的宏观冲突（如正邪大战、文明危机、神魔博弈）、以及关键的历史事件或传说]')}
 
 [人物设定]
 1. 主角设定：
-- 背景：{character_guide.get('protagonist', {}).get('background', '')}
-- 性格：{character_guide.get('protagonist', {}).get('initial_personality', '')}
-- 成长路径：{character_guide.get('protagonist', {}).get('growth_path', '')}
+- 背景：{character_guide.get('protagonist', {}).get('background', '[主角的出身、家庭背景、特殊身份、携带的关键信物或谜团等]')}
+- 性格：{character_guide.get('protagonist', {}).get('initial_personality', '[主角初期的性格特点、核心价值观、内在的矛盾与驱动力]')}
+- 成长路径：{character_guide.get('protagonist', {}).get('growth_path', '[主角从故事开始到结局的预期转变，包括能力、心智和地位的成长弧光]')}
 
 2. 重要配角：
-{chr(10).join([f"- {role.get('role_type', '')}：{role.get('personality', '')} - {role.get('relationship', '')}" for role in character_guide.get('supporting_roles', [])])}
+- [导师/引路人]：[性格特点] - [与主角的关系，以及在剧情中的核心作用]
+- [伙伴/挚友]：[性格特点] - [与主角的关系，以及在剧情中的核心作用]
+- [红颜/道侣]：[性格特点] - [与主角的关系，以及在剧情中的核心作用]
+{chr(10).join([f"- {role.get('role_type', '[其他配角类型]')}：{role.get('personality', '[性格特点]')} - {role.get('relationship', '[与主角的关系及作用]')}" for role in character_guide.get('supporting_roles', [])])}
 
 3. 主要对手：
-{chr(10).join([f"- {role.get('role_type', '')}：{role.get('personality', '')} - {role.get('conflict_point', '')}" for role in character_guide.get('antagonists', [])])}
+- [初期反派]：[性格/能力特点] - [与主角的核心冲突点]
+- [中期BOSS]：[性格/能力特点] - [与主角的核心冲突点]
+- [宿敌/一生之敌]：[性格/能力特点] - [与主角的核心冲突点]
+- [幕后黑手]：[性格/能力特点] - [与主角的核心冲突点]
+{chr(10).join([f"- {role.get('role_type', '[其他对手类型]')}：{role.get('personality', '[性格/能力特点]')} - {role.get('conflict_point', '[与主角的核心冲突点]')}" for role in character_guide.get('antagonists', [])])}
 
-[剧情结构]
-1. 第一幕：
-- 铺垫：{plot_structure.get('act_one', {}).get('setup', '')}
-- 触发事件：{plot_structure.get('act_one', {}).get('inciting_incident', '')}
-- 第一情节点：{plot_structure.get('act_one', {}).get('first_plot_point', '')}
 
-2. 第二幕：
-- 上升行动：{plot_structure.get('act_two', {}).get('rising_action', '')}
-- 中点：{plot_structure.get('act_two', {}).get('midpoint', '')}
-- 复杂化：{plot_structure.get('act_two', {}).get('complications', '')}
-- 最黑暗时刻：{plot_structure.get('act_two', {}).get('darkest_moment', '')}
-- 第二情节点：{plot_structure.get('act_two', {}).get('second_plot_point', '')}
+[剧情结构（三幕式）]
+1. 第一幕：建立
+- 铺垫：{plot_structure.get('act_one', {}).get('setup', '[故事开端，介绍主角和其所处的世界，展示其日常状态和初步矛盾]')}
+- 触发事件：{plot_structure.get('act_one', {}).get('inciting_incident', '[一个关键事件打破主角的平静生活，迫使其踏上征程或做出改变]')}
+- 第一情节点：{plot_structure.get('act_one', {}).get('first_plot_point', '[主角做出第一个重大决定，正式进入新的世界或接受挑战，无法回头]')}
 
-3. 第三幕：
-- 高潮：{plot_structure.get('act_three', {}).get('climax', '')}
-- 结局：{plot_structure.get('act_three', {}).get('resolution', '')}
-- 尾声：{plot_structure.get('act_three', {}).get('denouement', '')}
+2. 第二幕：对抗
+- 上升行动：{plot_structure.get('act_two', {}).get('rising_action', '[主角学习新技能，结识新伙伴，遭遇一系列挑战和胜利，逐步接近目标]')}
+- 中点：{plot_structure.get('act_two', {}).get('midpoint', '[剧情发生重大转折，主角可能获得关键信息或遭遇重大失败，故事的赌注被提高]')}
+- 复杂化：{plot_structure.get('act_two', {}).get('complications', '[盟友可能是敌人，计划出现意外，主角面临更复杂的困境和道德抉择]')}
+- 最黑暗时刻：{plot_structure.get('act_two', {}).get('darkest_moment', '[主角遭遇最惨重的失败，失去一切希望，仿佛已经无力回天]')}
+- 第二情节点：{plot_structure.get('act_two', {}).get('second_plot_point', '[主角获得新的启示、力量或盟友，重新振作，制定最终决战的计划]')}
+
+3. 第三幕：解决
+- 高潮：{plot_structure.get('act_three', {}).get('climax', '[主角与最终反派展开决战，所有次要情节汇集于此，是故事最紧张的时刻]')}
+- 结局：{plot_structure.get('act_three', {}).get('resolution', '[决战结束，核心冲突得到解决，主角达成或未能达成其最终目标]')}
+- 尾声：{plot_structure.get('act_three', {}).get('denouement', '[展示决战后的世界和人物状态，为续集或新的故事线埋下伏笔]')}
 
 [写作风格]
-1. 基调：{style_guide.get('tone', '')}
-2. 节奏：{style_guide.get('pacing', '')}
+1. 基调：{style_guide.get('tone', '[故事的整体基调，如：热血、黑暗、幽默、悬疑、史诗等]')}
+2. 节奏：{style_guide.get('pacing', '[故事的节奏，如：快节奏、单元剧、慢热、张弛有度等]')}
 3. 描写重点：
-{chr(10).join([f"- {item}" for item in style_guide.get('description_focus', [])])}
+- {style_guide.get('description_focus', ['[描写的第一个侧重点，如：战斗场面、世界观奇观、人物内心等]'])[0]}
+- {style_guide.get('description_focus', ['[描写的第二个侧重点，如：势力间的权谋博弈、神秘氛围的营造等]'])[1]}
+- {style_guide.get('description_focus', ['[描写的第三个侧重点，如：主角的成长与反思、配角群像的刻画等]'])[2]}
 
 [上下文信息]
 {existing_context}
@@ -104,8 +114,8 @@ def get_outline_prompt(
 
 2. 结构完整性：
    - 每章必须包含起承转合四个部分
-   - 每3章形成一个完整的故事单元
-   - 每10章形成一个大的故事弧
+   - 每3-5章形成一个完整的故事单元
+   - 每10-20章形成一个大的故事弧
 
 3. 人物发展：
    - 确保主要人物的性格和动机保持一致性
@@ -184,28 +194,24 @@ def get_chapter_prompt(
 冲突: {conflicts}
 
 [写作要求]
-1. 风格融合抒情与现实主义，语言在抽象与具象之间建立张力，善用意象、比喻、象征等修辞，增强表达深度与文学感染力。
-2. 强调多重感官描写（视觉、听觉、触觉、嗅觉、味觉），营造鲜明画面感与场景沉浸感。
-3. 采用第一或第三人称内视角叙事，深入人物心理，展现情绪视角过滤下的世界。
-4. 鼓励非线性结构、片段化推进、时空交错等创新叙事方式，提升阅读新鲜感。
-5. 善用修辞手法（如重复、排比、反讽、拟人等），增强语言表现力和节奏感。
-6. 控制节奏，通过段落长短与信息密度变化制造起伏，重要情节适当铺陈、放慢节奏，加强沉浸感。
-7. 场景设计：对话注重潜台词冲突，动作注重环境交互，心理注重认知失调与内心矛盾。
-8. 叙事技巧：建立情感契约，暗示深层主题，交替紧张与释放，创造“原来如此”时刻。
-9. 情感表达：识别普世共鸣点，创造情感升华与共情触点，适当留白，引导读者参与意义建构。
-10. 创新表达：颠覆读者预期但保持内在逻辑，追求独特的阅读体验。
+1. **叙事视角与深度**：遵循设定的叙事视角（如第一人称、第三人称有限/全知），深入挖掘角色的内心世界，展现其动机、情感和心理变化。通过角色的感知来过滤和呈现世界，使读者产生强烈的代入感。
+2. **场景与氛围营造**：通过多感官描写（视觉、听觉、嗅觉、触觉等）构建生动、立体的场景。根据情节需要，精准地营造氛围，无论是战斗的紧张、探索的神秘，还是角色互动的温情，都要有鲜明的感染力。
+3. **情节推进与节奏**：确保本章情节紧扣大纲的“关键情节点”，做到起承转合。通过段落长短、信息密度和事件安排来控制叙事节奏，做到张弛有度，高潮部分要蓄势待发，爆发有力。
+4. **人物塑造与对话**：通过角色的行为、对话和内心独白来展现其性格的复杂性和成长性。对话应符合人物身份和性格，避免脸谱化，并能推动情节发展或揭示隐藏信息，潜台词的运用尤为重要。
+5. **语言与风格**：保持与小说整体风格（如热血、幽默、悬疑等）的一致性。文笔流畅，用词精准，富有表现力。战斗描写要充满力量感和想象力，景物描写要能烘托气氛，情感描写要细腻动人。
+6. **承上启下**：在章节内容中，巧妙地回应前文的伏笔或设定，让故事的连续性更强。在章节末尾，制造新的悬念或留下线索，激发读者的追读欲望。
 
 [输出要求]
-1. 仅返回章节正文文本，不使用分章节小标题。
-2. 长短句交错，增强语言节奏感，文风统一但具张力，诗意与现实交织。
-3. 保持多重感官刺激和动态节奏，营造沉浸式阅读体验，避免陈词滥调。
-4. 仅输出简体中文及中文标点符号，尤其是中文双引号的正确使用。
+1. 仅返回章节正文文本，以“第{novel_number}章 {chapter_title}”开头，然后换行开始正文。
+2. 严格使用简体中文及中文标点符号，特别是中文双引号“”。
+3. 确保段落划分合理，长短句结合，以保持阅读的流畅性和节奏感。
+4. 避免使用与故事背景不符的现代词汇或网络梗，保持世界观的沉浸感。
 
 [质量检查]
-1. 是否触及人性的核心，展现真实与诗意的交融？
-2. 是否创造了独特且具张力的阅读体验？
-3. 是否有未探索的叙事维度或创新表达？
-4. 是否具备留白与共情触点，激发读者参与意义建构？"""
+1. 人物塑造是否立体，行为动机是否符合其性格逻辑？
+2. 战斗或关键事件的描写是否足够精彩，富有画面感？
+3. 是否有效地推进了主线剧情，并处理了必要的伏笔？
+4. 章节的整体氛围和情感基调是否与大纲要求一致？"""
 
     # 添加额外要求
     if extra_prompt:
