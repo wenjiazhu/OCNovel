@@ -267,91 +267,28 @@ class KnowledgeBase:
                     except Exception as e:
                         logging.warning(f"清理临时文件 {f} 失败: {e}")
 
-    def search(self, query: str, k: int = 5, rerank_top_n: int = 10) -> List[str]:
-        """搜索相关内容，支持重排"""
+    def search(self, query: str, k: int = 5) -> List[str]:
+        """搜索相关内容"""
         if not self.index:
+            logging.error("知识库索引未构建")
             raise ValueError("Knowledge base not built yet")
-        
+            
         query_vector = self.embedding_model.embed(query)
+        
         if query_vector is None:
+            logging.error("嵌入模型返回空向量")
             return []
-        
-        # 检查查询向量维度是否与索引维度匹配
-        query_dimension = len(query_vector)
-        index_dimension = self.index.d
-        
-        if query_dimension != index_dimension:
-            logging.error(f"维度不匹配：查询向量维度 {query_dimension}，索引维度 {index_dimension}")
-            logging.warning("检测到嵌入模型配置变化，将强制重新构建知识库...")
             
-            # 清除当前索引
-            self.index = None
-            self.chunks = []
-            self.is_built = False
-            
-            # 尝试重新构建知识库
-            try:
-                # 从缓存中获取原始文本
-                cache_path = self._get_cache_path("")  # 获取缓存路径
-                if os.path.exists(cache_path):
-                    with open(cache_path, 'rb') as f:
-                        cached_data = pickle.load(f)
-                    
-                    if 'original_text' in cached_data:
-                        original_text = cached_data['original_text']
-                        logging.info("找到原始文本，开始重新构建知识库...")
-                        self.build(original_text, force_rebuild=True)
-                        
-                        # 重新尝试搜索
-                        query_vector = self.embedding_model.embed(query)
-                        if query_vector is None:
-                            return []
-                        
-                        query_vector_array = np.array([query_vector]).astype('float32')
-                        distances, indices = self.index.search(query_vector_array, max(k, rerank_top_n))
-                        candidate_chunks = [self.chunks[idx] for idx in indices[0] if idx < len(self.chunks)]
-                        candidate_texts = [chunk.content for chunk in candidate_chunks]
-                        
-                        # 动态加载重排模型
-                        if self.reranker is None and self.reranker_model_name:
-                            self.reranker = FlagReranker(self.reranker_model_name, use_fp16=True)
-                        
-                        # 用重排模型对召回结果排序
-                        if self.reranker and len(candidate_texts) > 1:
-                            pairs = [[query, text] for text in candidate_texts]
-                            scores = self.reranker.compute_score(pairs, normalize=True)
-                            reranked = sorted(zip(scores, candidate_texts), key=lambda x: x[0], reverse=True)
-                            return [text for _, text in reranked[:k]]
-                        
-                        return candidate_texts[:k]
-                    else:
-                        logging.error("缓存中未找到原始文本，无法自动重新构建知识库。请手动删除缓存文件并重新运行。")
-                        return []
-                else:
-                    logging.error("未找到缓存文件，无法自动重新构建知识库。请手动删除缓存文件并重新运行。")
-                    return []
-            except Exception as e:
-                logging.error(f"重新构建知识库失败: {str(e)}")
-                return []
-        
-        # 先用向量召回
+        # 搜索最相似的文本块
         query_vector_array = np.array([query_vector]).astype('float32')
-        distances, indices = self.index.search(query_vector_array, max(k, rerank_top_n))
-        candidate_chunks = [self.chunks[idx] for idx in indices[0] if idx < len(self.chunks)]
-        candidate_texts = [chunk.content for chunk in candidate_chunks]
+        distances, indices = self.index.search(query_vector_array, k)
         
-        # 动态加载重排模型
-        if self.reranker is None and self.reranker_model_name:
-            self.reranker = FlagReranker(self.reranker_model_name, use_fp16=True)
-        
-        # 用重排模型对召回结果排序
-        if self.reranker and len(candidate_texts) > 1:
-            pairs = [[query, text] for text in candidate_texts]
-            scores = self.reranker.compute_score(pairs, normalize=True)
-            reranked = sorted(zip(scores, candidate_texts), key=lambda x: x[0], reverse=True)
-            return [text for _, text in reranked[:k]]
-        
-        return candidate_texts[:k]
+        # 返回相关文本内容
+        results = []
+        for idx in indices[0]:
+            if idx < len(self.chunks):
+                results.append(self.chunks[idx].content)
+        return results
 
     def get_all_references(self) -> Dict[str, str]:
         """获取所有参考内容"""
