@@ -8,14 +8,49 @@ class AIConfig:
     def __init__(self):
         # 加载环境变量
         load_dotenv()
-        
+
+        # OpenAI 配置（提前定义）
+        self.openai_config = {
+            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "10")),  # 默认 10 秒
+            "models": {
+                "embedding": {
+                    "name": "Qwen/Qwen3-Embedding-4B",
+                    "temperature": 0.7,
+                    "dimension": 2048,
+                    "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
+                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
+                    "timeout": int(os.getenv("OPENAI_EMBEDDING_TIMEOUT", "60"))
+                },
+                "outline": {
+                    "name": "deepgeminipro",  # 使用本地服务器支持的模型
+                    "temperature": 1.0,
+                    "api_key": os.getenv("OPENAI_OUTLINE_API_KEY", ""),
+                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.openai.com/v1"),
+                    "timeout": int(os.getenv("OPENAI_OUTLINE_TIMEOUT", "120"))
+                },
+                "content": {
+                    "name": "deepgeminiflash",  # 使用本地服务器支持的模型
+                    "temperature": 0.7,
+                    "api_key": os.getenv("OPENAI_CONTENT_API_KEY", ""),
+                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.openai.com/v1"),
+                    "timeout": int(os.getenv("OPENAI_CONTENT_TIMEOUT", "180"))  # 内容生成需要更长时间
+                },
+                "reranker": {
+                    "name": os.getenv("OPENAI_RERANKER_MODEL", "Qwen/Qwen3-Reranker-0.6B"),
+                    "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),
+                    "base_url": os.getenv("OPENAI_EMBEDDING_API_BASE", "https://api.openai.com/v1"),
+                    "use_fp16": os.getenv("OPENAI_RERANKER_USE_FP16", "True") == "True",
+                    "timeout": int(os.getenv("OPENAI_EMBEDDING_TIMEOUT", "60"))
+                }
+            }
+        }
         # Gemini 配置
         self.gemini_config = {
             "api_key": os.getenv("GEMINI_API_KEY", ""),
             "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
             "models": {
                 "outline": {
-                    "name": "gemini-2.5-pro-preview-05-06",
+                    "name": "gemini-2.5-pro-preview-06-05",
                     "temperature": 1.0
                 },
                 "content": {
@@ -24,21 +59,6 @@ class AIConfig:
                 }
             }
         }
-        
-        # OpenAI 配置
-        self.openai_config = {
-            "api_key": os.getenv("OPENAI_API_KEY", ""),
-            "base_url": os.getenv("OPENAI_API_BASE", "https://api.siliconflow.cn/v1"),
-            "retry_delay": float(os.getenv("OPENAI_RETRY_DELAY", "5")),  # 默认 5 秒
-            "models": {
-                "embedding": {
-                    "name": "Pro/BAAI/bge-m3",
-                    "temperature": 0.7,
-                    "dimension": 1024
-                }
-            }
-        }
-        
         # 验证配置
         self._validate_config()
     
@@ -49,11 +69,11 @@ class AIConfig:
             raise ValueError("未设置 GEMINI_API_KEY 环境变量")
             
         # 验证 OpenAI 配置
-        if not self.openai_config["api_key"]:
-            raise ValueError("未设置 OPENAI_API_KEY 环境变量")
-            
-        if not self.openai_config["base_url"]:
-            raise ValueError("未设置 OPENAI_API_BASE 环境变量")
+        for model_type, model_config in self.openai_config["models"].items():
+            if not model_config["api_key"]:
+                raise ValueError(f"未设置 OPENAI_{model_type.upper()}_API_KEY 环境变量")
+            if not model_config["base_url"]:
+                raise ValueError(f"未设置 OPENAI_{model_type.upper()}_API_BASE 环境变量")
     
     def get_gemini_config(self, model_type: str = "content") -> Dict[str, Any]:
         """获取 Gemini 模型配置"""
@@ -72,15 +92,27 @@ class AIConfig:
         """获取 OpenAI 模型配置"""
         if model_type not in self.openai_config["models"]:
             raise ValueError(f"不支持的 OpenAI 模型类型: {model_type}")
-            
+        model_config = self.openai_config["models"][model_type]
+        # 针对reranker类型，返回专用字段
+        if model_type == "reranker":
+            return {
+                "type": "openai",
+                "api_key": model_config["api_key"],
+                "base_url": model_config["base_url"],
+                "model_name": model_config["name"],
+                "use_fp16": model_config.get("use_fp16", True),
+                "retry_delay": self.openai_config["retry_delay"],
+                "timeout": model_config.get("timeout", 60)
+            }
         return {
             "type": "openai",
-            "api_key": self.openai_config["api_key"],
-            "base_url": self.openai_config["base_url"],
-            "model_name": self.openai_config["models"][model_type]["name"],
-            "temperature": self.openai_config["models"][model_type]["temperature"],
-            "dimension": self.openai_config["models"][model_type].get("dimension", 1024),
-            "retry_delay": self.openai_config["retry_delay"]  # 新增重试间隔
+            "api_key": model_config["api_key"],
+            "base_url": model_config["base_url"],
+            "model_name": model_config["name"],
+            "temperature": model_config["temperature"],
+            "dimension": model_config.get("dimension", 1024),
+            "retry_delay": self.openai_config["retry_delay"],
+            "timeout": model_config.get("timeout", 60)
         }
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
@@ -90,4 +122,17 @@ class AIConfig:
         elif model_type.startswith("openai"):
             return self.get_openai_config(model_type.split("_")[1])
         else:
-            raise ValueError(f"不支持的模型类型: {model_type}") 
+            raise ValueError(f"不支持的模型类型: {model_type}")
+
+    def get_model_config(model_purpose: str) -> Dict[str, Any]:
+        """根据用途获取模型配置"""
+        model_selection = config["generation_config"]["model_selection"][model_purpose]
+        provider = model_selection["provider"]
+        model_type = model_selection["model_type"]
+        
+        if provider == "openai":
+            return ai_config.get_model_config(f"openai_{model_type}")
+        elif provider == "gemini":
+            return ai_config.get_model_config(f"gemini_{model_type}")
+        else:
+            raise ValueError(f"不支持的模型提供商: {provider}")

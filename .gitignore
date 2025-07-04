@@ -29,6 +29,9 @@ cookies.json
 /chapters/*
 auto_publish.py
 merge_chapters.py
+convert_encoding.py
+提示词参考.md
+文风评价.md
 
 # 环境变量
 .env

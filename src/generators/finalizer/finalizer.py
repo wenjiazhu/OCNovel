@@ -38,6 +38,7 @@ class NovelFinalizer:
         try:
             # Load outline to get the title for the filename
             outline_file = os.path.join(self.output_dir, "outline.json")
+            logger.info(f"实际读取的大纲文件路径: {outline_file}")
             if not os.path.exists(outline_file):
                 logger.error(f"无法找到大纲文件: {outline_file}")
                 return False
@@ -86,6 +87,20 @@ class NovelFinalizer:
                 logger.info(f"第 {chapter_num} 章摘要更新成功。")
             
             logging.info(f"第 {chapter_num} 章定稿完成")
+            
+            # 新增：定稿章节号为5的倍数时，自动更新sync_info.json
+            if chapter_num % 5 == 0:
+                try:
+                    from ..content.content_generator import ContentGenerator
+                    # 构造临时ContentGenerator实例，仅用于同步信息更新
+                    temp_content_gen = ContentGenerator(self.config, self.content_model, self.knowledge_base)
+                    temp_content_gen.current_chapter = chapter_num
+                    temp_content_gen._load_outline()  # 修复：主动加载大纲
+                    temp_content_gen._trigger_sync_info_update(self.content_model)
+                    logger.info(f"章节号 {chapter_num} 为5的倍数，已自动更新sync_info.json")
+                except Exception as sync_e:
+                    logger.error(f"章节号 {chapter_num} 为5的倍数，但自动更新sync_info.json失败: {sync_e}", exc_info=True)
+            
             return True
             
         except Exception as e:
@@ -195,8 +210,9 @@ class NovelFinalizer:
 
 if __name__ == "__main__":
     import argparse
-    from ..config.config import Config
-    from ..models import ContentModel, KnowledgeBase
+    # 绝对导入，兼容直接运行
+    from src.config.config import Config
+    from src.models import ContentModel, KnowledgeBase
     
     parser = argparse.ArgumentParser(description='处理小说章节的定稿工作')
     parser.add_argument('--config', type=str, required=True, help='配置文件路径')
@@ -208,8 +224,8 @@ if __name__ == "__main__":
     config = Config(args.config)
     
     # 初始化模型和知识库
-    content_model = ContentModel()
-    knowledge_base = KnowledgeBase()
+    content_model = ContentModel(config)
+    knowledge_base = KnowledgeBase(config)
     
     # 创建定稿器
     finalizer = NovelFinalizer(config, content_model, knowledge_base)

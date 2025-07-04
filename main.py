@@ -191,7 +191,7 @@ def main():
         # 命令处理
         if args.command == 'outline':
             logging.info("--- 执行大纲生成任务 ---")
-            generator = OutlineGenerator(config, outline_model, knowledge_base)
+            generator = OutlineGenerator(config, outline_model, knowledge_base, content_model)
             
             # 使用命令行参数或配置文件中的设置
             novel_type = args.novel_type or config.novel_config.get("type")
@@ -253,7 +253,7 @@ def main():
             setup_logging(config.log_config["log_dir"], clear_logs=True)
             logging.info("--- 执行自动生成流程 ---")
             # 自动流程需要实例化所有生成器
-            outline_generator = OutlineGenerator(config, outline_model, knowledge_base)
+            outline_generator = OutlineGenerator(config, outline_model, knowledge_base, content_model)
             # Pass finalizer instance to ContentGenerator
             content_generator = ContentGenerator(config, content_model, knowledge_base, finalizer=finalizer)
             # finalizer is already instantiated

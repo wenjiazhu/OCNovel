@@ -19,4 +19,5 @@ faiss-cpu>=1.7.4
 jieba>=0.42.1
 tenacity>=8.2.0
 opencc
-playwright==1.41.2 
+playwright==1.41.2
+FlagEmbedding>=1.2.7

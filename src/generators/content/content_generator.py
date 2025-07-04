@@ -352,16 +352,20 @@ class ContentGenerator:
         if chapter_num > 1:
             context_parts = []
             
-            # 1. 尝试获取前一章摘要
+            # 1. 尝试获取前一章摘要（限制长度）
             try:
                 prev_summary = self.consistency_checker._get_previous_summary(chapter_num - 1)
                 if prev_summary:
-                    context_parts.append(f"前一章摘要：\n{prev_summary}")
+                    # 限制摘要长度
+                    max_summary_length = 500
+                    if len(prev_summary) > max_summary_length:
+                        prev_summary = prev_summary[:max_summary_length] + "..."
+                    context_parts.append(f"前一章摘要：{prev_summary}")
                     logger.debug(f"获取到第 {chapter_num-1} 章摘要")
             except Exception as e:
                 logger.warning(f"获取第 {chapter_num-1} 章摘要时出错: {e}")
 
-            # 2. 获取前一章内容
+            # 2. 获取前一章内容（进一步限制长度）
             try:
                 prev_chapter_num = chapter_num - 1
                 if 0 <= prev_chapter_num - 1 < len(self.chapter_outlines):
@@ -373,21 +377,26 @@ class ContentGenerator:
                     if os.path.exists(prev_chapter_file):
                         with open(prev_chapter_file, 'r', encoding='utf-8') as f:
                             prev_content = f.read()
-                            # 如果内容太长，只取最后一部分
-                            max_prev_content_length = self.config.generation_config.get("context_length", 2000)
+                            # 进一步限制内容长度，只取最后一部分
+                            max_prev_content_length = 1500  # 减少到1500字符
                             if len(prev_content) > max_prev_content_length:
-                                context_parts.append(f"前一章结尾部分：\n...{prev_content[-max_prev_content_length:]}")
+                                context_parts.append(f"前一章结尾：{prev_content[-max_prev_content_length:]}")
                             else:
-                                context_parts.append(f"前一章内容：\n{prev_content}")
+                                context_parts.append(f"前一章内容：{prev_content}")
                             logger.debug(f"获取到第 {prev_chapter_num} 章内容")
                     else:
                         logger.warning(f"未找到前一章文件 {prev_chapter_file}")
             except Exception as e:
                 logger.warning(f"读取第 {prev_chapter_num} 章内容时出错: {str(e)}")
 
-            # 返回所有上下文信息
+            # 返回所有上下文信息，并限制总长度
             if context_parts:
-                return "\n\n".join(context_parts)
+                combined_context = "\n".join(context_parts)
+                # 限制总上下文长度
+                max_total_context_length = 2000
+                if len(combined_context) > max_total_context_length:
+                    combined_context = combined_context[-max_total_context_length:] + "...(前文已省略)"
+                return combined_context
             return "（无法获取前一章信息）"
         else:
             return "（这是第一章，无前文）"
@@ -401,6 +410,15 @@ class ContentGenerator:
         }
 
         try:
+            # 检查知识库状态
+            if not hasattr(self.knowledge_base, 'is_built') or not self.knowledge_base.is_built:
+                logging.warning("知识库未构建，跳过检索")
+                return references
+                
+            if not hasattr(self.knowledge_base, 'index') or self.knowledge_base.index is None:
+                logging.warning("知识库索引不存在，跳过检索")
+                return references
+            
             # 生成检索关键词
             search_prompt = get_knowledge_search_prompt(
                 chapter_number=chapter_outline.chapter_number,
@@ -414,6 +432,9 @@ class ContentGenerator:
                 short_summary="",  # 可根据实际需求补充
             )
 
+<<<<<<< HEAD
+            logging.debug(f"知识库检索提示词: {search_prompt}")
+=======
             # 添加日志，记录搜索提示词
             logger.info(f"搜索提示词: {search_prompt[:100]}...，长度: {len(search_prompt)}")
             
@@ -421,6 +442,7 @@ class ContentGenerator:
             logger.info(f"知识库对象类型: {type(self.knowledge_base)}")
             logger.info(f"知识库是否已构建: {getattr(self.knowledge_base, 'is_built', False)}")
             logger.info(f"知识库索引类型: {type(getattr(self.knowledge_base, 'index', None))}")
+>>>>>>> origin/main
             
             # 调用知识库检索
             logger.info("开始调用知识库搜索方法...")
@@ -434,12 +456,21 @@ class ContentGenerator:
                 references["plot_references"] = relevant_knowledge[:3]  # 限制数量
                 references["character_references"] = relevant_knowledge[3:6]
                 references["setting_references"] = relevant_knowledge[6:9]
+<<<<<<< HEAD
+                logging.debug(f"成功检索到 {len(relevant_knowledge)} 条相关知识")
+            else:
+                logging.debug("知识库检索返回空结果")
+
+        except Exception as e:
+            logging.error(f"优化检索章节参考信息时出错: {str(e)}", exc_info=True)
+=======
                 logger.info(f"成功分配参考信息，共 {len(relevant_knowledge)} 项")
             else:
                 logger.warning(f"知识库返回结果无效或为空: {relevant_knowledge}")
 
         except Exception as e:
             logger.error(f"优化检索章节参考信息时出错: {str(e)}", exc_info=True)  # 添加exc_info获取完整堆栈
+>>>>>>> origin/main
 
         return references
 
@@ -479,7 +510,7 @@ class ContentGenerator:
             logger.info(f"已完成第 {chapter_num} 章，开始更新缓存...")
             self._update_content_cache()
             logger.info(f"开始更新同步信息文件: {self.sync_info_file}")
-            self._trigger_sync_info_update()
+            self._trigger_sync_info_update(self.content_model)
             self.chapters_since_last_cache = 0
         else:
             self.chapters_since_last_cache += 1
@@ -513,28 +544,69 @@ class ContentGenerator:
         except Exception as e:
             logger.error(f"更新正文知识库缓存时出错: {str(e)}")
 
-    def _trigger_sync_info_update(self) -> None:
+    def _trigger_sync_info_update(self, sync_model=None) -> None:
         """触发同步信息更新"""
         os.makedirs(os.path.dirname(self.sync_info_file), exist_ok=True)
         # 使用 self.current_chapter 而不是其他变量
         logger.info(f"准备更新同步信息，当前章节进度: {self.current_chapter}，同步信息文件: {self.sync_info_file}")
         try:
             all_content = ""
-            # 使用 self.current_chapter + 1 确保包含当前章节
-            for chapter_num in range(1, self.current_chapter + 1):
-                filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
-                filepath = os.path.join(self.output_dir, filename)
-                logger.debug(f"尝试读取章节文件: {filepath}")
-                if os.path.exists(filepath):
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        all_content += f.read() + "\n\n"
+            # 修改：只读取最近5章的内容来更新同步信息
+            # 确保从第1章开始，且不超过当前已完成的章节
+            num_chapters_to_include = 5
+            start_chapter_for_sync = max(1, self.current_chapter - num_chapters_to_include + 1)
+            
+            logger.info(f"将读取第 {start_chapter_for_sync} 章到第 {self.current_chapter} 章的内容来生成同步信息。")
+
+            for chapter_num in range(start_chapter_for_sync, self.current_chapter + 1):
+                if chapter_num - 1 < len(self.chapter_outlines): # 确保章节索引有效
+                    filename = f"第{chapter_num}章_{self._clean_filename(self.chapter_outlines[chapter_num-1].title)}.txt"
+                    filepath = os.path.join(self.output_dir, filename)
+                    logger.debug(f"尝试读取章节文件: {filepath}")
+                    if os.path.exists(filepath):
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            all_content += f.read() + "\n\n"
+                    else:
+                        logger.warning(f"文件不存在，无法读取: {filepath}")
                 else:
-                    logger.warning(f"文件不存在，无法读取: {filepath}")
+                    logger.warning(f"章节大纲中不存在章节 {chapter_num}，跳过读取。")
+
 
             if all_content:
-                logger.info(f"成功读取所有章节内容，总字数: {len(all_content)}，开始生成同步信息")
+                logger.info(f"成功读取最近章节内容，总字数: {len(all_content)}，开始生成同步信息")
                 prompt = self._create_sync_info_prompt(all_content)
-                sync_info = self.content_model.generate(prompt)
+                
+                # 使用指定的模型或默认使用content_model
+                model_to_use = sync_model if sync_model is not None else self.content_model
+                
+                # 增加重试机制和错误处理
+                max_retries = 5  # 增加重试次数
+                sync_info = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        sync_info = model_to_use.generate(prompt)
+                        if sync_info:
+                            break
+                        else:
+                            logger.warning(f"模型返回空的同步信息，尝试 {attempt + 1}/{max_retries}")
+                            if attempt == max_retries - 1:
+                                logger.warning("模型返回空的同步信息，使用降级方案")
+                                self._fallback_sync_info_update()
+                                return
+                    except Exception as e:
+                        logger.error(f"模型调用失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                        if attempt == max_retries - 1:
+                            logger.error("所有重试都失败了，使用降级方案")
+                            self._fallback_sync_info_update()
+                            return
+                        # 等待一段时间后重试
+                        time.sleep(10 * (attempt + 1))  # 递增等待时间
+                
+                if not sync_info:
+                    logger.warning("模型返回空的同步信息，使用降级方案")
+                    self._fallback_sync_info_update()
+                    return
                 
                 try:
                     # 尝试提取JSON部分 - 有时模型会生成额外文本
@@ -545,6 +617,8 @@ class ContentGenerator:
                         json_content = sync_info[json_start:json_end]
                         logger.info(f"提取到JSON内容，长度: {len(json_content)}")
                         sync_info_dict = json.loads(json_content)
+                        # 在保存前，确保更新时间字段
+                        sync_info_dict["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
                         logger.info(f"成功解析同步信息JSON，准备写入文件: {self.sync_info_file}")
                         with open(self.sync_info_file, 'w', encoding='utf-8') as f:
                             json.dump(sync_info_dict, f, ensure_ascii=False, indent=2)
@@ -556,6 +630,7 @@ class ContentGenerator:
                         with open(debug_file, 'w', encoding='utf-8') as f:
                             f.write(sync_info)
                         logger.info(f"已保存原始输出到 {debug_file} 以供调试")
+                        self._fallback_sync_info_update()
                 except json.JSONDecodeError as e:
                     logger.error(f"生成的同步信息不是有效的JSON格式: {e}")
                     logger.debug(f"无效的JSON内容前200个字符: {sync_info[:200]}...")
@@ -564,10 +639,59 @@ class ContentGenerator:
                     with open(debug_file, 'w', encoding='utf-8') as f:
                         f.write(sync_info)
                     logger.info(f"已保存原始输出到 {debug_file} 以供调试")
+                    self._fallback_sync_info_update()
             else:
-                logger.warning("未找到任何已完成的章节内容，无法更新同步信息")
+                logger.warning("未找到任何已完成的章节内容，使用降级方案")
+                self._fallback_sync_info_update()
         except Exception as e:
             logger.error(f"更新同步信息时出错: {str(e)}", exc_info=True)
+            self._fallback_sync_info_update()
+
+    def _fallback_sync_info_update(self) -> None:
+        """降级方案：手动更新同步信息"""
+        try:
+            logger.info("使用降级方案更新同步信息")
+            
+            # 加载现有同步信息
+            existing_sync_info = {}
+            if os.path.exists(self.sync_info_file):
+                try:
+                    with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        if content.strip():
+                            existing_sync_info = json.loads(content)
+                except Exception as e:
+                    logger.warning(f"读取现有同步信息失败: {e}")
+            
+            # 更新当前章节进度
+            existing_sync_info["当前章节"] = self.current_chapter
+            existing_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 添加新的前情提要
+            if "前情提要" not in existing_sync_info:
+                existing_sync_info["前情提要"] = []
+            
+            # 获取最近完成的章节信息
+            recent_chapters = []
+            for chapter_num in range(max(1, self.current_chapter - 4), self.current_chapter + 1):
+                if chapter_num - 1 < len(self.chapter_outlines):
+                    outline = self.chapter_outlines[chapter_num - 1]
+                    if outline:
+                        recent_chapters.append(f"第{chapter_num}章：{outline.title}")
+            
+            if recent_chapters:
+                summary = f"最近完成章节：{', '.join(recent_chapters)}"
+                if summary not in existing_sync_info["前情提要"]:
+                    existing_sync_info["前情提要"].append(summary)
+            
+            # 保存更新后的同步信息
+            with open(self.sync_info_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_sync_info, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"降级方案同步信息更新完成")
+            
+        except Exception as e:
+            logger.error(f"降级方案也失败了: {str(e)}", exc_info=True)
 
     def _create_sync_info_prompt(self, story_content: str) -> str:
         """创建生成同步信息的提示词"""

@@ -7,6 +7,7 @@ import jieba
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import logging
+from FlagEmbedding import FlagReranker
 
 @dataclass
 class TextChunk:
@@ -18,7 +19,7 @@ class TextChunk:
     metadata: Dict
 
 class KnowledgeBase:
-    def __init__(self, config: Dict, embedding_model):
+    def __init__(self, config: Dict, embedding_model, reranker_model_name: str = None):
         self.config = config
         self.embedding_model = embedding_model
         self.chunks: List[TextChunk] = []
@@ -26,6 +27,8 @@ class KnowledgeBase:
         self.cache_dir = config["cache_dir"]
         self.is_built = False  # 添加构建状态标志
         os.makedirs(self.cache_dir, exist_ok=True)
+        self.reranker_model_name = reranker_model_name
+        self.reranker = None
         
     def _get_cache_path(self, text: str) -> str:
         """获取缓存文件路径"""
@@ -149,13 +152,38 @@ class KnowledgeBase:
             try:
                 with open(cache_path, 'rb') as f:
                     cached_data = pickle.load(f)
-                self.index = cached_data['index']
-                self.chunks = cached_data['chunks']
-                self.is_built = True  # 标记为已构建
-                logging.info("成功从缓存加载知识库")
-                return
+                
+                # 检查缓存格式兼容性
+                if 'original_text' in cached_data and 'embedding_model_name' in cached_data:
+                    # 新格式缓存
+                    cached_model_name = cached_data.get('embedding_model_name', '')
+                    current_model_name = self.embedding_model.model_name
+                    
+                    if cached_model_name != current_model_name:
+                        logging.warning(f"嵌入模型配置已更改：缓存使用 {cached_model_name}，当前使用 {current_model_name}")
+                        logging.info("将重新构建知识库以使用新的嵌入模型配置")
+                        force_rebuild = True
+                    else:
+                        self.index = cached_data['index']
+                        self.chunks = cached_data['chunks']
+                        self.is_built = True
+                        logging.info("成功从缓存加载知识库")
+                        return
+                else:
+                    # 旧格式缓存，检查维度兼容性
+                    if 'index' in cached_data and 'chunks' in cached_data:
+                        self.index = cached_data['index']
+                        self.chunks = cached_data['chunks']
+                        self.is_built = True
+                        logging.info("成功从旧格式缓存加载知识库")
+                        return
+                    else:
+                        logging.warning("缓存格式不完整，将重新构建")
+                        force_rebuild = True
+                        
             except Exception as e:
                 logging.warning(f"加载缓存失败: {e}")
+                force_rebuild = True
         
         # 检查是否有临时文件可以恢复
         temp_file_info = None if force_rebuild else self._find_latest_temp_file(cache_path)
@@ -223,7 +251,10 @@ class KnowledgeBase:
         with open(cache_path, 'wb') as f:
             pickle.dump({
                 'index': self.index,
-                'chunks': self.chunks
+                'chunks': self.chunks,
+                'original_text': text,  # 保存原始文本以便重新构建
+                'embedding_model_name': self.embedding_model.model_name,  # 保存嵌入模型名称
+                'embedding_dimension': dimension  # 保存嵌入维度
             }, f)
         logging.info("知识库构建完成并已缓存")
         
@@ -238,48 +269,25 @@ class KnowledgeBase:
 
     def search(self, query: str, k: int = 5) -> List[str]:
         """搜索相关内容"""
-        logging.info(f"开始搜索，查询长度: {len(query)}, k={k}")
-        
         if not self.index:
             logging.error("知识库索引未构建")
             raise ValueError("Knowledge base not built yet")
-        
-        logging.info(f"知识库索引类型: {type(self.index)}, 维度: {self.index.d}")
-        
+            
         query_vector = self.embedding_model.embed(query)
         
         if query_vector is None:
             logging.error("嵌入模型返回空向量")
             return []
-        
-        logging.info(f"查询向量类型: {type(query_vector)}, 形状: {getattr(query_vector, 'shape', len(query_vector))}")
-        
+            
         # 搜索最相似的文本块
         query_vector_array = np.array([query_vector]).astype('float32')
-        logging.info(f"处理后的查询向量数组形状: {query_vector_array.shape}, 类型: {query_vector_array.dtype}")
-        
-        # 确保向量维度与索引维度匹配
-        if query_vector_array.shape[1] != self.index.d:
-            logging.error(f"查询向量维度不匹配: 索引维度={self.index.d}, 查询向量维度={query_vector_array.shape[1]}")
-            return []
-        
-        try:
-            logging.info(f"调用faiss搜索，参数: 向量形状={query_vector_array.shape}, k={k}")
-            distances, indices = self.index.search(query_vector_array, k)
-            logging.info(f"搜索结果: 距离形状={distances.shape}, 索引形状={indices.shape}")
-        except Exception as e:
-            logging.error(f"faiss搜索失败: {str(e)}", exc_info=True)
-            raise
+        distances, indices = self.index.search(query_vector_array, k)
         
         # 返回相关文本内容
         results = []
         for idx in indices[0]:
             if idx < len(self.chunks):
                 results.append(self.chunks[idx].content)
-            else:
-                logging.warning(f"索引越界: idx={idx}, chunks长度={len(self.chunks)}")
-        
-        logging.info(f"返回结果数量: {len(results)}")
         return results
 
     def get_all_references(self) -> Dict[str, str]:
@@ -370,3 +378,16 @@ class KnowledgeBase:
             # 恢复原始缓存目录
             if cache_dir:
                 self.cache_dir = old_cache_dir 
+
+    def get_openai_config(self, model_type: str) -> Dict:
+        """获取OpenAI配置"""
+        if model_type == "reranker":
+            return {
+                "model_name": self.reranker_model_name,
+                "api_key": "",
+                "base_url": "",
+                "use_fp16": True,
+                "retry_delay": 5
+            }
+        else:
+            return {} 

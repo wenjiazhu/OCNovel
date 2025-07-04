@@ -10,12 +10,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def test_embedding():
-    """测试硅基流动的Pro/BAAI/bge-m3 embedding模型"""
+    """测试硅基流动的Qwen/Qwen3-Embedding-4B embedding模型"""
     try:
         # 加载环境变量
         load_dotenv()
-        api_key = os.getenv("OPENAI_API_KEY")
-        api_base = os.getenv("OPENAI_API_BASE")
+        api_key = os.getenv("OPENAI_EMBEDDING_API_KEY")
+        api_base = os.getenv("OPENAI_EMBEDDING_API_BASE")
         
         if not api_key or not api_base:
             raise ValueError("未找到API密钥或基础URL")
@@ -39,7 +39,7 @@ def test_embedding():
         # 生成embeddings
         logger.info("正在生成embeddings...")
         response = client.embeddings.create(
-            model="Pro/BAAI/bge-m3",
+            model="Qwen/Qwen3-Embedding-4B",
             input=texts
         )
         
@@ -66,6 +66,6 @@ def test_embedding():
         return False
 
 if __name__ == "__main__":
-    logger.info("开始测试硅基流动的Pro/BAAI/bge-m3模型...")
+    logger.info("开始测试硅基流动的Qwen/Qwen3-Embedding-4B模型...")
     success = test_embedding()
     logger.info(f"\n测试结果: {'✓ 成功' if success else '✗ 失败'}") 
