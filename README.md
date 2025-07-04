@@ -45,15 +45,36 @@ source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 ```
 
+> 主要依赖说明：
+> - openai：用于调用 OpenAI API（嵌入/内容/大纲模型）
+> - google-generativeai：用于调用 Gemini API
+> - chromadb、faiss-cpu：知识库向量化与检索
+> - jieba：中文分词
+> - FlagEmbedding：中文语义重排序
+> - python-dotenv：环境变量加载
+> - tenacity：自动重试机制
+> - numpy：向量与数值处理
+> - pytest：单元测试
+> - pydantic：类型校验
+> - opencc：繁简转换（章节整理工具用）
+
 4. 配置环境变量：
 创建 `.env` 文件并添加以下内容：
 ```
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
-# OpenAI API配置
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_API_BASE=你的OpenAI API基础URL（可选）
+# 嵌入模型配置（用于知识库向量化等）
+OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
+OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
+
+# 大纲模型配置（用于生成小说大纲）
+OPENAI_OUTLINE_API_KEY=你的OpenAI大纲模型API密钥
+OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
+
+# 内容模型配置（用于生成章节内容）
+OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
+OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
 ```
 
 5. 准备配置文件 (`config.json`)：
@@ -193,10 +214,25 @@ OCNovel/
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
-# OpenAI API配置
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_API_BASE=你的OpenAI API基础URL（可选）
+# 嵌入模型配置（用于知识库向量化等）
+OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
+OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
+
+# 大纲模型配置（用于生成小说大纲）
+OPENAI_OUTLINE_API_KEY=你的OpenAI大纲模型API密钥
+OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
+
+# 内容模型配置（用于生成章节内容）
+OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
+OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
 ```
+
+- `GEMINI_API_KEY`：用于 Gemini LLM 的 API 密钥。
+- `OPENAI_EMBEDDING_API_KEY`/`OPENAI_EMBEDDING_API_BASE`：用于知识库嵌入模型（如文本向量化）。
+- `OPENAI_OUTLINE_API_KEY`/`OPENAI_OUTLINE_API_BASE`：用于生成小说大纲的 LLM。
+- `OPENAI_CONTENT_API_KEY`/`OPENAI_CONTENT_API_BASE`：用于生成章节内容的 LLM。
+
+如不需要某项功能，可留空对应配置。
 
 ### 2. 项目配置（config.json）
 
