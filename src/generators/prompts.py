@@ -195,7 +195,7 @@ def get_chapter_prompt(
 
 [故事设定]
 世界观：
-- 修炼体系：{world_building.get('magic_system', '未设定')}
+- 修炼/魔法体系：{world_building.get('magic_system', '未设定')}
 - 社会结构：{world_building.get('social_system', '未设定')}
 - 时代背景：{world_building.get('background', '未设定')}
 
