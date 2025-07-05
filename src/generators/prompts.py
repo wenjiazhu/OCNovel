@@ -195,19 +195,32 @@ def get_chapter_prompt(
 
 [故事设定]
 世界观：
-- 修炼/魔法体系：{world_building.get('magic_system', '未设定')}
-- 社会结构：{world_building.get('social_system', '未设定')}
-- 时代背景：{world_building.get('background', '未设定')}
+1. 修炼/魔法体系：
+{world_building.get('magic_system', '[在此处插入详细的修炼体系、等级划分、核心规则、能量来源、特殊体质设定等]')}
+
+2. 社会结构与地理：
+{world_building.get('social_system', '[在此处插入世界的社会结构、主要国家/地域划分、关键势力（如门派、家族、组织）及其相互关系等]')}
+
+3. 时代背景与核心矛盾：
+{world_building.get('background', '[在此处插入故事发生的时代背景、核心的宏观冲突（如正邪大战、文明危机、神魔博弈）、以及关键的历史事件或传说]')}
 
 人物设定：
-- 主角背景：{character_guide.get('protagonist', {}).get('background', '未设定')}
-- 主角性格：{character_guide.get('protagonist', {}).get('initial_personality', '未设定')}
-- 主角成长路径：{character_guide.get('protagonist', {}).get('growth_path', '未设定')}
+1. 主角背景：
+{character_guide.get('protagonist', {}).get('background', '[在此处插入主角的背景故事、家族渊源、成长经历等]')}
+
+2. 主角性格：
+{character_guide.get('protagonist', {}).get('initial_personality', '[在此处插入主角的性格特点、行为习惯、口头禅等]')}
+
+3. 主角成长路径：
+{character_guide.get('protagonist', {}).get('growth_path', '[在此处插入主角的成长路径、修炼方向、特殊能力等]')}
 
 写作风格：
-- 整体基调：{style_guide.get('tone', '未设定')}
-- 节奏控制：{style_guide.get('pacing', '未设定')}
-- 描写重点：{', '.join(style_guide.get('description_focus', ['未设定']))}"""
+1. 基调：{style_guide.get('tone', '[故事的整体基调，如：热血、黑暗、幽默、悬疑、史诗等]')}
+2. 节奏：{style_guide.get('pacing', '[故事的节奏，如：快节奏、单元剧、慢热、张弛有度等]')}
+3. 描写重点：
+- {style_guide.get('description_focus', ['[描写的第一个侧重点，如：战斗场面、世界观奇观、人物内心等]'])[0]}
+- {style_guide.get('description_focus', ['[描写的第二个侧重点，如：势力间的权谋博弈、神秘氛围的营造等]'])[1]}
+- {style_guide.get('description_focus', ['[描写的第三个侧重点，如：主角的成长与反思、配角群像的刻画等]'])[2]}
 
     # 添加同步信息（如果提供）
     if sync_info:
