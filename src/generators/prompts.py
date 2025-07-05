@@ -220,7 +220,7 @@ def get_chapter_prompt(
 3. 描写重点：
 - {style_guide.get('description_focus', ['[描写的第一个侧重点，如：战斗场面、世界观奇观、人物内心等]'])[0]}
 - {style_guide.get('description_focus', ['[描写的第二个侧重点，如：势力间的权谋博弈、神秘氛围的营造等]'])[1]}
-- {style_guide.get('description_focus', ['[描写的第三个侧重点，如：主角的成长与反思、配角群像的刻画等]'])[2]}
+- {style_guide.get('description_focus', ['[描写的第三个侧重点，如：主角的成长与反思、配角群像的刻画等]'])[2]}"""
 
     # 添加同步信息（如果提供）
     if sync_info:

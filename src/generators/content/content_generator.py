@@ -438,9 +438,6 @@ class ContentGenerator:
                 short_summary="",  # 可根据实际需求补充
             )
 
-<<<<<<< HEAD
-            logging.debug(f"知识库检索提示词: {search_prompt}")
-=======
             # 添加日志，记录搜索提示词
             logger.info(f"搜索提示词: {search_prompt[:100]}...，长度: {len(search_prompt)}")
             
@@ -448,7 +445,6 @@ class ContentGenerator:
             logger.info(f"知识库对象类型: {type(self.knowledge_base)}")
             logger.info(f"知识库是否已构建: {getattr(self.knowledge_base, 'is_built', False)}")
             logger.info(f"知识库索引类型: {type(getattr(self.knowledge_base, 'index', None))}")
->>>>>>> origin/main
             
             # 调用知识库检索
             logger.info("开始调用知识库搜索方法...")
@@ -462,21 +458,12 @@ class ContentGenerator:
                 references["plot_references"] = relevant_knowledge[:3]  # 限制数量
                 references["character_references"] = relevant_knowledge[3:6]
                 references["setting_references"] = relevant_knowledge[6:9]
-<<<<<<< HEAD
-                logging.debug(f"成功检索到 {len(relevant_knowledge)} 条相关知识")
-            else:
-                logging.debug("知识库检索返回空结果")
-
-        except Exception as e:
-            logging.error(f"优化检索章节参考信息时出错: {str(e)}", exc_info=True)
-=======
                 logger.info(f"成功分配参考信息，共 {len(relevant_knowledge)} 项")
             else:
                 logger.warning(f"知识库返回结果无效或为空: {relevant_knowledge}")
 
         except Exception as e:
             logger.error(f"优化检索章节参考信息时出错: {str(e)}", exc_info=True)  # 添加exc_info获取完整堆栈
->>>>>>> origin/main
 
         return references
 
