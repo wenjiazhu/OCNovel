@@ -24,11 +24,11 @@ class OpenAIModel(BaseModel):
         self.fallback_api_key = os.getenv("OPENAI_EMBEDDING_API_KEY", "")  # 使用embedding的API key作为备用
         # 根据当前模型类型选择备用模型
         if "deepgeminiflash" in self.model_name:
-            self.fallback_model_name = "deepseek-ai/DeepSeek-V3"  # 使用DeepSeek-V3作为deepgeminiflash的备用
+            self.fallback_model_name = "deepseek-ai/DeepSeek-R1"  # 使用DeepSeek-R1作为deepgeminiflash的备用
         elif "deepgeminipro" in self.model_name:
             self.fallback_model_name = "Qwen/Qwen3-235B-A22B"  # 使用Qwen作为deepgeminipro的备用
         else:
-            self.fallback_model_name = "deepseek-ai/DeepSeek-V3"  # 默认备用模型
+            self.fallback_model_name = "deepseek-ai/DeepSeek-R1"  # 默认备用模型
         
         self.client = OpenAI(
             api_key=config["api_key"],

@@ -275,13 +275,19 @@ class ContentGenerator:
             logger.info(f"开始为第 {chapter_num} 章生成原始内容...")
             context = self._get_context_for_chapter(chapter_num)
             references = self._get_references_for_chapter(chapter_outline)
+            
+            # 获取故事设定和同步信息
+            story_config = self.config.novel_config if hasattr(self.config, 'novel_config') else None
+            sync_info = self._load_sync_info()
 
             # 使用 prompts.py 中的方法
             prompt = get_chapter_prompt(
                 outline=chapter_outline.__dict__,
                 references=references,
                 extra_prompt=extra_prompt or "",
-                context_info=context
+                context_info=context,
+                story_config=story_config,  # 新增：传递故事设定
+                sync_info=sync_info  # 新增：传递同步信息
             )
             logger.debug(f"完整提示词: {prompt}")
 

@@ -163,7 +163,9 @@ def get_chapter_prompt(
     outline: Dict, 
     references: Dict,
     extra_prompt: str = "",
-    context_info: str = ""
+    context_info: str = "",
+    story_config: Optional[Dict] = None,
+    sync_info: Optional[Dict] = None
 ) -> str:
     """生成用于创建章节内容的提示词"""
     
@@ -180,7 +182,58 @@ def get_chapter_prompt(
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
     
-    base_prompt = f"""你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节，且生成的故事要遵循一系列叙事和输出规则，你的任务是基于以下信息生成章节内容：
+    base_prompt = f"""你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节，且生成的故事要遵循一系列叙事和输出规则，你的任务是基于以下信息生成章节内容："""
+
+    # 添加故事设定信息（如果提供）
+    if story_config:
+        writing_guide = story_config.get("writing_guide", {})
+        world_building = writing_guide.get("world_building", {})
+        character_guide = writing_guide.get("character_guide", {})
+        style_guide = writing_guide.get("style_guide", {})
+        
+        base_prompt += f"""
+
+[故事设定]
+世界观：
+- 修炼体系：{world_building.get('magic_system', '未设定')}
+- 社会结构：{world_building.get('social_system', '未设定')}
+- 时代背景：{world_building.get('background', '未设定')}
+
+人物设定：
+- 主角背景：{character_guide.get('protagonist', {}).get('background', '未设定')}
+- 主角性格：{character_guide.get('protagonist', {}).get('initial_personality', '未设定')}
+- 主角成长路径：{character_guide.get('protagonist', {}).get('growth_path', '未设定')}
+
+写作风格：
+- 整体基调：{style_guide.get('tone', '未设定')}
+- 节奏控制：{style_guide.get('pacing', '未设定')}
+- 描写重点：{', '.join(style_guide.get('description_focus', ['未设定']))}"""
+
+    # 添加同步信息（如果提供）
+    if sync_info:
+        world_info = sync_info.get("世界观", {})
+        character_info = sync_info.get("人物设定", {})
+        plot_info = sync_info.get("剧情发展", {})
+        
+        base_prompt += f"""
+
+[故事进展信息]
+世界观现状：
+- 世界背景：{', '.join(world_info.get('世界背景', []))}
+- 阵营势力：{', '.join(world_info.get('阵营势力', []))}
+- 重要规则：{', '.join(world_info.get('重要规则', []))}
+- 关键场所：{', '.join(world_info.get('关键场所', []))}
+
+人物现状：
+{chr(10).join([f"- {char.get('名称', '未知')}：{char.get('身份', '')} - {char.get('当前状态', '')}" for char in character_info.get('人物信息', [])])}
+
+剧情发展：
+- 主线梗概：{plot_info.get('主线梗概', '未设定')}
+- 重要事件：{', '.join(plot_info.get('重要事件', [])[-5:])}  # 最近5个重要事件
+- 进行中冲突：{', '.join(plot_info.get('进行中冲突', []))}
+- 悬念伏笔：{', '.join(plot_info.get('悬念伏笔', [])[-3:])}  # 最近3个伏笔"""
+
+    base_prompt += f"""
 
 [章节信息]
 章节号: {novel_number}
@@ -196,14 +249,14 @@ def get_chapter_prompt(
 [写作要求]
 1. **叙事视角与深度**：遵循设定的叙事视角（如第一人称、第三人称有限/全知），深入挖掘角色的内心世界，展现其动机、情感和心理变化。通过角色的感知来过滤和呈现世界，使读者产生强烈的代入感。
 2. **场景与氛围营造**：通过多感官描写（视觉、听觉、嗅觉、触觉等）构建生动、立体的场景。根据情节需要，精准地营造氛围，无论是战斗的紧张、探索的神秘，还是角色互动的温情，都要有鲜明的感染力。
-3. **情节推进与节奏**：确保本章情节紧扣大纲的“关键情节点”，做到起承转合。通过段落长短、信息密度和事件安排来控制叙事节奏，做到张弛有度，高潮部分要蓄势待发，爆发有力。
+3. **情节推进与节奏**：确保本章情节紧扣大纲的"关键情节点"，做到起承转合。通过段落长短、信息密度和事件安排来控制叙事节奏，做到张弛有度，高潮部分要蓄势待发，爆发有力。
 4. **人物塑造与对话**：通过角色的行为、对话和内心独白来展现其性格的复杂性和成长性。对话应符合人物身份和性格，避免脸谱化，并能推动情节发展或揭示隐藏信息，潜台词的运用尤为重要。
 5. **语言与风格**：保持与小说整体风格（如热血、幽默、悬疑等）的一致性。文笔流畅，用词精准，富有表现力。战斗描写要充满力量感和想象力，景物描写要能烘托气氛，情感描写要细腻动人。
 6. **承上启下**：在章节内容中，巧妙地回应前文的伏笔或设定，让故事的连续性更强。在章节末尾，制造新的悬念或留下线索，激发读者的追读欲望。
 
 [输出要求]
-1. 仅返回章节正文文本，以“第{novel_number}章 {chapter_title}”开头，然后换行开始正文。
-2. 严格使用简体中文及中文标点符号，特别是中文双引号“”。
+1. 仅返回章节正文文本，以"第{novel_number}章 {chapter_title}"开头，然后换行开始正文。
+2. 严格使用简体中文及中文标点符号，特别是中文双引号""。
 3. 确保段落划分合理，长短句结合，以保持阅读的流畅性和节奏感。
 4. 避免使用与故事背景不符的现代词汇或网络梗，保持世界观的沉浸感。
 
