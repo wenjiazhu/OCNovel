@@ -5,6 +5,8 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 ## 功能特点
 
 - 🤖 支持多种 AI 模型（Gemini、OpenAI）
+  - Gemini模型：使用 `gemini-2.5-flash`（内容生成）和 `gemini-2.5-pro`（大纲生成）
+  - OpenAI模型：支持自定义API端点，兼容多种模型
 - 📚 智能知识库系统，支持参考小说导入和分析
 - 📝 自动生成小说大纲和章节内容
 - 💡 支持手动更新和优化小说大纲
@@ -47,7 +49,7 @@ pip install -r requirements.txt
 
 > 主要依赖说明：
 > - openai：用于调用 OpenAI API（嵌入/内容/大纲模型）
-> - google-generativeai：用于调用 Gemini API
+> - google-generativeai：用于调用 Gemini API（支持 gemini-2.5-flash、gemini-2.5-pro 等模型）
 > - chromadb、faiss-cpu：知识库向量化与检索
 > - jieba：中文分词
 > - FlagEmbedding：中文语义重排序
@@ -198,7 +200,23 @@ OCNovel/
 ├── main.py              # 主程序入口
 ├── requirements.txt     # Python依赖列表
 └── README.md           # 项目说明
-```
+
+## 故障排除
+
+### Gemini API 调用失败
+
+如果遇到 "404 models/gemini-2.5-flash-preview is not found" 错误：
+
+1. **问题原因**：模型名称已更新，旧版本模型名称不再可用
+2. **解决方案**：项目已自动使用正确的模型名称：
+   - 内容生成：`gemini-2.5-flash`
+   - 大纲生成：`gemini-2.5-pro`
+
+### 其他常见问题
+
+1. **API密钥错误**：确保在 `.env` 文件中正确设置了所有必需的API密钥
+2. **网络连接问题**：如果使用代理，确保代理设置正确
+3. **模型超时**：可以调整配置文件中的 `timeout` 参数
 
 ## 配置说明 (`config.json`)
 

@@ -13,8 +13,8 @@ class GeminiModel(BaseModel):
         super().__init__(config)
         self._validate_config()
         genai.configure(api_key=self.api_key)
-        # 如果配置中没有指定模型名称，使用默认的 'gemini-2.5-flash-preview'
-        self.model_name = config.get('model_name', 'gemini-2.5-flash-preview')
+        # 如果配置中没有指定模型名称，使用默认的 'gemini-2.5-flash'
+        self.model_name = config.get('model_name', 'gemini-2.5-flash')
         # 获取温度参数，默认为0.7
         self.temperature = config.get('temperature', 0.7)
         # 获取超时参数，默认为60秒

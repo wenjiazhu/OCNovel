@@ -1,140 +1,152 @@
 {
-  "knowledge_base_config": {
-    "reference_files": [
-      "data/reference/example_novel.txt"
-    ],
-    "chunk_size": 1000,
-    "chunk_overlap": 200,
-    "cache_dir": "data/cache"
-  },
-  "log_config": {
-    "log_dir": "data/logs",
-    "log_level": "INFO",
-    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  },
-  "novel_config": {
-    "type": "示例类型",
-    "theme": "示例主题",
-    "style": "示例风格",
-    "title": "示例标题",
-    "target_chapters": 100,
-    "chapter_length": 2000,
-    "writing_guide": {
-      "world_building": {
-        "magic_system": "示例力量体系或核心设定",
-        "social_system": "示例社会结构或势力划分",
-        "background": "示例时代背景或世界起源"
+    "knowledge_base_config": {
+      "reference_files": [],
+      "chunk_size": 1200,
+      "chunk_overlap": 300,
+      "cache_dir": "data/cache"
+    },
+    "log_config": {
+      "log_dir": "data/logs",
+      "log_level": "DEBUG",
+      "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    },
+    "novel_config": {
+      "type": "东方玄幻",
+      "theme": "凡人流、成长、冒险",
+      "style": "热血、幽默、悬疑",
+      "title": "牧神记",
+      "target_chapters": 100,
+      "chapter_length": 2500,
+      "knowledge_base": {
+        "chunk_size": 1200,
+        "chunk_overlap": 300,
+        "cache_dir": "data/cache"
       },
-      "character_guide": {
-        "protagonist": {
-          "background": "示例主角背景故事",
-          "initial_personality": "示例主角初始性格",
-          "growth_path": "示例主角成长或转变路径"
+      "writing_guide": {
+        "world_building": {
+          "magic_system": "修炼体系基于开启人体'七大神藏'：灵胎、五曜、六合、七星、天人、生死、神桥。每个神藏间有'壁'阻隔，需'破壁'方可晋升。天生灵胎壁开启者为'灵体'（分青龙、白虎、朱雀、玄武四种），修炼事半功倍。主角秦牧为'凡体'，被村长善意欺骗为万古无一的'霸体'，以最基础的'导引功'（霸体三丹功）打下无上根基。'神通'是将武技或法术修炼到极致的体现，如刀出火、拳出雷。",
+          "social_system": "世界分为两部分：1) 大墟：被诅咒的遗弃之地，'天黑别出门'是铁律，黑暗中潜藏致命危险，村落依靠神秘石像庇护。2) 外部世界：以'延康国'为代表，城市繁华，门派林立，如漓江派、天魔教、大雷音寺等。大墟中的居民被称为'神之弃民'，被外界排斥。",
+          "background": "故事始于大墟中的'残老村'，一群实力强大但身有残疾的神秘村民，从江边捡到了主角秦牧。大墟的黑暗、神秘的石像、以及主角的身世（无忧乡）是故事初期的核心谜团。"
         },
+        "character_guide": {
+          "protagonist": {
+            "background": "身世不明的弃婴，被残老村村民抚养长大，佩戴一枚刻有'秦'字的神秘玉佩。体质为普通'凡体'，却被告知是万古无一的'霸体'。",
+            "initial_personality": "淳朴善良，聪慧好学，对抚养自己的长辈充满信赖与孝心。在村民的'言传身教'下，行事逐渐果决，带有一丝'反派'的狡黠与狠辣。",
+            "growth_path": "从修炼基础导引功开始，通过服用'四灵血'和村民的魔鬼训练淬炼肉身与元气，在生死历练中将各项战技（刀、拳、腿、眼、法）推向极致，意外破开灵胎壁，并成为天魔教少教主，最终踏出大墟，走向更广阔的世界。"
+          },
         "supporting_roles": [
-          {
-            "role_type": "示例配角类型 (例如: 导师, 挚友, 竞争对手)",
-            "personality": "示例配角性格",
-            "relationship": "示例配角与主角的关系"
-          }
-        ],
-        "antagonists": [
-          {
-            "role_type": "示例反派类型 (例如: 宿敌, 幕后黑手, 理念冲突者)",
-            "personality": "示例反派性格",
-            "conflict_point": "示例反派与主角的核心冲突"
-          }
-        ]
-      },
-      "plot_structure": {
-        "act_one": {
-          "setup": "示例开篇设定和背景介绍",
-          "inciting_incident": "示例激励事件，故事的起点",
-          "first_plot_point": "示例第一主要情节转折点"
+            {
+              "role_type": "导师/亲人",
+              "personality": "司婆婆：残老村的裁缝与稳婆，天魔教前教主夫人。看似慈祥的驼背老妪，实则魔功盖世，传授秦牧'天魔造化功'。外冷内热，视秦牧如己出。",
+              "relationship": "秦牧的养母，第一个发现并救下他的人，也是其魔道功法的启蒙者。"
+            },
+            {
+              "role_type": "导师/亲人",
+              "personality": "村长：残老村的灵魂人物，无手无脚，智慧深不可测。'霸体'谎言的缔造者，传授秦牧'霸体三丹功'和无上剑法'剑图'。实为上一个时代的剑神。",
+              "relationship": "秦牧的精神导师和领路人，为秦牧规划了成长道路。"
+            },
+            {
+              "role_type": "导师/亲人",
+              "personality": "瘸子：独腿，看似憨厚老实，实则心思缜密，下手狠辣。传授秦牧'偷天神腿'和为人处世的'狡猾'。实为天下第一神偷。",
+              "relationship": "教导秦牧身法与生存智慧，是秦牧'反派'气质的来源之一。"
+            },
+            {
+              "role_type": "导师/亲人",
+              "personality": "马爷：独臂，性格沉稳，不苟言笑。传授秦牧'雷音八式'。实为大雷音寺弃徒'马王神'。",
+              "relationship": "教导秦牧正统的战技与刚猛的战斗风格。"
+            },
+            {
+              "role_type": "导师/亲人",
+              "personality": "瞎子：眼盲，性格骚情，爱拽文。传授秦牧'九重天开眼法'和枪法。实为一代枪神。",
+              "relationship": "为秦牧开启了超越肉眼的视野，教导他看破虚妄。"
+            },
+            {
+              "role_type": "导师/亲人",
+              "personality": "屠夫：只有上半身，性格癫狂豪迈。传授秦牧'杀猪刀法'。实为'天刀'。",
+              "relationship": "塑造了秦牧勇猛无畏、一往无前的战斗意志。"
+            }
+          ],
+          "antagonists": [
+            {
+              "role_type": "初期反派",
+              "personality": "漓江派众人：自诩正道，前来大墟降妖除魔，实则傲慢自大，滥杀无辜。其弟子（曲师兄、晴师姐等）成为秦牧初期的生死磨刀石。",
+              "conflict_point": "追杀秦牧，迫使其在生死间成长，并引出残老村的强大实力。"
+            },
+            {
+              "role_type": "区域BOSS",
+              "personality": "吴女/小雷音寺铜佛：被镇压在江心古庙的强大妖怪与邪佛，代表了大墟中诡异的危险。",
+              "conflict_point": "秦牧利用其与邪佛的矛盾，意外破开灵胎壁，并展现了智取强敌的能力。"
+            },
+            {
+              "role_type": "亦敌亦友",
+              "personality": "天魔教众人：包括少年祖师、执法长老及三百六十堂堂主。行事亦正亦邪，遵循'强者为尊'的魔道逻辑。",
+              "conflict_point": "为寻回教主夫人（司婆婆）而来，对秦牧进行严酷考验，最终认可其为少教主。"
+            },
+            {
+              "role_type": "潜在威胁",
+              "personality": "延康国：以国家形式存在的超级门派，由'神下第一人'延康国师主导，意图将大墟纳入版图。其军队纪律严明，装备精良，代表了外界文明的强大压迫力。",
+              "conflict_point": "与残老村众人产生冲突，展现了外界势力的冰山一角，是主角未来将要面对的巨大挑战。"
+            }
+          ]
         },
-        "act_two": {
-          "rising_action": "示例上升情节，主角应对挑战",
-          "midpoint": "示例中点事件，重要的转折或揭示",
-          "complications": "示例情节复杂化，困难加剧",
-          "darkest_moment": "示例主角面临的最低谷或最大危机",
-          "second_plot_point": "示例第二主要情节转折点，导向结局"
+        "plot_structure": {
+          "act_one": {
+            "setup": "大墟残老村，少年秦牧在九位残疾长辈的抚养下长大，学习各种奇怪的本领。",
+            "inciting_incident": "秦牧被检测为无法修炼的'凡体'，村长为给予村民希望，谎称其为万古无一的'霸体'，并开始对其进行地狱式训练。",
+            "first_plot_point": "秦牧初出茅庐，遭遇漓江派弟子的追杀，第一次经历生死搏杀，并成功反杀，展现了惊人的战斗天赋和村民们所教技艺的强大。"
+          },
+          "act_two": {
+            "rising_action": "秦牧在历练中不断成长，与魔猿结为好友，智取吴女和镇央宫魔影，探索涌江龙宫，并意外以'魔音'破开灵胎壁，正式踏上修炼之路。",
+            "midpoint": "天魔教寻至残老村，秦牧的'霸体'身份面临真正考验。他接受了天魔教三百六十房的挑战，这是一场持续一天一夜的极限战斗。",
+            "complications": "秦牧在战斗中不断突破，元气属性相继觉醒（水、火、青龙），其实力让天魔教众人震惊。司婆婆的真实身份（前教主夫人）被揭露。",
+            "darkest_moment": "在挑战的最后阶段，秦牧身心俱疲，濒临极限，但他凭借坚定的意志和守护婆婆的信念坚持了下来。",
+            "second_plot_point": "秦牧成功打穿三百六十房，其潜力与实力得到天魔教祖师的认可，被正式册封为'少教主'。"
+          },
+          "act_three": {
+            "climax": "延康国大军入侵大墟，兵锋直指镶龙城。残老村众人各显神通，聋子作画阻挡百万军，屠夫、瞎子、瘸子、药师等人纷纷出手示威，展现了残老村恐怖的实力。",
+            "resolution": "神秘的'太阳船'出现，其无与伦比的威压迫使延康国师下令退兵，化解了镶龙城的危机。秦牧也因此见识到了大墟更深层次的秘密。",
+            "denouement": "村长等人同意秦牧外出历练，秦牧通过了九位长辈的最终考验，正式'成年'。他告别村民，与狐灵儿一同踏上前往延康国的旅程，开启新的篇章。"
+          }
         },
-        "act_three": {
-          "climax": "示例高潮，最终对决或问题解决",
-          "resolution": "示例结局，事件的最终结果",
-          "denouement": "示例尾声，展示结局后的状态"
+        "style_guide": {
+          "tone": "整体风格热血、爽快，同时带有浓厚的神秘感和一丝幽默。主角的成长与大墟的秘密探索交织，营造出一种独特的史诗感。",
+          "pacing": "节奏明快，事件紧凑。采用单元剧式的冒险结构（如漓江派、天魔教、延康国），每个单元都推动主角实力和心智的成长，并揭示一部分世界观。",
+          "description_focus": [
+            "战斗描写：注重招式、神通的奇特性和力量感，如'雷音八式'的雷声滚滚，'杀猪刀法'的癫狂霸气，'剑图'的山河壮阔。",
+            "世界观塑造：通过秦牧的视角，逐步揭开'大墟'的神秘面纱，如黑暗中的怪物、各种诡异的遗迹（神女关、镇央宫、涌江龙宫）、以及太阳船、月亮船等超乎想象的存在。",
+            "人物刻画：残老村村民的形象塑造尤为出色，每个人都有着神秘的过去和独特的性格，他们之间的互动和对秦牧的教导是前期核心看点。"
+          ]
         }
-      },
-      "style_guide": {
-        "tone": "示例整体基调 (例如: 轻松幽默, 严肃深刻)",
-        "pacing": "示例节奏控制 (例如: 快节奏, 张弛有度)",
-        "description_focus": [
-          "示例描写侧重点1 (例如: 动作场面)",
-          "示例描写侧重点2 (例如: 内心活动)",
-          "示例描写侧重点3 (例如: 环境氛围)"
-        ]
       }
     },
-    "extra_guidance": {
-      "writing_style": {
-        "pacing": "示例章节节奏 (例如: 每章一个小高潮)",
-        "description": "示例描写风格 (例如: 简洁, 华丽)",
-        "dialogue": "示例对话风格 (例如: 生活化, 富含信息)",
-        "action": "示例动作场景风格 (例如: 强调速度, 强调策略)"
-      },
-      "content_rules": {
-        "must_include": [
-          "示例必须包含的元素1",
-          "示例必须包含的元素2"
-        ],
-        "must_avoid": [
-          "示例必须避免的内容1",
-          "示例必须避免的内容2"
-        ]
-      },
-      "chapter_structure": {
-        "opening": "示例章节开头方式 (例如: 以悬念开始)",
-        "development": "示例章节情节推进方式",
-        "climax": "示例章节高潮设置方式",
-        "ending": "示例章节结尾方式 (例如: 留下钩子)"
-      },
-      "plot_corrections": {
-        "example_correction_1": {
-          "title": "示例修正点标题1",
-          "description": "示例修正点描述1"
+    "generation_config": {
+      "max_retries": 3,
+      "retry_delay": 30,
+      "batch_size": 10,
+      "model_timeout": 60,
+      "max_tokens": 8000,
+      "force_rebuild_kb": false,
+      "model_selection": {
+        "outline": {
+          "provider": "gemini",
+          "model_type": "outline"
         },
-        "example_correction_2": {
-          "title": "示例修正点标题2",
-          "description": "示例修正点描述2"
+        "content": {
+          "provider": "openai",
+          "model_type": "content"
         }
-      }
-    }
-  },
-  "generation_config": {
-    "max_retries": 3,
-    "retry_delay": 10,
-    "force_rebuild_kb": false,
-    "model_selection": {
-      "outline": {
-        "provider": "openai",
-        "model_type": "outline"
       },
-      "content": {
-        "provider": "gemini",
-        "model_type": "content"
+      "validation": {
+        "check_logic": true,
+        "check_consistency": true,
+        "check_duplicates": true
       }
     },
-    "validation": {
-      "check_logic": true,
-      "check_consistency": true,
-      "check_duplicates": true
+    "output_config": {
+      "format": "json",
+      "encoding": "utf-8",
+      "save_outline": true,
+      "save_character_states": false,
+      "output_dir": "data/output_mgs"
     }
-  },
-  "output_config": {
-    "format": "txt",
-    "encoding": "utf-8",
-    "save_outline": true,
-    "save_character_states": false,
-    "output_dir": "data/output"
-  }
 }

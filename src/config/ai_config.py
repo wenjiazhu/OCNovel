@@ -50,11 +50,11 @@ class AIConfig:
             "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
             "models": {
                 "outline": {
-                    "name": "gemini-2.5-pro-preview-06-05",
+                    "name": "gemini-2.5-pro",
                     "temperature": 1.0
                 },
                 "content": {
-                    "name": "gemini-2.5-flash-preview-05-20",
+                    "name": "gemini-2.5-flash",
                     "temperature": 0.7
                 }
             }
