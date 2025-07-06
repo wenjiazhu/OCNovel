@@ -7,6 +7,10 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 - 🤖 支持多种 AI 模型（Gemini、OpenAI）
   - Gemini模型：使用 `gemini-2.5-flash`（内容生成）和 `gemini-2.5-pro`（大纲生成）
   - OpenAI模型：支持自定义API端点，兼容多种模型
+  - 🔄 智能备用模型系统：当主模型不可用时，自动切换到备用模型
+    - Gemini Flash → DeepSeek-R1
+    - Gemini Pro → Qwen3-235B-A22B
+    - OpenAI模型 → 相应的备用模型
 - 📚 智能知识库系统，支持参考小说导入和分析
 - 📝 自动生成小说大纲和章节内容
 - 💡 支持手动更新和优化小说大纲
@@ -66,7 +70,7 @@ pip install -r requirements.txt
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
-# 嵌入模型配置（用于知识库向量化等）
+# 嵌入模型配置（用于知识库向量化等，也作为备用模型的API密钥）
 OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
 OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
 
@@ -77,11 +81,42 @@ OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
 # 内容模型配置（用于生成章节内容）
 OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
 OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
+
+# 备用模型配置（可选）
+GEMINI_FALLBACK_ENABLED=True  # 是否启用Gemini备用模型，默认为True
+GEMINI_FALLBACK_BASE_URL=https://api.siliconflow.cn/v1  # 备用API基础URL
+GEMINI_FALLBACK_TIMEOUT=180  # 备用API超时时间（秒）
 ```
 
 5. 准备配置文件 (`config.json`)：
    - 你可以手动复制 `config.json.example` 并重命名为 `config.json`，然后根据需要修改。
    - **首次运行** `main.py` 时，如果 `config.json` 不存在，程序会提示你输入小说主题，并自动调用 `src/tools/generate_config.py` 生成一个基础的 `config.json` 文件。
+
+## 备用模型系统
+
+OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能够自动切换到备用模型，提高系统的稳定性和可用性。
+
+### 备用模型映射
+
+| 主模型 | 备用模型 | 说明 |
+|--------|----------|------|
+| Gemini Flash | DeepSeek-R1 | 当Gemini Flash不可用时自动切换 |
+| Gemini Pro | Qwen3-235B-A22B | 当Gemini Pro不可用时自动切换 |
+| OpenAI模型 | 相应备用模型 | 根据模型类型选择对应的备用模型 |
+
+### 工作原理
+
+1. **自动检测**：系统会监控主模型的调用状态
+2. **错误识别**：当检测到连接错误、超时或API错误时，触发备用模型
+3. **无缝切换**：自动切换到配置的备用模型，保持相同的生成参数
+4. **日志记录**：详细记录切换过程和结果
+
+### 配置选项
+
+- `GEMINI_FALLBACK_ENABLED`：是否启用备用模型功能（默认：True）
+- `GEMINI_FALLBACK_BASE_URL`：备用API的基础URL
+- `GEMINI_FALLBACK_TIMEOUT`：备用API的超时时间
+- `OPENAI_EMBEDDING_API_KEY`：用作备用模型的API密钥
 
 ## 使用方法
 
@@ -156,6 +191,16 @@ python src/tools/process_novel.py <输入目录> <输出目录> -e <结束章节
 ```
 *(此工具的功能和用法请参考其内部实现或相关文档)*
 
+### 4. 备用模型功能示例
+
+```bash
+python examples/fallback_usage_example.py
+```
+这个示例展示了如何使用备用模型功能，包括：
+- Gemini模型的备用模型切换
+- OpenAI模型的备用模型切换
+- 错误处理和日志记录
+
 ## 项目结构
 
 ```
@@ -194,6 +239,8 @@ OCNovel/
 │       ├── generate_marketing.py # 营销内容生成
 │       └── process_novel.py      # 章节内容整理
 ├── tests/               # 测试文件
+├── examples/            # 使用示例
+│   └── fallback_usage_example.py  # 备用模型使用示例
 ├── .env                 # 环境变量 (API Keys等)
 ├── config.json          # 主配置文件
 ├── config.json.example   # 配置文件示例
