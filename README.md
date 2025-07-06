@@ -23,6 +23,7 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 - 📄 首次运行时可交互生成基础配置文件
 - 📊 完整的日志记录系统
 - 🎨 支持生成营销内容（标题、封面提示词等）
+- ✍️ 智能文本仿写功能，支持风格迁移和文风转换
 
 ## 系统要求
 
@@ -118,6 +119,25 @@ OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能
 - `GEMINI_FALLBACK_TIMEOUT`：备用API的超时时间
 - `OPENAI_EMBEDDING_API_KEY`：用作备用模型的API密钥
 
+## 快速开始
+
+### 基本使用示例
+
+1. **生成完整小说**：
+```bash
+python main.py auto
+```
+
+2. **文本仿写**：
+```bash
+python main.py imitate --style-source style.txt --input-file original.txt --output-file output.txt
+```
+
+3. **生成营销内容**：
+```bash
+python src/tools/generate_marketing.py --keywords "玄幻" "修仙" --characters "主角" "反派"
+```
+
 ## 使用方法
 
 ### 1. 主程序运行 (main.py)
@@ -177,6 +197,35 @@ python main.py finalize --chapter <章节号>
 - **参数**：
   - `--chapter`：必需，需要定稿的章节号（从 1 开始）。
 
+#### (5) 文本仿写功能 (`imitate`)
+```bash
+python main.py imitate \
+    --style-source <风格源文件> \
+    --input-file <原始文本文件> \
+    --output-file <输出文件> \
+    [--extra-prompt "额外要求"]
+```
+- **功能**：根据指定的风格范文对原始文本进行仿写，实现风格的智能迁移。系统会构建临时知识库分析风格特征，然后使用AI模型生成符合目标风格的文本。
+- **参数**：
+  - `--style-source`：必需，作为风格参考的源文件路径（如：`style.txt`）
+  - `--input-file`：必需，需要进行仿写的原始文本文件路径（如：`original.txt`）
+  - `--output-file`：必需，仿写结果的输出文件路径（如：`output.txt`）
+  - `--extra-prompt`：可选，额外的仿写要求或指导（如："保持古风韵味"、"增加悬疑氛围"等）
+- **工作原理**：
+  1. 读取风格源文件，构建临时知识库
+  2. 使用嵌入模型分析原始文本与风格文本的相似性
+  3. 检索最相关的风格片段作为范例
+  4. 生成仿写提示词，调用AI模型进行风格迁移
+  5. 输出仿写结果到指定文件
+- **使用示例**：
+  ```bash
+  # 将简单描述仿写为古风雅致的文风
+  python main.py imitate --style-source style.txt --input-file original.txt --output-file imitation_output.txt --extra-prompt "保持古风韵味"
+  
+  # 将现代文仿写为悬疑风格
+  python main.py imitate --style-source mystery_style.txt --input-file modern_text.txt --output-file mystery_output.txt --extra-prompt "增加悬疑氛围和紧张感"
+  ```
+
 ### 2. 生成营销内容
 
 ```bash
@@ -226,8 +275,9 @@ OCNovel/
 │   │   │   └── content_generator.py
 │   │   ├── finalizer/    # 章节定稿处理
 │   │   │   └── finalizer.py
-│   │   └── outline/      # 大纲生成
-│   │       └── outline_generator.py
+│   │   ├── outline/      # 大纲生成
+│   │   │   └── outline_generator.py
+│   │   └── prompts.py    # 提示词生成（包含仿写功能提示词）
 │   ├── knowledge_base/  # 知识库管理
 │   │   └── knowledge_base.py
 │   ├── models/          # AI模型接口
@@ -264,6 +314,10 @@ OCNovel/
 1. **API密钥错误**：确保在 `.env` 文件中正确设置了所有必需的API密钥
 2. **网络连接问题**：如果使用代理，确保代理设置正确
 3. **模型超时**：可以调整配置文件中的 `timeout` 参数
+4. **仿写功能问题**：
+   - **风格文件为空**：确保风格源文件包含足够的文本内容
+   - **仿写效果不理想**：尝试提供更具体的 `--extra-prompt` 参数
+   - **知识库构建失败**：检查风格文件的编码格式，确保为UTF-8
 
 ## 配置说明 (`config.json`)
 

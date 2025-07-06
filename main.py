@@ -76,6 +76,13 @@ def main():
     # 自动生成命令（包含完整流程）
     auto_parser = subparsers.add_parser('auto', help='自动执行完整生成流程')
     auto_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
+
+    # 仿写命令
+    imitate_parser = subparsers.add_parser('imitate', help='根据指定的风格范文仿写文本')
+    imitate_parser.add_argument('--style-source', type=str, required=True, help='作为风格参考的源文件路径')
+    imitate_parser.add_argument('--input-file', type=str, required=True, help='需要进行仿写的原始文本文件路径')
+    imitate_parser.add_argument('--output-file', type=str, required=True, help='仿写结果的输出文件路径')
+    imitate_parser.add_argument('--extra-prompt', type=str, help='额外的仿写要求')
     
     args = parser.parse_args()
     
@@ -337,6 +344,65 @@ def main():
                  print("内容生成及定稿成功！")
 
             print("自动生成流程全部完成！")
+
+        elif args.command == 'imitate':
+            logging.info("--- 执行仿写任务 ---")
+            try:
+                # 1. 读取输入文件
+                logging.info(f"读取风格源文件: {args.style_source}")
+                with open(args.style_source, 'r', encoding='utf-8') as f:
+                    style_text = f.read()
+
+                logging.info(f"读取原始文本文件: {args.input_file}")
+                with open(args.input_file, 'r', encoding='utf-8') as f:
+                    input_text = f.read()
+
+                # 2. 初始化模型 (这里我们复用 content_model 的配置)
+                logging.info("初始化AI模型...")
+                imitation_model = create_model(config.model_config["content_model"])
+
+                # 3. 创建一个临时的、基于风格范文的知识库
+                logging.info("为风格范文动态构建临时知识库...")
+                # 创建一个临时的知识库配置，指向一个专用的仿写缓存目录
+                imitate_kb_config = config.knowledge_base_config.copy()
+                imitate_kb_config["cache_dir"] = os.path.join(config.knowledge_base_config["cache_dir"], "imitation_cache")
+                
+                style_kb = KnowledgeBase(imitate_kb_config, embedding_model)
+                # 注意：这里我们直接用文本构建知识库，而不是文件路径
+                style_kb.build(style_text, force_rebuild=False) # force_rebuild可以根据需要调整
+                logging.info("临时知识库构建完成。")
+
+                # 4. 从风格知识库中检索与原始文本最相关的片段作为范例
+                logging.info("从风格知识库中检索最相关的风格范例...")
+                # 使用原始文本作为查询语句，检索出最能体现风格的片段
+                style_examples = style_kb.search(input_text, k=5) # 检索5个最相关的片段
+
+                # 5. 导入并使用新的仿写提示词
+                from src.generators.prompts import get_imitation_prompt
+                
+                prompt = get_imitation_prompt(
+                    original_text=input_text,
+                    style_examples=style_examples,
+                    extra_prompt=args.extra_prompt
+                )
+                
+                # 6. 调用模型生成仿写内容
+                logging.info("调用AI模型进行仿写...")
+                imitated_content = imitation_model.generate(prompt)
+
+                # 7. 保存结果
+                logging.info(f"仿写完成，保存结果到: {args.output_file}")
+                with open(args.output_file, 'w', encoding='utf-8') as f:
+                    f.write(imitated_content)
+                
+                print(f"仿写成功！结果已保存至 {args.output_file}")
+
+            except FileNotFoundError as e:
+                logging.error(f"文件未找到: {e}", exc_info=True)
+                print(f"错误：文件未找到 - {e}")
+            except Exception as e:
+                logging.error(f"执行仿写任务时出错: {e}", exc_info=True)
+                print(f"错误：执行仿写任务失败，请查看日志。")
             
         else:
             parser.print_help()
@@ -349,4 +415,4 @@ def main():
         logging.error(f"程序执行出错: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
-    main() 
+    main()

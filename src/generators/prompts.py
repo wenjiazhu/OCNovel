@@ -74,7 +74,7 @@ def get_outline_prompt(
 - [中期BOSS]：[性格/能力特点] - [与主角的核心冲突点]
 - [宿敌/一生之敌]：[性格/能力特点] - [与主角的核心冲突点]
 - [幕后黑手]：[性格/能力特点] - [与主角的核心冲突点]
-{chr(10).join([f"- {role.get('role_type', '[其他对手类型]')}：{role.get('personality', '[性格/能力特点]')} - {role.get('conflict_point', '[与主角的核心冲突点]')}" for role in character_guide.get('antagonists', [])])}
+{chr(10).join([f"- {role.get('role_type', '[其他对手类型]')}：{role.get('personality', '[性格特点]')} - {role.get('conflict_point', '[与主角的核心冲突点]')}" for role in character_guide.get('antagonists', [])])}
 
 
 [剧情结构（三幕式）]
@@ -151,10 +151,10 @@ def get_outline_prompt(
 """
 
     if extra_prompt:
-        base_prompt += f"\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
     if reference_info:
-        base_prompt += f"\n[知识库参考信息]\n{reference_info}\n"
+        base_prompt += f"{chr(10)}[知识库参考信息]{chr(10)}{reference_info}{chr(10)}"
 
     return base_prompt
 
@@ -281,7 +281,7 @@ def get_chapter_prompt(
 
     # 添加额外要求
     if extra_prompt:
-        base_prompt += f"\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
     # 添加上下文信息（限制长度）
     if context_info:
@@ -289,7 +289,7 @@ def get_chapter_prompt(
         max_context_length = 2000
         if len(context_info) > max_context_length:
             context_info = context_info[-max_context_length:] + "...(前文已省略)"
-        base_prompt += f"\n[上下文信息]\n{context_info}"
+        base_prompt += f"{chr(10)}[上下文信息]{chr(10)}{context_info}"
 
     return base_prompt
 
@@ -551,7 +551,8 @@ def get_consistency_check_prompt(
 2. <具体建议>
 ...
 
-[修改必要性]: <"需要修改"或"无需修改">"""
+[修改必要性]: <"需要修改"或"无需修改">
+"""
 
 # =============== 10. 章节修正提示词 ===================
 def get_chapter_revision_prompt(
@@ -650,7 +651,7 @@ def get_knowledge_filter_prompt(
 {json.dumps(chapter_info, ensure_ascii=False, indent=2)}
 
 [待过滤内容]
-{chr(10).join([f"--- 片段 {i+1} ---{chr(10)}{text[:200]}..." for i, text in enumerate(retrieved_texts)])}
+{chr(10).join(["--- 片段 " + str(i+1) + " ---" + chr(10) + text[:200] + "..." for i, text in enumerate(retrieved_texts)])}
 
 ===== 过滤规则 =====
 1. **冲突检测**：
@@ -677,7 +678,7 @@ def get_knowledge_filter_prompt(
 
 示例：
 [情节燃料]→可用于第{chapter_info.get('chapter_number', 'N')}章高潮
-❗ "主角发现密室中的古老地图，暗示下个副本位置"（▲与第三章地图描述冲突）
+❗ "主角发现密室中的古老地图，暗示下个副本位置"
 · "村民谈论最近的异常天气"（可作背景铺垫）
 """
 
@@ -694,7 +695,7 @@ def get_logic_check_prompt(
 关键点：{', '.join(chapter_outline.get('key_points', []))}
 角色：{', '.join(chapter_outline.get('characters', []))}
 场景：{', '.join(chapter_outline.get('settings', []))}
-冲突：{', '.join(chapter_outline.get('conflicts', []))}"""
+冲突：{', '.join(chapter_outline.get('conflicts', []))} """
 
     # 添加同步信息部分（如果提供）
     if sync_info:
@@ -731,7 +732,8 @@ def get_logic_check_prompt(
 [修改建议]:
 <针对每个逻辑问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">"""
+[修改必要性]: <"需要修改"或"无需修改">
+"""
     return prompt
 
 def get_style_check_prompt(
@@ -779,7 +781,8 @@ def get_style_check_prompt(
 [修改建议]:
 <针对每个风格问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">"""
+[修改必要性]: <"需要修改"或"无需修改">
+"""
 
 def get_emotion_check_prompt(
     chapter_content: str,
@@ -820,4 +823,63 @@ def get_emotion_check_prompt(
 [修改建议]:
 <针对每个情感问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">""" 
+[修改必要性]: <"需要修改"或"无需修改">
+""" 
+
+def get_imitation_prompt(
+    original_text: str,
+    style_examples: List[str],
+    extra_prompt: Optional[str] = None
+) -> str:
+    """
+    生成用于仿写任务的提示词
+    
+    Args:
+        original_text: 需要被重写的原始文本.
+        style_examples: 从风格范文中提取的、用于模仿的文本片段.
+        extra_prompt: 用户额外的指令.
+    """
+    
+    # 将风格范例格式化
+    separator = chr(10) + chr(10) + "---" + chr(10) + chr(10)
+    formatted_examples = separator.join(style_examples)
+    
+    prompt_template = (
+        "你是一位顶级的文体学家和模仿大师。你的任务是严格按照提供的「风格范例」，重写「原始文本」." + chr(10) +
+        chr(10) +
+        "核心要求：" + chr(10) +
+        "1.  **保留核心意义**：必须完整、准确地保留「原始文本」的所有关键信息、情节和逻辑。不能增加或删减核心意思。" + chr(10) +
+        "2.  **迁移文笔风格**：必须彻底地模仿「风格范例」的笔触。这包括：" + chr(10) +
+        "    -   **词汇选择**：使用与范例相似的词汇偏好（例如，是用“华丽辞藻”还是“朴实白描”）。" + chr(10) +
+        "    -   **句式结构**：模仿范例的长短句搭配、倒装、排比等句式特点。" + chr(10) +
+        "    -   **叙事节奏**：模仿范例是“快节奏推进”还是“慢节奏铺陈”。" + chr(10) +
+        "    -   **情感基调**：模仿范例的整体情绪色彩（如冷静、激昂、悲伤等）。" + chr(10) +
+        "    -   **标点符号用法**：注意范例中特殊标点（如破折号、省略号）的使用习惯。" + chr(10) +
+        chr(10) +
+        "---" + chr(10) +
+        chr(10) +
+        "[风格范例]" + chr(10) +
+        "{formatted_examples}" + chr(10) +
+        chr(10) +
+        "---" + chr(10) +
+        chr(10) +
+        "[原始文本]" + chr(10) +
+        "{original_text}" + chr(10) +
+        chr(10) +
+        "---" + chr(10) +
+        chr(10) +
+        "[额外要求]" + chr(10) +
+        "{extra_prompt_val}" + chr(10) +
+        chr(10) +
+        "------" + chr(10) +
+        chr(10) +
+        "现在，请开始仿写。直接输出仿写后的正文，不要包含任何解释或标题." + chr(10)
+    )
+    
+    # Use .format() for substitution
+    prompt = prompt_template.format(
+        formatted_examples=formatted_examples,
+        original_text=original_text,
+        extra_prompt_val=extra_prompt if extra_prompt else "无"
+    )
+    return prompt
