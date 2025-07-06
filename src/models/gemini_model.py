@@ -24,8 +24,8 @@ class GeminiModel(BaseModel):
         self.retry_delay = config.get('retry_delay', 30)
         # 获取最大重试次数，默认为5次
         self.max_retries = config.get('max_retries', 5)
-        # 获取最大输入长度，默认为30000字符
-        self.max_input_length = config.get('max_input_length', 30000)
+        # 获取最大输入长度，默认为500000字符
+        self.max_input_length = config.get('max_input_length', 500000)
         self.model = genai.GenerativeModel(self.model_name)
         
         # 备用模型配置

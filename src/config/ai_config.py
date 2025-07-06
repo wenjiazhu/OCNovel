@@ -49,7 +49,7 @@ class AIConfig:
             "api_key": os.getenv("GEMINI_API_KEY", ""),
             "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
             "max_retries": int(os.getenv("GEMINI_MAX_RETRIES", "5")),  # 默认 5 次
-            "max_input_length": int(os.getenv("GEMINI_MAX_INPUT_LENGTH", "30000")),  # 默认 30000 字符
+            "max_input_length": int(os.getenv("GEMINI_MAX_INPUT_LENGTH", "500000")),  # 默认 500000 字符
             "timeout": int(os.getenv("GEMINI_TIMEOUT", "60")),  # 默认 60 秒
             # 备用模型配置
             "fallback": {
