@@ -81,6 +81,9 @@ class Config:
         self.output_config.update({
             "output_dir": config_output_dir if config_output_dir else os.path.join(self.base_dir, "data", "output")
         })
+        
+        # 仿写配置
+        self.imitation_config = self.config.get("imitation_config", {})
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
         """

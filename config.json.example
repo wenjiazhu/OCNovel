@@ -148,5 +148,46 @@
       "save_outline": true,
       "save_character_states": false,
       "output_dir": "data/output_mgs"
+    },
+    "imitation_config": {
+      "enabled": true,
+      "auto_imitation": {
+        "enabled": true,
+        "trigger_all_chapters": true,
+        "style_sources": [
+          {
+            "name": "古风雅致",
+            "file_path": "data/reference/古风风格参考.txt",
+            "description": "古风雅致的文风，适合玄幻仙侠类小说",
+            "extra_prompt": "保持古风韵味，增加诗词意境"
+          },
+          {
+            "name": "悬疑紧张",
+            "file_path": "data/reference/悬疑风格参考.txt", 
+            "description": "悬疑紧张的氛围，适合推理惊悚类小说",
+            "extra_prompt": "营造悬疑氛围，增加紧张感"
+          },
+          {
+            "name": "热血激昂",
+            "file_path": "data/reference/热血风格参考.txt",
+            "description": "热血激昂的节奏，适合战斗冒险类小说", 
+            "extra_prompt": "保持热血节奏，增强战斗场面"
+          }
+        ],
+        "default_style": "古风雅致",
+        "output_suffix": "_imitated",
+        "backup_original": true
+      },
+      "manual_imitation": {
+        "enabled": true,
+        "default_output_dir": "data/imitation_output",
+        "temp_kb_cache_dir": "data/cache/imitation_cache"
+      },
+      "quality_control": {
+        "min_style_similarity": 0.7,
+        "max_retries": 3,
+        "content_preservation_check": true,
+        "style_consistency_check": true
+      }
     }
 }

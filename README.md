@@ -24,6 +24,11 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 - 📊 完整的日志记录系统
 - 🎨 支持生成营销内容（标题、封面提示词等）
 - ✍️ 智能文本仿写功能，支持风格迁移和文风转换
+  - 🎭 手动仿写：支持自定义风格源文件进行文本风格迁移
+  - 🤖 自动仿写：在小说生成流程中自动触发，无需手动干预
+  - 🎨 多种风格：内置古风雅致、悬疑紧张、热血激昂等经典风格
+  - 🔍 智能检索：基于知识库的语义检索，精准匹配风格片段
+  - 📊 质量控制：内置内容保持度和风格一致性检查
 
 ## 系统要求
 
@@ -123,7 +128,7 @@ OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能
 
 ### 基本使用示例
 
-1. **生成完整小说**：
+1. **生成完整小说（包含自动仿写）**：
 ```bash
 python main.py auto
 ```
@@ -136,6 +141,15 @@ python main.py imitate --style-source style.txt --input-file original.txt --outp
 3. **生成营销内容**：
 ```bash
 python src/tools/generate_marketing.py --keywords "玄幻" "修仙" --characters "主角" "反派"
+```
+
+4. **全局仿写配置**：
+```bash
+# 开启全局仿写（默认已开启）
+# 在config.json中设置：trigger_all_chapters: true
+
+# 关闭全局仿写，仅对指定章节进行仿写
+# 在config.json中设置：trigger_all_chapters: false
 ```
 
 ## 使用方法
@@ -225,6 +239,42 @@ python main.py imitate \
   # 将现代文仿写为悬疑风格
   python main.py imitate --style-source mystery_style.txt --input-file modern_text.txt --output-file mystery_output.txt --extra-prompt "增加悬疑氛围和紧张感"
   ```
+
+#### (6) 自动仿写功能
+- **功能**：在auto流程的定稿阶段自动触发仿写功能，无需手动干预。系统会根据配置对每个章节自动进行风格仿写。
+- **触发条件**：在`config.json`的`imitation_config.auto_imitation.trigger_all_chapters`中配置（默认：true，对所有章节进行仿写）
+- **工作流程**：
+  1. 章节内容生成完成后进入定稿阶段
+  2. 检查是否开启全局仿写功能
+  3. 如果开启，自动读取默认风格源文件
+  4. 构建临时知识库并检索风格范例
+  5. 生成仿写内容并保存（文件名后缀：`_imitated`）
+  6. 备份原文件（文件名后缀：`_original`）
+- **配置说明**：
+  ```json
+  "imitation_config": {
+    "enabled": true,
+    "auto_imitation": {
+      "enabled": true,
+      "trigger_all_chapters": true,
+      "style_sources": [
+        {
+          "name": "古风雅致",
+          "file_path": "data/reference/古风风格参考.txt",
+          "description": "古风雅致的文风，适合玄幻仙侠类小说",
+          "extra_prompt": "保持古风韵味，增加诗词意境"
+        }
+      ],
+      "default_style": "古风雅致",
+      "output_suffix": "_imitated",
+      "backup_original": true
+    }
+  }
+  ```
+- **全局仿写配置说明**：
+  - `trigger_all_chapters: true`：开启全局仿写，每个章节都会自动进行仿写
+  - `trigger_all_chapters: false`：关闭全局仿写，仅对指定章节进行仿写
+  - 当关闭全局仿写时，可以使用`trigger_chapters`数组指定需要仿写的章节号
 
 ### 2. 生成营销内容
 
@@ -401,6 +451,43 @@ OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
 }
 ```
 
+#### 2.6 仿写配置 (`imitation_config`)
+
+控制文本仿写功能的配置项。
+
+```json
+{
+  "enabled": true,                    // 是否启用仿写功能
+  "auto_imitation": {                 // 自动仿写配置
+    "enabled": true,                  // 是否启用自动仿写
+    "trigger_all_chapters": true,     // 是否对所有章节进行仿写（true=全部章节，false=仅指定章节）
+    "trigger_chapters": [5, 10, 15, 20, 25, 30, 35, 40, 45, 50],  // 当trigger_all_chapters=false时，触发自动仿写的章节号
+    "style_sources": [                // 风格源文件配置
+      {
+        "name": "古风雅致",           // 风格名称
+        "file_path": "data/reference/古风风格参考.txt",  // 风格源文件路径
+        "description": "古风雅致的文风，适合玄幻仙侠类小说",  // 风格描述
+        "extra_prompt": "保持古风韵味，增加诗词意境"  // 额外仿写要求
+      }
+    ],
+    "default_style": "古风雅致",      // 默认使用的风格
+    "output_suffix": "_imitated",     // 仿写结果文件后缀
+    "backup_original": true           // 是否备份原文件
+  },
+  "manual_imitation": {               // 手动仿写配置
+    "enabled": true,                  // 是否启用手动仿写
+    "default_output_dir": "data/imitation_output",  // 默认输出目录
+    "temp_kb_cache_dir": "data/cache/imitation_cache"  // 临时知识库缓存目录
+  },
+  "quality_control": {                // 质量控制配置
+    "min_style_similarity": 0.7,      // 最小风格相似度阈值
+    "max_retries": 3,                 // 最大重试次数
+    "content_preservation_check": true,  // 是否检查内容保持度
+    "style_consistency_check": true   // 是否检查风格一致性
+  }
+}
+```
+
 ## 故障排除
 
 ### FAISS索引维度不匹配错误
@@ -433,3 +520,69 @@ AssertionError: assert d == self.d
 **预防措施：**
 - 避免频繁更改嵌入模型配置
 - 如需更改模型配置，建议先清理缓存再运行程序
+
+## 仿写功能测试与验证
+
+### 功能测试
+
+项目提供了完整的仿写功能测试脚本，用于验证功能的正常运行：
+
+```bash
+# 运行仿写逻辑验证测试
+python test_imitation_logic.py
+
+# 运行仿写功能演示测试
+python test_imitation_demo.py
+```
+
+### 测试内容
+
+1. **仿写逻辑验证测试** (`test_imitation_logic.py`)：
+   - 检查风格源文件是否存在且内容有效
+   - 验证仿写配置是否正确设置
+   - 测试自动仿写触发逻辑
+   - 验证知识库检索功能
+
+2. **仿写功能演示测试** (`test_imitation_demo.py`)：
+   - 测试手动仿写命令执行
+   - 验证仿写结果生成
+   - 展示仿写效果对比
+
+### 测试结果示例
+
+```
+🎭 仿写功能演示测试
+==================================================
+
+=== 测试自动仿写触发逻辑 ===
+测试章节触发情况:
+  章节  1: ✓ 触发
+  章节  5: ✓ 触发
+  章节 10: ✓ 触发
+  章节 15: ✓ 触发
+  章节 20: ✓ 触发
+  章节 25: ✓ 触发
+  章节 30: ✓ 触发
+
+仿写配置信息:
+  全局仿写: ✓ 启用
+  默认风格: 古风雅致
+  风格源数量: 3
+
+=== 测试手动仿写功能 ===
+✓ 创建测试原始文本文件: test_original.txt
+✓ 仿写命令执行成功
+✓ 仿写结果已保存到: test_imitation_output.txt
+仿写内容长度: 531 字符
+
+--- 仿写结果预览 ---
+这是一个寻常的午后，赤乌衔耀，金芒凿破疏窗，洒落在案牍之上...
+--- 预览结束 ---
+
+🎉 所有测试通过！仿写功能运行正常。
+```
+
+### 详细使用指南
+
+更多关于仿写功能的详细说明，请参考：
+- [仿写功能使用指南](仿写功能使用指南.md) - 完整的功能说明和使用教程
