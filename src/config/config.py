@@ -31,23 +31,30 @@ class Config:
         # 从配置文件中读取 output_dir
         config_output_dir = self.config["output_config"].get("output_dir")
         
-        # 动态AI模型配置，根据config.json的model_selection字段
-        self.model_config = {}
-        model_selection = self.config["generation_config"].get("model_selection", {})
-        # outline_model
-        outline_sel = model_selection.get("outline", {"provider": "gemini", "model_type": "outline"})
-        if outline_sel["provider"] == "openai":
-            self.model_config["outline_model"] = self.ai_config.get_openai_config(outline_sel["model_type"])
+        # 优先使用config.json中的model_config，如果没有则使用AIConfig的默认配置
+        if "model_config" in self.config:
+            # 使用配置文件中的model_config
+            self.model_config = self.config["model_config"].copy()
+            logging.info("使用配置文件中的model_config")
         else:
-            self.model_config["outline_model"] = self.ai_config.get_gemini_config(outline_sel["model_type"])
-        # content_model
-        content_sel = model_selection.get("content", {"provider": "gemini", "model_type": "content"})
-        if content_sel["provider"] == "openai":
-            self.model_config["content_model"] = self.ai_config.get_openai_config(content_sel["model_type"])
-        else:
-            self.model_config["content_model"] = self.ai_config.get_gemini_config(content_sel["model_type"])
-        # embedding_model 只支持openai
-        self.model_config["embedding_model"] = self.ai_config.get_openai_config("embedding")
+            # 动态AI模型配置，根据config.json的model_selection字段
+            self.model_config = {}
+            model_selection = self.config["generation_config"].get("model_selection", {})
+            # outline_model
+            outline_sel = model_selection.get("outline", {"provider": "gemini", "model_type": "outline"})
+            if outline_sel["provider"] == "openai":
+                self.model_config["outline_model"] = self.ai_config.get_openai_config(outline_sel["model_type"])
+            else:
+                self.model_config["outline_model"] = self.ai_config.get_gemini_config(outline_sel["model_type"])
+            # content_model
+            content_sel = model_selection.get("content", {"provider": "gemini", "model_type": "content"})
+            if content_sel["provider"] == "openai":
+                self.model_config["content_model"] = self.ai_config.get_openai_config(content_sel["model_type"])
+            else:
+                self.model_config["content_model"] = self.ai_config.get_gemini_config(content_sel["model_type"])
+            # embedding_model 只支持openai
+            self.model_config["embedding_model"] = self.ai_config.get_openai_config("embedding")
+            logging.info("使用AIConfig的默认model_config")
         
         # 小说配置
         self.novel_config = self.config["novel_config"]
