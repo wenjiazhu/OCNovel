@@ -91,13 +91,16 @@ class Config:
         
         # 仿写配置
         self.imitation_config = self.config.get("imitation_config", {})
+
+        # 启动时打印当前 model_config 便于调试
+        logging.info(f"[调试] 当前 model_config: {self.model_config}")
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
         """
         获取指定类型的模型配置
         
         Args:
-            model_type: 模型类型（outline_model/content_model/embedding_model）
+            model_type: 模型类型（outline_model/content_model/embedding_model/imitation_model）
             
         Returns:
             Dict[str, Any]: 模型配置
@@ -129,4 +132,32 @@ class Config:
         """获取配置项"""
         if name in self.config:
             return self.config[name]
-        raise AttributeError(f"Config has no attribute '{name}'") 
+        raise AttributeError(f"Config has no attribute '{name}'")
+
+    def get_imitation_model(self) -> Dict[str, Any]:
+        """
+        获取仿写专用模型配置，优先级：
+        1. model_config['imitation_model']
+        2. ai_config.gemini_config['fallback']（补全必要字段）
+        3. content_model
+        """
+        # 1. 优先使用 model_config['imitation_model']
+        if "imitation_model" in self.model_config:
+            logging.info(f"[仿写模型选择] 使用 model_config['imitation_model']: {self.model_config['imitation_model']}")
+            return self.model_config["imitation_model"]
+        # 2. 其次使用 ai_config.gemini_config['fallback']
+        fallback = getattr(self.ai_config, "gemini_config", {}).get("fallback")
+        if fallback and fallback.get("enabled", False):
+            fallback_model_name = fallback.get("models", {}).get("default", "deepseek-ai/DeepSeek-R1")
+            imitation_fallback_config = {
+                "type": "gemini",
+                "model_name": fallback_model_name,
+                "api_key": fallback.get("api_key", ""),
+                "base_url": fallback.get("base_url", "https://api.siliconflow.cn/v1"),
+                "timeout": fallback.get("timeout", 180),
+            }
+            logging.info(f"[仿写模型选择] 使用 gemini_config['fallback']: {imitation_fallback_config}")
+            return imitation_fallback_config
+        # 3. 最后 fallback 到 content_model
+        logging.info(f"[仿写模型选择] fallback 到 content_model: {self.model_config.get('content_model')}")
+        return self.model_config.get("content_model") 

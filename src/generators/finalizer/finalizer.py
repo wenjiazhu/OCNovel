@@ -91,7 +91,17 @@ class NovelFinalizer:
             # 新增：自动仿写功能
             if self._should_trigger_auto_imitation(chapter_num):
                 logger.info(f"章节号 {chapter_num} 触发自动仿写...")
-                if self._perform_auto_imitation(chapter_num, content, cleaned_title):
+                # 使用 imitation_model
+                imitation_model_config = self.config.get_imitation_model()
+                if imitation_model_config["type"] == "gemini":
+                    imitation_model = self.content_model.__class__(imitation_model_config)
+                elif imitation_model_config["type"] == "openai":
+                    from src.models.openai_model import OpenAIModel
+                    imitation_model = OpenAIModel(imitation_model_config)
+                else:
+                    logger.error(f"不支持的模型类型: {imitation_model_config['type']}")
+                    imitation_model = self.content_model
+                if self._perform_auto_imitation(chapter_num, content, cleaned_title, imitation_model):
                     logger.info(f"第 {chapter_num} 章自动仿写完成")
                 else:
                     logger.warning(f"第 {chapter_num} 章自动仿写失败，但不影响定稿流程")
@@ -244,7 +254,7 @@ class NovelFinalizer:
             logger.error(f"检查自动仿写触发条件时出错: {e}")
             return False
 
-    def _perform_auto_imitation(self, chapter_num: int, content: str, cleaned_title: str) -> bool:
+    def _perform_auto_imitation(self, chapter_num: int, content: str, cleaned_title: str, imitation_model=None) -> bool:
         """执行自动仿写"""
         try:
             imitation_config = getattr(self.config, 'imitation_config', {})
@@ -292,8 +302,9 @@ class NovelFinalizer:
             extra_prompt = default_style.get('extra_prompt', '')
             prompt = prompts.get_imitation_prompt(content, style_examples, extra_prompt)
             
-            # 调用模型生成仿写内容
-            imitated_content = self.content_model.generate(prompt)
+            # 调用 imitation_model 生成仿写内容
+            model = imitation_model if imitation_model is not None else self.content_model
+            imitated_content = model.generate(prompt)
             
             if not imitated_content or not imitated_content.strip():
                 logger.error(f"模型未能生成有效的仿写内容")

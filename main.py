@@ -357,36 +357,39 @@ def main():
                 with open(args.input_file, 'r', encoding='utf-8') as f:
                     input_text = f.read()
 
-                # 2. 初始化模型 (这里我们复用 content_model 的配置)
+                # 2. 初始化模型（改为 imitation_model 配置）
                 logging.info("初始化AI模型...")
-                imitation_model = create_model(config.model_config["content_model"])
+                imitation_model_config = config.get_imitation_model()
+                if imitation_model_config["type"] == "gemini":
+                    imitation_model = GeminiModel(imitation_model_config)
+                elif imitation_model_config["type"] == "openai":
+                    imitation_model = OpenAIModel(imitation_model_config)
+                else:
+                    raise ValueError(f"不支持的模型类型: {imitation_model_config['type']}")
 
                 # 3. 创建一个临时的、基于风格范文的知识库
                 logging.info("为风格范文动态构建临时知识库...")
                 # 创建一个临时的知识库配置，指向一个专用的仿写缓存目录
                 imitate_kb_config = config.knowledge_base_config.copy()
                 imitate_kb_config["cache_dir"] = os.path.join(config.knowledge_base_config["cache_dir"], "imitation_cache")
-                
                 style_kb = KnowledgeBase(imitate_kb_config, embedding_model)
-                # 注意：这里我们直接用文本构建知识库，而不是文件路径
-                style_kb.build(style_text, force_rebuild=False) # force_rebuild可以根据需要调整
+                style_kb.build(style_text, force_rebuild=False)
                 logging.info("临时知识库构建完成。")
 
                 # 4. 从风格知识库中检索与原始文本最相关的片段作为范例
                 logging.info("从风格知识库中检索最相关的风格范例...")
-                # 使用原始文本作为查询语句，检索出最能体现风格的片段
-                style_examples = style_kb.search(input_text, k=5) # 检索5个最相关的片段
+                style_examples = style_kb.search(input_text, k=5)
 
                 # 5. 导入并使用新的仿写提示词
                 from src.generators.prompts import get_imitation_prompt
-                
                 prompt = get_imitation_prompt(
                     original_text=input_text,
                     style_examples=style_examples,
                     extra_prompt=args.extra_prompt
                 )
-                
-                # 6. 调用模型生成仿写内容
+
+                # 6. 调用模型生成仿写内容前，打印实际模型名
+                logging.info(f"仿写实际调用模型: {imitation_model_config.get('model_name', imitation_model_config)}")
                 logging.info("调用AI模型进行仿写...")
                 imitated_content = imitation_model.generate(prompt)
 
@@ -394,7 +397,6 @@ def main():
                 logging.info(f"仿写完成，保存结果到: {args.output_file}")
                 with open(args.output_file, 'w', encoding='utf-8') as f:
                     f.write(imitated_content)
-                
                 print(f"仿写成功！结果已保存至 {args.output_file}")
 
             except FileNotFoundError as e:
