@@ -172,9 +172,39 @@
             "file_path": "data/reference/热血风格参考.txt",
             "description": "热血激昂的节奏，适合战斗冒险类小说", 
             "extra_prompt": "保持热血节奏，增强战斗场面"
+          },
+          {
+            "name": "历史权谋",
+            "file_path": "data/reference/历史权谋风格参考.txt",
+            "description": "历史权谋、朝堂斗争、智谋博弈，适合历史、权谋类小说",
+            "extra_prompt": "突出智谋、权力斗争、历史厚重感"
+          },
+          {
+            "name": "现代权谋",
+            "file_path": "data/reference/现代权谋风格参考.txt",
+            "description": "现代都市中的权力、商战、职场博弈，适合现代权谋、都市精英类小说",
+            "extra_prompt": "突出职场、商战、现代社会权力运作"
+          },
+          {
+            "name": "都市轻松",
+            "file_path": "data/reference/都市轻松风格参考.txt",
+            "description": "轻松幽默、日常温馨，适合都市生活、轻喜剧类小说",
+            "extra_prompt": "营造轻松氛围，增加幽默和温情"
+          },
+          {
+            "name": "科幻冒险",
+            "file_path": "data/reference/科幻冒险风格参考.txt",
+            "description": "未来科技、宇宙冒险、异星探索，适合科幻、冒险类小说",
+            "extra_prompt": "突出科技感、冒险精神、世界观新奇"
+          },
+          {
+            "name": "青春校园",
+            "file_path": "data/reference/青春校园风格参考.txt",
+            "description": "青春成长、友情爱情、校园生活，适合青春校园、成长类小说",
+            "extra_prompt": "突出青春气息、成长烦恼、校园氛围"
           }
         ],
-        "default_style": "古风雅致",
+        "default_style": "现代权谋",
         "output_suffix": "_imitated",
         "backup_original": false
       },
