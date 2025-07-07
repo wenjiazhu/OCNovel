@@ -88,6 +88,24 @@ class NovelFinalizer:
             
             logging.info(f"第 {chapter_num} 章定稿完成")
             
+            # 新增：自动仿写功能
+            if self._should_trigger_auto_imitation(chapter_num):
+                logger.info(f"章节号 {chapter_num} 触发自动仿写...")
+                # 使用 imitation_model
+                imitation_model_config = self.config.get_imitation_model()
+                if imitation_model_config["type"] == "gemini":
+                    imitation_model = self.content_model.__class__(imitation_model_config)
+                elif imitation_model_config["type"] == "openai":
+                    from src.models.openai_model import OpenAIModel
+                    imitation_model = OpenAIModel(imitation_model_config)
+                else:
+                    logger.error(f"不支持的模型类型: {imitation_model_config['type']}")
+                    imitation_model = self.content_model
+                if self._perform_auto_imitation(chapter_num, content, cleaned_title, imitation_model):
+                    logger.info(f"第 {chapter_num} 章自动仿写完成")
+                else:
+                    logger.warning(f"第 {chapter_num} 章自动仿写失败，但不影响定稿流程")
+            
             # 新增：定稿章节号为5的倍数时，自动更新sync_info.json
             if chapter_num % 5 == 0:
                 try:
@@ -207,6 +225,114 @@ class NovelFinalizer:
         cleaned_summary = cleaned_summary.strip()
 
         return cleaned_summary
+
+    def _should_trigger_auto_imitation(self, chapter_num: int) -> bool:
+        """判断是否应该触发自动仿写"""
+        try:
+            # 检查仿写功能是否启用
+            imitation_config = getattr(self.config, 'imitation_config', {})
+            if not imitation_config.get('enabled', False):
+                return False
+            
+            auto_config = imitation_config.get('auto_imitation', {})
+            if not auto_config.get('enabled', False):
+                return False
+            
+            # 检查是否开启全局仿写
+            trigger_all_chapters = auto_config.get('trigger_all_chapters', False)
+            if trigger_all_chapters:
+                return True
+            
+            # 兼容旧配置：检查章节号是否在触发列表中
+            trigger_chapters = auto_config.get('trigger_chapters', [])
+            if trigger_chapters:
+                return chapter_num in trigger_chapters
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"检查自动仿写触发条件时出错: {e}")
+            return False
+
+    def _perform_auto_imitation(self, chapter_num: int, content: str, cleaned_title: str, imitation_model=None) -> bool:
+        """执行自动仿写"""
+        try:
+            imitation_config = getattr(self.config, 'imitation_config', {})
+            auto_config = imitation_config.get('auto_imitation', {})
+            
+            # 获取默认风格
+            default_style_name = auto_config.get('default_style', '古风雅致')
+            style_sources = auto_config.get('style_sources', [])
+            
+            # 查找默认风格配置
+            default_style = None
+            for style in style_sources:
+                if style.get('name') == default_style_name:
+                    default_style = style
+                    break
+            
+            if not default_style:
+                logger.error(f"未找到默认风格配置: {default_style_name}")
+                return False
+            
+            # 读取风格源文件
+            style_file_path = default_style.get('file_path')
+            if not os.path.exists(style_file_path):
+                logger.error(f"风格源文件不存在: {style_file_path}")
+                return False
+            
+            with open(style_file_path, 'r', encoding='utf-8') as f:
+                style_text = f.read()
+            
+            # 构建临时知识库
+            temp_kb_config = {
+                "chunk_size": 1200,
+                "chunk_overlap": 300,
+                "cache_dir": imitation_config.get('manual_imitation', {}).get('temp_kb_cache_dir', 'data/cache/imitation_cache')
+            }
+            
+            # 创建临时知识库
+            temp_kb = self.knowledge_base.__class__(temp_kb_config, self.knowledge_base.embedding_model)
+            temp_kb.build(style_text, force_rebuild=False)
+            
+            # 检索风格范例
+            style_examples = temp_kb.search(content, k=3)
+            
+            # 生成仿写提示词
+            extra_prompt = default_style.get('extra_prompt', '')
+            prompt = prompts.get_imitation_prompt(content, style_examples, extra_prompt)
+            
+            # 调用 imitation_model 生成仿写内容
+            model = imitation_model if imitation_model is not None else self.content_model
+            imitated_content = model.generate(prompt)
+            
+            if not imitated_content or not imitated_content.strip():
+                logger.error(f"模型未能生成有效的仿写内容")
+                return False
+            
+            # 保存仿写结果
+            output_suffix = auto_config.get('output_suffix', '_imitated')
+            imitated_file = os.path.join(self.output_dir, f"第{chapter_num}章_{cleaned_title}{output_suffix}.txt")
+            
+            # 如果需要备份原文件
+            if auto_config.get('backup_original', True):
+                original_file = os.path.join(self.output_dir, f"第{chapter_num}章_{cleaned_title}.txt")
+                backup_file = os.path.join(self.output_dir, f"第{chapter_num}章_{cleaned_title}_original.txt")
+                if os.path.exists(original_file):
+                    import shutil
+                    shutil.copy2(original_file, backup_file)
+                    logger.info(f"已备份原文件到: {backup_file}")
+            
+            # 保存仿写结果
+            with open(imitated_file, 'w', encoding='utf-8') as f:
+                f.write(imitated_content)
+            
+            logger.info(f"仿写结果已保存到: {imitated_file}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"执行自动仿写时出错: {e}", exc_info=True)
+            return False
 
 if __name__ == "__main__":
     import argparse

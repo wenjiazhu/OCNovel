@@ -48,13 +48,28 @@ class AIConfig:
         self.gemini_config = {
             "api_key": os.getenv("GEMINI_API_KEY", ""),
             "retry_delay": float(os.getenv("GEMINI_RETRY_DELAY", "30")),  # 默认 30 秒
+            "max_retries": int(os.getenv("GEMINI_MAX_RETRIES", "5")),  # 默认 5 次
+            "max_input_length": int(os.getenv("GEMINI_MAX_INPUT_LENGTH", "500000")),  # 默认 500000 字符
+            "timeout": int(os.getenv("GEMINI_TIMEOUT", "60")),  # 默认 60 秒
+            # 备用模型配置
+            "fallback": {
+                "enabled": os.getenv("GEMINI_FALLBACK_ENABLED", "True") == "True",  # 默认启用备用模型
+                "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),  # 使用embedding的API key作为备用
+                "base_url": os.getenv("GEMINI_FALLBACK_BASE_URL", "https://api.siliconflow.cn/v1"),
+                "timeout": int(os.getenv("GEMINI_FALLBACK_TIMEOUT", "180")),  # 备用API使用更长的超时时间
+                "models": {
+                    "flash": "deepseek-ai/DeepSeek-R1",  # flash模型的备用
+                    "pro": "Qwen/Qwen3-235B-A22B",  # pro模型的备用
+                    "default": "deepseek-ai/DeepSeek-R1"  # 默认备用模型
+                }
+            },
             "models": {
                 "outline": {
-                    "name": "gemini-2.5-pro-preview-06-05",
+                    "name": "gemini-2.5-pro",
                     "temperature": 1.0
                 },
                 "content": {
-                    "name": "gemini-2.5-flash-preview-05-20",
+                    "name": "gemini-2.5-flash",
                     "temperature": 0.7
                 }
             }
@@ -80,13 +95,30 @@ class AIConfig:
         if model_type not in self.gemini_config["models"]:
             raise ValueError(f"不支持的 Gemini 模型类型: {model_type}")
             
-        return {
+        config = {
             "type": "gemini",
             "api_key": self.gemini_config["api_key"],
             "model_name": self.gemini_config["models"][model_type]["name"],
             "temperature": self.gemini_config["models"][model_type]["temperature"],
-            "retry_delay": self.gemini_config["retry_delay"]  # 新增重试间隔
+            "retry_delay": self.gemini_config["retry_delay"],
+            "max_retries": self.gemini_config["max_retries"],
+            "max_input_length": self.gemini_config["max_input_length"],
+            "timeout": self.gemini_config["timeout"]
         }
+        
+        # 添加备用模型配置
+        if self.gemini_config["fallback"]["enabled"]:
+            config.update({
+                "fallback_enabled": True,
+                "fallback_api_key": self.gemini_config["fallback"]["api_key"],
+                "fallback_base_url": self.gemini_config["fallback"]["base_url"],
+                "fallback_timeout": self.gemini_config["fallback"]["timeout"],
+                "fallback_models": self.gemini_config["fallback"]["models"]
+            })
+        else:
+            config["fallback_enabled"] = False
+            
+        return config
     
     def get_openai_config(self, model_type: str = "embedding") -> Dict[str, Any]:
         """获取 OpenAI 模型配置"""
@@ -124,15 +156,8 @@ class AIConfig:
         else:
             raise ValueError(f"不支持的模型类型: {model_type}")
 
-    def get_model_config(model_purpose: str) -> Dict[str, Any]:
+    def get_model_config_by_purpose(self, model_purpose: str) -> Dict[str, Any]:
         """根据用途获取模型配置"""
-        model_selection = config["generation_config"]["model_selection"][model_purpose]
-        provider = model_selection["provider"]
-        model_type = model_selection["model_type"]
-        
-        if provider == "openai":
-            return ai_config.get_model_config(f"openai_{model_type}")
-        elif provider == "gemini":
-            return ai_config.get_model_config(f"gemini_{model_type}")
-        else:
-            raise ValueError(f"不支持的模型提供商: {provider}")
+        # 这个方法需要外部传入config和ai_config实例
+        # 暂时保留但标记为需要重构
+        raise NotImplementedError("此方法需要重构，请使用get_gemini_config或get_openai_config方法")

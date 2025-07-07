@@ -31,23 +31,30 @@ class Config:
         # 从配置文件中读取 output_dir
         config_output_dir = self.config["output_config"].get("output_dir")
         
-        # 动态AI模型配置，根据config.json的model_selection字段
-        self.model_config = {}
-        model_selection = self.config["generation_config"].get("model_selection", {})
-        # outline_model
-        outline_sel = model_selection.get("outline", {"provider": "gemini", "model_type": "outline"})
-        if outline_sel["provider"] == "openai":
-            self.model_config["outline_model"] = self.ai_config.get_openai_config(outline_sel["model_type"])
+        # 优先使用config.json中的model_config，如果没有则使用AIConfig的默认配置
+        if "model_config" in self.config:
+            # 使用配置文件中的model_config
+            self.model_config = self.config["model_config"].copy()
+            logging.info("使用配置文件中的model_config")
         else:
-            self.model_config["outline_model"] = self.ai_config.get_gemini_config(outline_sel["model_type"])
-        # content_model
-        content_sel = model_selection.get("content", {"provider": "gemini", "model_type": "content"})
-        if content_sel["provider"] == "openai":
-            self.model_config["content_model"] = self.ai_config.get_openai_config(content_sel["model_type"])
-        else:
-            self.model_config["content_model"] = self.ai_config.get_gemini_config(content_sel["model_type"])
-        # embedding_model 只支持openai
-        self.model_config["embedding_model"] = self.ai_config.get_openai_config("embedding")
+            # 动态AI模型配置，根据config.json的model_selection字段
+            self.model_config = {}
+            model_selection = self.config["generation_config"].get("model_selection", {})
+            # outline_model
+            outline_sel = model_selection.get("outline", {"provider": "gemini", "model_type": "outline"})
+            if outline_sel["provider"] == "openai":
+                self.model_config["outline_model"] = self.ai_config.get_openai_config(outline_sel["model_type"])
+            else:
+                self.model_config["outline_model"] = self.ai_config.get_gemini_config(outline_sel["model_type"])
+            # content_model
+            content_sel = model_selection.get("content", {"provider": "gemini", "model_type": "content"})
+            if content_sel["provider"] == "openai":
+                self.model_config["content_model"] = self.ai_config.get_openai_config(content_sel["model_type"])
+            else:
+                self.model_config["content_model"] = self.ai_config.get_gemini_config(content_sel["model_type"])
+            # embedding_model 只支持openai
+            self.model_config["embedding_model"] = self.ai_config.get_openai_config("embedding")
+            logging.info("使用AIConfig的默认model_config")
         
         # 小说配置
         self.novel_config = self.config["novel_config"]
@@ -81,13 +88,19 @@ class Config:
         self.output_config.update({
             "output_dir": config_output_dir if config_output_dir else os.path.join(self.base_dir, "data", "output")
         })
+        
+        # 仿写配置
+        self.imitation_config = self.config.get("imitation_config", {})
+
+        # 启动时打印当前 model_config 便于调试
+        logging.info(f"[调试] 当前 model_config: {self.model_config}")
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
         """
         获取指定类型的模型配置
         
         Args:
-            model_type: 模型类型（outline_model/content_model/embedding_model）
+            model_type: 模型类型（outline_model/content_model/embedding_model/imitation_model）
             
         Returns:
             Dict[str, Any]: 模型配置
@@ -119,4 +132,32 @@ class Config:
         """获取配置项"""
         if name in self.config:
             return self.config[name]
-        raise AttributeError(f"Config has no attribute '{name}'") 
+        raise AttributeError(f"Config has no attribute '{name}'")
+
+    def get_imitation_model(self) -> Dict[str, Any]:
+        """
+        获取仿写专用模型配置，优先级：
+        1. model_config['imitation_model']
+        2. ai_config.gemini_config['fallback']（补全必要字段）
+        3. content_model
+        """
+        # 1. 优先使用 model_config['imitation_model']
+        if "imitation_model" in self.model_config:
+            logging.info(f"[仿写模型选择] 使用 model_config['imitation_model']: {self.model_config['imitation_model']}")
+            return self.model_config["imitation_model"]
+        # 2. 其次使用 ai_config.gemini_config['fallback']
+        fallback = getattr(self.ai_config, "gemini_config", {}).get("fallback")
+        if fallback and fallback.get("enabled", False):
+            fallback_model_name = fallback.get("models", {}).get("default", "deepseek-ai/DeepSeek-R1")
+            imitation_fallback_config = {
+                "type": "gemini",
+                "model_name": fallback_model_name,
+                "api_key": fallback.get("api_key", ""),
+                "base_url": fallback.get("base_url", "https://api.siliconflow.cn/v1"),
+                "timeout": fallback.get("timeout", 180),
+            }
+            logging.info(f"[仿写模型选择] 使用 gemini_config['fallback']: {imitation_fallback_config}")
+            return imitation_fallback_config
+        # 3. 最后 fallback 到 content_model
+        logging.info(f"[仿写模型选择] fallback 到 content_model: {self.model_config.get('content_model')}")
+        return self.model_config.get("content_model") 

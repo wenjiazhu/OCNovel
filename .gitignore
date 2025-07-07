@@ -32,6 +32,7 @@ merge_chapters.py
 convert_encoding.py
 提示词参考.md
 文风评价.md
+*.txt
 
 # 环境变量
 .env

@@ -5,6 +5,12 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 ## 功能特点
 
 - 🤖 支持多种 AI 模型（Gemini、OpenAI）
+  - Gemini模型：使用 `gemini-2.5-flash`（内容生成）和 `gemini-2.5-pro`（大纲生成）
+  - OpenAI模型：支持自定义API端点，兼容多种模型
+  - 🔄 智能备用模型系统：当主模型不可用时，自动切换到备用模型
+    - Gemini Flash → DeepSeek-R1
+    - Gemini Pro → Qwen3-235B-A22B
+    - OpenAI模型 → 相应的备用模型
 - 📚 智能知识库系统，支持参考小说导入和分析
 - 📝 自动生成小说大纲和章节内容
 - 💡 支持手动更新和优化小说大纲
@@ -17,6 +23,12 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
 - 📄 首次运行时可交互生成基础配置文件
 - 📊 完整的日志记录系统
 - 🎨 支持生成营销内容（标题、封面提示词等）
+- ✍️ 智能文本仿写功能，支持风格迁移和文风转换
+  - 🎭 手动仿写：支持自定义风格源文件进行文本风格迁移
+  - 🤖 自动仿写：在小说生成流程中自动触发，无需手动干预
+  - 🎨 多种风格：内置古风雅致、悬疑紧张、热血激昂等经典风格
+  - 🔍 智能检索：基于知识库的语义检索，精准匹配风格片段
+  - 📊 质量控制：内置内容保持度和风格一致性检查
 
 ## 系统要求
 
@@ -45,20 +57,100 @@ source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 ```
 
+> 主要依赖说明：
+> - openai：用于调用 OpenAI API（嵌入/内容/大纲模型）
+> - google-generativeai：用于调用 Gemini API（支持 gemini-2.5-flash、gemini-2.5-pro 等模型）
+> - chromadb、faiss-cpu：知识库向量化与检索
+> - jieba：中文分词
+> - FlagEmbedding：中文语义重排序
+> - python-dotenv：环境变量加载
+> - tenacity：自动重试机制
+> - numpy：向量与数值处理
+> - pytest：单元测试
+> - pydantic：类型校验
+> - opencc：繁简转换（章节整理工具用）
+
 4. 配置环境变量：
 创建 `.env` 文件并添加以下内容：
 ```
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
-# OpenAI API配置
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_API_BASE=你的OpenAI API基础URL（可选）
+# 嵌入模型配置（用于知识库向量化等，也作为备用模型的API密钥）
+OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
+OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
+
+# 大纲模型配置（用于生成小说大纲）
+OPENAI_OUTLINE_API_KEY=你的OpenAI大纲模型API密钥
+OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
+
+# 内容模型配置（用于生成章节内容）
+OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
+OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
+
+# 备用模型配置（可选）
+GEMINI_FALLBACK_ENABLED=True  # 是否启用Gemini备用模型，默认为True
+GEMINI_FALLBACK_BASE_URL=https://api.siliconflow.cn/v1  # 备用API基础URL
+GEMINI_FALLBACK_TIMEOUT=180  # 备用API超时时间（秒）
 ```
 
 5. 准备配置文件 (`config.json`)：
    - 你可以手动复制 `config.json.example` 并重命名为 `config.json`，然后根据需要修改。
    - **首次运行** `main.py` 时，如果 `config.json` 不存在，程序会提示你输入小说主题，并自动调用 `src/tools/generate_config.py` 生成一个基础的 `config.json` 文件。
+
+## 备用模型系统
+
+OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能够自动切换到备用模型，提高系统的稳定性和可用性。
+
+### 备用模型映射
+
+| 主模型 | 备用模型 | 说明 |
+|--------|----------|------|
+| Gemini Flash | DeepSeek-R1 | 当Gemini Flash不可用时自动切换 |
+| Gemini Pro | Qwen3-235B-A22B | 当Gemini Pro不可用时自动切换 |
+| OpenAI模型 | 相应备用模型 | 根据模型类型选择对应的备用模型 |
+
+### 工作原理
+
+1. **自动检测**：系统会监控主模型的调用状态
+2. **错误识别**：当检测到连接错误、超时或API错误时，触发备用模型
+3. **无缝切换**：自动切换到配置的备用模型，保持相同的生成参数
+4. **日志记录**：详细记录切换过程和结果
+
+### 配置选项
+
+- `GEMINI_FALLBACK_ENABLED`：是否启用备用模型功能（默认：True）
+- `GEMINI_FALLBACK_BASE_URL`：备用API的基础URL
+- `GEMINI_FALLBACK_TIMEOUT`：备用API的超时时间
+- `OPENAI_EMBEDDING_API_KEY`：用作备用模型的API密钥
+
+## 快速开始
+
+### 基本使用示例
+
+1. **生成完整小说（包含自动仿写）**：
+```bash
+python main.py auto
+```
+
+2. **文本仿写**：
+```bash
+python main.py imitate --style-source style.txt --input-file original.txt --output-file output.txt
+```
+
+3. **生成营销内容**：
+```bash
+python src/tools/generate_marketing.py --keywords "玄幻" "修仙" --characters "主角" "反派"
+```
+
+4. **全局仿写配置**：
+```bash
+# 开启全局仿写（默认已开启）
+# 在config.json中设置：trigger_all_chapters: true
+
+# 关闭全局仿写，仅对指定章节进行仿写
+# 在config.json中设置：trigger_all_chapters: false
+```
 
 ## 使用方法
 
@@ -119,6 +211,71 @@ python main.py finalize --chapter <章节号>
 - **参数**：
   - `--chapter`：必需，需要定稿的章节号（从 1 开始）。
 
+#### (5) 文本仿写功能 (`imitate`)
+```bash
+python main.py imitate \
+    --style-source <风格源文件> \
+    --input-file <原始文本文件> \
+    --output-file <输出文件> \
+    [--extra-prompt "额外要求"]
+```
+- **功能**：根据指定的风格范文对原始文本进行仿写，实现风格的智能迁移。系统会构建临时知识库分析风格特征，然后使用AI模型生成符合目标风格的文本。
+- **参数**：
+  - `--style-source`：必需，作为风格参考的源文件路径（如：`style.txt`）
+  - `--input-file`：必需，需要进行仿写的原始文本文件路径（如：`original.txt`）
+  - `--output-file`：必需，仿写结果的输出文件路径（如：`output.txt`）
+  - `--extra-prompt`：可选，额外的仿写要求或指导（如："保持古风韵味"、"增加悬疑氛围"等）
+- **工作原理**：
+  1. 读取风格源文件，构建临时知识库
+  2. 使用嵌入模型分析原始文本与风格文本的相似性
+  3. 检索最相关的风格片段作为范例
+  4. 生成仿写提示词，调用AI模型进行风格迁移
+  5. 输出仿写结果到指定文件
+- **使用示例**：
+  ```bash
+  # 将简单描述仿写为古风雅致的文风
+  python main.py imitate --style-source style.txt --input-file original.txt --output-file imitation_output.txt --extra-prompt "保持古风韵味"
+  
+  # 将现代文仿写为悬疑风格
+  python main.py imitate --style-source mystery_style.txt --input-file modern_text.txt --output-file mystery_output.txt --extra-prompt "增加悬疑氛围和紧张感"
+  ```
+
+#### (6) 自动仿写功能
+- **功能**：在auto流程的定稿阶段自动触发仿写功能，无需手动干预。系统会根据配置对每个章节自动进行风格仿写。
+- **触发条件**：在`config.json`的`imitation_config.auto_imitation.trigger_all_chapters`中配置（默认：true，对所有章节进行仿写）
+- **工作流程**：
+  1. 章节内容生成完成后进入定稿阶段
+  2. 检查是否开启全局仿写功能
+  3. 如果开启，自动读取默认风格源文件
+  4. 构建临时知识库并检索风格范例
+  5. 生成仿写内容并保存（文件名后缀：`_imitated`）
+  6. 备份原文件（文件名后缀：`_original`）
+- **配置说明**：
+  ```json
+  "imitation_config": {
+    "enabled": true,
+    "auto_imitation": {
+      "enabled": true,
+      "trigger_all_chapters": true,
+      "style_sources": [
+        {
+          "name": "古风雅致",
+          "file_path": "data/reference/古风风格参考.txt",
+          "description": "古风雅致的文风，适合玄幻仙侠类小说",
+          "extra_prompt": "保持古风韵味，增加诗词意境"
+        }
+      ],
+      "default_style": "古风雅致",
+      "output_suffix": "_imitated",
+      "backup_original": true
+    }
+  }
+  ```
+- **全局仿写配置说明**：
+  - `trigger_all_chapters: true`：开启全局仿写，每个章节都会自动进行仿写
+  - `trigger_all_chapters: false`：关闭全局仿写，仅对指定章节进行仿写
+  - 当关闭全局仿写时，可以使用`trigger_chapters`数组指定需要仿写的章节号
+
 ### 2. 生成营销内容
 
 ```bash
@@ -132,6 +289,16 @@ python src/tools/generate_marketing.py --keywords "关键词1" "关键词2" --ch
 python src/tools/process_novel.py <输入目录> <输出目录> -e <结束章节号> [-s <起始章节号>] [--split-sentences]
 ```
 *(此工具的功能和用法请参考其内部实现或相关文档)*
+
+### 4. 备用模型功能示例
+
+```bash
+python examples/fallback_usage_example.py
+```
+这个示例展示了如何使用备用模型功能，包括：
+- Gemini模型的备用模型切换
+- OpenAI模型的备用模型切换
+- 错误处理和日志记录
 
 ## 项目结构
 
@@ -158,8 +325,9 @@ OCNovel/
 │   │   │   └── content_generator.py
 │   │   ├── finalizer/    # 章节定稿处理
 │   │   │   └── finalizer.py
-│   │   └── outline/      # 大纲生成
-│   │       └── outline_generator.py
+│   │   ├── outline/      # 大纲生成
+│   │   │   └── outline_generator.py
+│   │   └── prompts.py    # 提示词生成（包含仿写功能提示词）
 │   ├── knowledge_base/  # 知识库管理
 │   │   └── knowledge_base.py
 │   ├── models/          # AI模型接口
@@ -171,13 +339,35 @@ OCNovel/
 │       ├── generate_marketing.py # 营销内容生成
 │       └── process_novel.py      # 章节内容整理
 ├── tests/               # 测试文件
+├── examples/            # 使用示例
+│   └── fallback_usage_example.py  # 备用模型使用示例
 ├── .env                 # 环境变量 (API Keys等)
 ├── config.json          # 主配置文件
 ├── config.json.example   # 配置文件示例
 ├── main.py              # 主程序入口
 ├── requirements.txt     # Python依赖列表
 └── README.md           # 项目说明
-```
+
+## 故障排除
+
+### Gemini API 调用失败
+
+如果遇到 "404 models/gemini-2.5-flash-preview is not found" 错误：
+
+1. **问题原因**：模型名称已更新，旧版本模型名称不再可用
+2. **解决方案**：项目已自动使用正确的模型名称：
+   - 内容生成：`gemini-2.5-flash`
+   - 大纲生成：`gemini-2.5-pro`
+
+### 其他常见问题
+
+1. **API密钥错误**：确保在 `.env` 文件中正确设置了所有必需的API密钥
+2. **网络连接问题**：如果使用代理，确保代理设置正确
+3. **模型超时**：可以调整配置文件中的 `timeout` 参数
+4. **仿写功能问题**：
+   - **风格文件为空**：确保风格源文件包含足够的文本内容
+   - **仿写效果不理想**：尝试提供更具体的 `--extra-prompt` 参数
+   - **知识库构建失败**：检查风格文件的编码格式，确保为UTF-8
 
 ## 配置说明 (`config.json`)
 
@@ -193,10 +383,25 @@ OCNovel/
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
-# OpenAI API配置
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_API_BASE=你的OpenAI API基础URL（可选）
+# 嵌入模型配置（用于知识库向量化等）
+OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
+OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
+
+# 大纲模型配置（用于生成小说大纲）
+OPENAI_OUTLINE_API_KEY=你的OpenAI大纲模型API密钥
+OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
+
+# 内容模型配置（用于生成章节内容）
+OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
+OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
 ```
+
+- `GEMINI_API_KEY`：用于 Gemini LLM 的 API 密钥。
+- `OPENAI_EMBEDDING_API_KEY`/`OPENAI_EMBEDDING_API_BASE`：用于知识库嵌入模型（如文本向量化）。
+- `OPENAI_OUTLINE_API_KEY`/`OPENAI_OUTLINE_API_BASE`：用于生成小说大纲的 LLM。
+- `OPENAI_CONTENT_API_KEY`/`OPENAI_CONTENT_API_BASE`：用于生成章节内容的 LLM。
+
+如不需要某项功能，可留空对应配置。
 
 ### 2. 项目配置（config.json）
 
@@ -246,6 +451,43 @@ OPENAI_API_BASE=你的OpenAI API基础URL（可选）
 }
 ```
 
+#### 2.6 仿写配置 (`imitation_config`)
+
+控制文本仿写功能的配置项。
+
+```json
+{
+  "enabled": true,                    // 是否启用仿写功能
+  "auto_imitation": {                 // 自动仿写配置
+    "enabled": true,                  // 是否启用自动仿写
+    "trigger_all_chapters": true,     // 是否对所有章节进行仿写（true=全部章节，false=仅指定章节）
+    "trigger_chapters": [5, 10, 15, 20, 25, 30, 35, 40, 45, 50],  // 当trigger_all_chapters=false时，触发自动仿写的章节号
+    "style_sources": [                // 风格源文件配置
+      {
+        "name": "古风雅致",           // 风格名称
+        "file_path": "data/reference/古风风格参考.txt",  // 风格源文件路径
+        "description": "古风雅致的文风，适合玄幻仙侠类小说",  // 风格描述
+        "extra_prompt": "保持古风韵味，增加诗词意境"  // 额外仿写要求
+      }
+    ],
+    "default_style": "古风雅致",      // 默认使用的风格
+    "output_suffix": "_imitated",     // 仿写结果文件后缀
+    "backup_original": true           // 是否备份原文件
+  },
+  "manual_imitation": {               // 手动仿写配置
+    "enabled": true,                  // 是否启用手动仿写
+    "default_output_dir": "data/imitation_output",  // 默认输出目录
+    "temp_kb_cache_dir": "data/cache/imitation_cache"  // 临时知识库缓存目录
+  },
+  "quality_control": {                // 质量控制配置
+    "min_style_similarity": 0.7,      // 最小风格相似度阈值
+    "max_retries": 3,                 // 最大重试次数
+    "content_preservation_check": true,  // 是否检查内容保持度
+    "style_consistency_check": true   // 是否检查风格一致性
+  }
+}
+```
+
 ## 故障排除
 
 ### FAISS索引维度不匹配错误
@@ -278,3 +520,69 @@ AssertionError: assert d == self.d
 **预防措施：**
 - 避免频繁更改嵌入模型配置
 - 如需更改模型配置，建议先清理缓存再运行程序
+
+## 仿写功能测试与验证
+
+### 功能测试
+
+项目提供了完整的仿写功能测试脚本，用于验证功能的正常运行：
+
+```bash
+# 运行仿写逻辑验证测试
+python test_imitation_logic.py
+
+# 运行仿写功能演示测试
+python test_imitation_demo.py
+```
+
+### 测试内容
+
+1. **仿写逻辑验证测试** (`test_imitation_logic.py`)：
+   - 检查风格源文件是否存在且内容有效
+   - 验证仿写配置是否正确设置
+   - 测试自动仿写触发逻辑
+   - 验证知识库检索功能
+
+2. **仿写功能演示测试** (`test_imitation_demo.py`)：
+   - 测试手动仿写命令执行
+   - 验证仿写结果生成
+   - 展示仿写效果对比
+
+### 测试结果示例
+
+```
+🎭 仿写功能演示测试
+==================================================
+
+=== 测试自动仿写触发逻辑 ===
+测试章节触发情况:
+  章节  1: ✓ 触发
+  章节  5: ✓ 触发
+  章节 10: ✓ 触发
+  章节 15: ✓ 触发
+  章节 20: ✓ 触发
+  章节 25: ✓ 触发
+  章节 30: ✓ 触发
+
+仿写配置信息:
+  全局仿写: ✓ 启用
+  默认风格: 古风雅致
+  风格源数量: 3
+
+=== 测试手动仿写功能 ===
+✓ 创建测试原始文本文件: test_original.txt
+✓ 仿写命令执行成功
+✓ 仿写结果已保存到: test_imitation_output.txt
+仿写内容长度: 531 字符
+
+--- 仿写结果预览 ---
+这是一个寻常的午后，赤乌衔耀，金芒凿破疏窗，洒落在案牍之上...
+--- 预览结束 ---
+
+🎉 所有测试通过！仿写功能运行正常。
+```
+
+### 详细使用指南
+
+更多关于仿写功能的详细说明，请参考：
+- [仿写功能使用指南](仿写功能使用指南.md) - 完整的功能说明和使用教程

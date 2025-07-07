@@ -74,7 +74,7 @@ def get_outline_prompt(
 - [中期BOSS]：[性格/能力特点] - [与主角的核心冲突点]
 - [宿敌/一生之敌]：[性格/能力特点] - [与主角的核心冲突点]
 - [幕后黑手]：[性格/能力特点] - [与主角的核心冲突点]
-{chr(10).join([f"- {role.get('role_type', '[其他对手类型]')}：{role.get('personality', '[性格/能力特点]')} - {role.get('conflict_point', '[与主角的核心冲突点]')}" for role in character_guide.get('antagonists', [])])}
+{chr(10).join([f"- {role.get('role_type', '[其他对手类型]')}：{role.get('personality', '[性格特点]')} - {role.get('conflict_point', '[与主角的核心冲突点]')}" for role in character_guide.get('antagonists', [])])}
 
 
 [剧情结构（三幕式）]
@@ -151,10 +151,10 @@ def get_outline_prompt(
 """
 
     if extra_prompt:
-        base_prompt += f"\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
     if reference_info:
-        base_prompt += f"\n[知识库参考信息]\n{reference_info}\n"
+        base_prompt += f"{chr(10)}[知识库参考信息]{chr(10)}{reference_info}{chr(10)}"
 
     return base_prompt
 
@@ -163,7 +163,9 @@ def get_chapter_prompt(
     outline: Dict, 
     references: Dict,
     extra_prompt: str = "",
-    context_info: str = ""
+    context_info: str = "",
+    story_config: Optional[Dict] = None,
+    sync_info: Optional[Dict] = None
 ) -> str:
     """生成用于创建章节内容的提示词"""
     
@@ -180,7 +182,71 @@ def get_chapter_prompt(
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
     
-    base_prompt = f"""你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节，且生成的故事要遵循一系列叙事和输出规则，你的任务是基于以下信息生成章节内容：
+    base_prompt = f"""你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节，且生成的故事要遵循一系列叙事和输出规则，你的任务是基于以下信息生成章节内容："""
+
+    # 添加故事设定信息（如果提供）
+    if story_config:
+        writing_guide = story_config.get("writing_guide", {})
+        world_building = writing_guide.get("world_building", {})
+        character_guide = writing_guide.get("character_guide", {})
+        style_guide = writing_guide.get("style_guide", {})
+        
+        base_prompt += f"""
+
+[故事设定]
+世界观：
+1. 修炼/魔法体系：
+{world_building.get('magic_system', '[在此处插入详细的修炼体系、等级划分、核心规则、能量来源、特殊体质设定等]')}
+
+2. 社会结构与地理：
+{world_building.get('social_system', '[在此处插入世界的社会结构、主要国家/地域划分、关键势力（如门派、家族、组织）及其相互关系等]')}
+
+3. 时代背景与核心矛盾：
+{world_building.get('background', '[在此处插入故事发生的时代背景、核心的宏观冲突（如正邪大战、文明危机、神魔博弈）、以及关键的历史事件或传说]')}
+
+人物设定：
+1. 主角背景：
+{character_guide.get('protagonist', {}).get('background', '[在此处插入主角的背景故事、家族渊源、成长经历等]')}
+
+2. 主角性格：
+{character_guide.get('protagonist', {}).get('initial_personality', '[在此处插入主角的性格特点、行为习惯、口头禅等]')}
+
+3. 主角成长路径：
+{character_guide.get('protagonist', {}).get('growth_path', '[在此处插入主角的成长路径、修炼方向、特殊能力等]')}
+
+写作风格：
+1. 基调：{style_guide.get('tone', '[故事的整体基调，如：热血、黑暗、幽默、悬疑、史诗等]')}
+2. 节奏：{style_guide.get('pacing', '[故事的节奏，如：快节奏、单元剧、慢热、张弛有度等]')}
+3. 描写重点：
+- {style_guide.get('description_focus', ['[描写的第一个侧重点，如：战斗场面、世界观奇观、人物内心等]'])[0]}
+- {style_guide.get('description_focus', ['[描写的第二个侧重点，如：势力间的权谋博弈、神秘氛围的营造等]'])[1]}
+- {style_guide.get('description_focus', ['[描写的第三个侧重点，如：主角的成长与反思、配角群像的刻画等]'])[2]}"""
+
+    # 添加同步信息（如果提供）
+    if sync_info:
+        world_info = sync_info.get("世界观", {})
+        character_info = sync_info.get("人物设定", {})
+        plot_info = sync_info.get("剧情发展", {})
+        
+        base_prompt += f"""
+
+[故事进展信息]
+世界观现状：
+- 世界背景：{', '.join(world_info.get('世界背景', []))}
+- 阵营势力：{', '.join(world_info.get('阵营势力', []))}
+- 重要规则：{', '.join(world_info.get('重要规则', []))}
+- 关键场所：{', '.join(world_info.get('关键场所', []))}
+
+人物现状：
+{chr(10).join([f"- {char.get('名称', '未知')}：{char.get('身份', '')} - {char.get('当前状态', '')}" for char in character_info.get('人物信息', [])])}
+
+剧情发展：
+- 主线梗概：{plot_info.get('主线梗概', '未设定')}
+- 重要事件：{', '.join(plot_info.get('重要事件', [])[-5:])}  # 最近5个重要事件
+- 进行中冲突：{', '.join(plot_info.get('进行中冲突', []))}
+- 悬念伏笔：{', '.join(plot_info.get('悬念伏笔', [])[-3:])}  # 最近3个伏笔"""
+
+    base_prompt += f"""
 
 [章节信息]
 章节号: {novel_number}
@@ -196,14 +262,14 @@ def get_chapter_prompt(
 [写作要求]
 1. **叙事视角与深度**：遵循设定的叙事视角（如第一人称、第三人称有限/全知），深入挖掘角色的内心世界，展现其动机、情感和心理变化。通过角色的感知来过滤和呈现世界，使读者产生强烈的代入感。
 2. **场景与氛围营造**：通过多感官描写（视觉、听觉、嗅觉、触觉等）构建生动、立体的场景。根据情节需要，精准地营造氛围，无论是战斗的紧张、探索的神秘，还是角色互动的温情，都要有鲜明的感染力。
-3. **情节推进与节奏**：确保本章情节紧扣大纲的“关键情节点”，做到起承转合。通过段落长短、信息密度和事件安排来控制叙事节奏，做到张弛有度，高潮部分要蓄势待发，爆发有力。
+3. **情节推进与节奏**：确保本章情节紧扣大纲的"关键情节点"，做到起承转合。通过段落长短、信息密度和事件安排来控制叙事节奏，做到张弛有度，高潮部分要蓄势待发，爆发有力。
 4. **人物塑造与对话**：通过角色的行为、对话和内心独白来展现其性格的复杂性和成长性。对话应符合人物身份和性格，避免脸谱化，并能推动情节发展或揭示隐藏信息，潜台词的运用尤为重要。
 5. **语言与风格**：保持与小说整体风格（如热血、幽默、悬疑等）的一致性。文笔流畅，用词精准，富有表现力。战斗描写要充满力量感和想象力，景物描写要能烘托气氛，情感描写要细腻动人。
 6. **承上启下**：在章节内容中，巧妙地回应前文的伏笔或设定，让故事的连续性更强。在章节末尾，制造新的悬念或留下线索，激发读者的追读欲望。
 
 [输出要求]
-1. 仅返回章节正文文本，以“第{novel_number}章 {chapter_title}”开头，然后换行开始正文。
-2. 严格使用简体中文及中文标点符号，特别是中文双引号“”。
+1. 仅返回章节正文文本，以"第{novel_number}章 {chapter_title}"开头，然后换行开始正文。
+2. 严格使用简体中文及中文标点符号，特别是中文双引号""。
 3. 确保段落划分合理，长短句结合，以保持阅读的流畅性和节奏感。
 4. 避免使用与故事背景不符的现代词汇或网络梗，保持世界观的沉浸感。
 
@@ -215,7 +281,7 @@ def get_chapter_prompt(
 
     # 添加额外要求
     if extra_prompt:
-        base_prompt += f"\n[额外要求]\n{extra_prompt}"
+        base_prompt += f"{chr(10)}[额外要求]{chr(10)}{extra_prompt}"
 
     # 添加上下文信息（限制长度）
     if context_info:
@@ -223,7 +289,7 @@ def get_chapter_prompt(
         max_context_length = 2000
         if len(context_info) > max_context_length:
             context_info = context_info[-max_context_length:] + "...(前文已省略)"
-        base_prompt += f"\n[上下文信息]\n{context_info}"
+        base_prompt += f"{chr(10)}[上下文信息]{chr(10)}{context_info}"
 
     return base_prompt
 
@@ -485,7 +551,8 @@ def get_consistency_check_prompt(
 2. <具体建议>
 ...
 
-[修改必要性]: <"需要修改"或"无需修改">"""
+[修改必要性]: <"需要修改"或"无需修改">
+"""
 
 # =============== 10. 章节修正提示词 ===================
 def get_chapter_revision_prompt(
@@ -584,7 +651,7 @@ def get_knowledge_filter_prompt(
 {json.dumps(chapter_info, ensure_ascii=False, indent=2)}
 
 [待过滤内容]
-{chr(10).join([f"--- 片段 {i+1} ---{chr(10)}{text[:200]}..." for i, text in enumerate(retrieved_texts)])}
+{chr(10).join(["--- 片段 " + str(i+1) + " ---" + chr(10) + text[:200] + "..." for i, text in enumerate(retrieved_texts)])}
 
 ===== 过滤规则 =====
 1. **冲突检测**：
@@ -611,7 +678,7 @@ def get_knowledge_filter_prompt(
 
 示例：
 [情节燃料]→可用于第{chapter_info.get('chapter_number', 'N')}章高潮
-❗ "主角发现密室中的古老地图，暗示下个副本位置"（▲与第三章地图描述冲突）
+❗ "主角发现密室中的古老地图，暗示下个副本位置"
 · "村民谈论最近的异常天气"（可作背景铺垫）
 """
 
@@ -628,7 +695,7 @@ def get_logic_check_prompt(
 关键点：{', '.join(chapter_outline.get('key_points', []))}
 角色：{', '.join(chapter_outline.get('characters', []))}
 场景：{', '.join(chapter_outline.get('settings', []))}
-冲突：{', '.join(chapter_outline.get('conflicts', []))}"""
+冲突：{', '.join(chapter_outline.get('conflicts', []))} """
 
     # 添加同步信息部分（如果提供）
     if sync_info:
@@ -665,7 +732,8 @@ def get_logic_check_prompt(
 [修改建议]:
 <针对每个逻辑问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">"""
+[修改必要性]: <"需要修改"或"无需修改">
+"""
     return prompt
 
 def get_style_check_prompt(
@@ -713,7 +781,8 @@ def get_style_check_prompt(
 [修改建议]:
 <针对每个风格问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">"""
+[修改必要性]: <"需要修改"或"无需修改">
+"""
 
 def get_emotion_check_prompt(
     chapter_content: str,
@@ -754,4 +823,63 @@ def get_emotion_check_prompt(
 [修改建议]:
 <针对每个情感问题的具体修改建议>
 
-[修改必要性]: <"需要修改"或"无需修改">""" 
+[修改必要性]: <"需要修改"或"无需修改">
+""" 
+
+def get_imitation_prompt(
+    original_text: str,
+    style_examples: List[str],
+    extra_prompt: Optional[str] = None
+) -> str:
+    """
+    生成用于仿写任务的提示词
+    
+    Args:
+        original_text: 需要被重写的原始文本.
+        style_examples: 从风格范文中提取的、用于模仿的文本片段.
+        extra_prompt: 用户额外的指令.
+    """
+    
+    # 将风格范例格式化
+    separator = chr(10) + chr(10) + "---" + chr(10) + chr(10)
+    formatted_examples = separator.join(style_examples)
+    
+    prompt_template = (
+        "你是一位顶级的文体学家和模仿大师。你的任务是严格按照提供的「风格范例」，重写「原始文本」." + chr(10) +
+        chr(10) +
+        "核心要求：" + chr(10) +
+        "1.  **保留核心意义**：必须完整、准确地保留「原始文本」的所有关键信息、情节和逻辑。不能增加或删减核心意思。" + chr(10) +
+        "2.  **迁移文笔风格**：必须彻底地模仿「风格范例」的笔触。这包括：" + chr(10) +
+        "    -   **词汇选择**：使用与范例相似的词汇偏好（例如，是用“华丽辞藻”还是“朴实白描”）。" + chr(10) +
+        "    -   **句式结构**：模仿范例的长短句搭配、倒装、排比等句式特点。" + chr(10) +
+        "    -   **叙事节奏**：模仿范例是“快节奏推进”还是“慢节奏铺陈”。" + chr(10) +
+        "    -   **情感基调**：模仿范例的整体情绪色彩（如冷静、激昂、悲伤等）。" + chr(10) +
+        "    -   **标点符号用法**：注意范例中特殊标点（如破折号、省略号）的使用习惯。" + chr(10) +
+        chr(10) +
+        "---" + chr(10) +
+        chr(10) +
+        "[风格范例]" + chr(10) +
+        "{formatted_examples}" + chr(10) +
+        chr(10) +
+        "---" + chr(10) +
+        chr(10) +
+        "[原始文本]" + chr(10) +
+        "{original_text}" + chr(10) +
+        chr(10) +
+        "---" + chr(10) +
+        chr(10) +
+        "[额外要求]" + chr(10) +
+        "{extra_prompt_val}" + chr(10) +
+        chr(10) +
+        "------" + chr(10) +
+        chr(10) +
+        "现在，请开始仿写。直接输出仿写后的正文，不要包含任何解释或标题." + chr(10)
+    )
+    
+    # Use .format() for substitution
+    prompt = prompt_template.format(
+        formatted_examples=formatted_examples,
+        original_text=original_text,
+        extra_prompt_val=extra_prompt if extra_prompt else "无"
+    )
+    return prompt

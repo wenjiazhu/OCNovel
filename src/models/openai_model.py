@@ -24,11 +24,11 @@ class OpenAIModel(BaseModel):
         self.fallback_api_key = os.getenv("OPENAI_EMBEDDING_API_KEY", "")  # 使用embedding的API key作为备用
         # 根据当前模型类型选择备用模型
         if "deepgeminiflash" in self.model_name:
-            self.fallback_model_name = "deepseek-ai/DeepSeek-V3"  # 使用DeepSeek-V3作为deepgeminiflash的备用
+            self.fallback_model_name = "deepseek-ai/DeepSeek-R1"  # 使用DeepSeek-R1作为deepgeminiflash的备用
         elif "deepgeminipro" in self.model_name:
             self.fallback_model_name = "Qwen/Qwen3-235B-A22B"  # 使用Qwen作为deepgeminipro的备用
         else:
-            self.fallback_model_name = "deepseek-ai/DeepSeek-V3"  # 默认备用模型
+            self.fallback_model_name = "deepseek-ai/DeepSeek-R1"  # 默认备用模型
         
         self.client = OpenAI(
             api_key=config["api_key"],
@@ -68,6 +68,9 @@ class OpenAIModel(BaseModel):
             )
             
             content = response.choices[0].message.content
+            if content is None:
+                raise Exception("模型返回空内容")
+                
             logging.info(f"文本生成成功，返回内容长度: {len(content)}")
             return content
             
@@ -87,6 +90,9 @@ class OpenAIModel(BaseModel):
                             temperature=0.7
                         )
                         content = response.choices[0].message.content
+                        if content is None:
+                            raise Exception("备用模型返回空内容")
+                            
                         logging.info(f"使用备用API生成成功，返回内容长度: {len(content)}")
                         return content
                     except Exception as fallback_error:
@@ -125,11 +131,12 @@ class OpenAIModel(BaseModel):
                 else:
                     logging.error("Response data is empty or invalid")
                     logging.error(f"Response: {response}")
-                    return None
+                    raise Exception("Embedding response is empty or invalid")
                     
             except Exception as api_error:
                 logging.error(f"API call failed: {str(api_error)}")
-                if hasattr(api_error, 'response'):
+                # 检查是否有response属性（OpenAI API错误通常有）
+                if hasattr(api_error, 'response') and api_error.response is not None:
                     logging.error(f"Response status: {api_error.response.status_code}")
                     logging.error(f"Response body: {api_error.response.text}")
                 raise
