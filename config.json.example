@@ -176,7 +176,7 @@
         ],
         "default_style": "古风雅致",
         "output_suffix": "_imitated",
-        "backup_original": true
+        "backup_original": false
       },
       "manual_imitation": {
         "enabled": true,
