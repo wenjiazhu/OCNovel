@@ -1,7 +1,7 @@
 import os
 import logging
 import time
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 import math
 from .consistency_checker import ConsistencyChecker
 from .validators import LogicValidator, DuplicateValidator
@@ -17,6 +17,7 @@ from ..prompts import (
     get_knowledge_search_prompt
 )
 import numpy as np
+import functools
 
 # Get a logger specific to this module
 logger = logging.getLogger(__name__)
@@ -55,6 +56,9 @@ class ContentGenerator:
         
         # 初始化知识库
         self._init_knowledge_base()
+
+        self.imitation_config = getattr(config, 'imitation_config', {})
+        self.default_style = '古风雅致'  # 默认风格
 
     def _load_outline(self):
         """加载大纲文件"""
@@ -106,66 +110,116 @@ class ContentGenerator:
         # 因为进度信息已经包含在 summary.json 中的最大章节号中
         logger.info(f"进度已更新，下一个待处理章节索引: {self.current_chapter}")
 
-    def generate_content(self, target_chapter: Optional[int] = None, external_prompt: Optional[str] = None) -> bool:
-        """生成章节内容，根据参数选择生成模式"""
-        # 在生成内容前加载最新的大纲
-        self._load_outline()
+    def get_style_prompt(self, style_name: Optional[str] = None) -> str:
+        """
+        根据风格名获取extra_prompt，若未指定则用默认风格。
+        """
+        imitation = self.imitation_config.get('auto_imitation', {})
+        style_sources = imitation.get('style_sources', [])
+        # 优先用参数，否则用imitation_config.default_style，否则用self.default_style
+        style = style_name or imitation.get('default_style') or self.default_style
+        for s in style_sources:
+            if s.get('name') == style:
+                return s.get('extra_prompt', '')
+        # 未找到则返回空
+        return ''
 
+    def get_style_reference(self, style_name: Optional[str] = None, max_length: int = 3000) -> (str, str):
+        """
+        获取风格extra_prompt和file_path指定的风格示例文本内容。
+        Args:
+            style_name: 风格名
+            max_length: 示例文本最大长度（字符）
+        Returns:
+            (extra_prompt, style_example_text)
+        """
+        imitation = self.imitation_config.get('auto_imitation', {})
+        style_sources = imitation.get('style_sources', [])
+        style = style_name or imitation.get('default_style') or self.default_style
+        for s in style_sources:
+            if s.get('name') == style:
+                extra_prompt = s.get('extra_prompt', '')
+                file_path = s.get('file_path')
+                style_example = ''
+                if file_path:
+                    abs_path = file_path if os.path.isabs(file_path) else os.path.join(self.config.base_dir, file_path)
+                    try:
+                        with open(abs_path, 'r', encoding='utf-8') as f:
+                            style_example = f.read()
+                            if max_length > 0 and len(style_example) > max_length:
+                                style_example = style_example[:max_length] + '\n...（示例已截断）'
+                    except Exception as e:
+                        logger.warning(f"读取风格示例文本失败: {abs_path} - {e}")
+                        style_example = ''
+                return extra_prompt, style_example
+        return '', ''
+
+    def generate_content(self, target_chapter: Optional[int] = None, external_prompt: Optional[str] = None, style_name: Optional[str] = None) -> bool:
+        """
+        生成章节内容，支持传入风格名
+        """
+        self._load_outline()
         if not self.chapter_outlines:
             logger.error("无法生成内容：大纲未加载或为空。请先生成大纲。")
             return False
-
         try:
             if target_chapter is not None:
                 if 1 <= target_chapter <= len(self.chapter_outlines):
-                    return self._process_single_chapter(target_chapter, external_prompt)
+                    return self._process_single_chapter(target_chapter, external_prompt, style_name=style_name)
                 else:
                     logger.error(f"目标章节 {target_chapter} 超出大纲范围 (1-{len(self.chapter_outlines)})。")
                     return False
             else:
-                return self._generate_remaining_chapters()
+                return self._generate_remaining_chapters(style_name=style_name)
         except Exception as e:
             logger.error(f"生成章节内容时发生未预期错误: {str(e)}", exc_info=True)
             return False
 
-    def _process_single_chapter(self, chapter_num: int, external_prompt: Optional[str] = None, max_retries: int = 3) -> bool:
-        """处理单个章节的生成、验证、保存和定稿"""
+    def _process_single_chapter(self, chapter_num: int, external_prompt: Optional[str] = None, max_retries: int = 3, style_name: Optional[str] = None) -> bool:
+        """
+        处理单个章节的生成、验证、保存和定稿，支持风格名
+        """
         if not (1 <= chapter_num <= len(self.chapter_outlines)):
             logger.error(f"无效的章节号: {chapter_num}")
             return False
-
         chapter_outline = self.chapter_outlines[chapter_num - 1]
         logger.info(f"[Chapter {chapter_num}] 开始处理章节: {chapter_outline.title}")
         success = False
-
         for attempt in range(max_retries):
             logger.info(f"[Chapter {chapter_num}] 尝试 {attempt + 1}/{max_retries}")
             try:
-                # 1. 生成原始内容
-                raw_content = self._generate_chapter_content(chapter_outline, external_prompt)
+                # 1. 生成原始内容，拼接风格示例和风格要求
+                extra_prompt, style_example = self.get_style_reference(style_name)
+                style_block = ''
+                if style_example:
+                    style_block += f"【风格示例】\n{style_example}\n"
+                if extra_prompt:
+                    style_block += f"【风格要求】{extra_prompt}\n"
+                merged_prompt = style_block + (external_prompt or '')
+                raw_content = self._generate_chapter_content(chapter_outline, merged_prompt)
                 if not raw_content:
                     raise Exception("原始内容生成失败，返回为空。")
 
                 # 2. 加载同步信息
                 sync_info = self._load_sync_info()
                 
-                # 3. 逻辑验证（加入同步信息）
+                # 3. 逻辑验证
                 logic_report, needs_logic_revision = self.logic_validator.check_logic(
                     raw_content, 
                     chapter_outline.__dict__,
-                    sync_info  # 新增参数
+                    sync_info
                 )
                 logger.info(
                     f"[Chapter {chapter_num}] 逻辑验证报告 (摘要): {logic_report[:200]}..."
                     f"\n需要修改: {'是' if needs_logic_revision else '否'}"
                 )
 
-                # 4. 一致性验证（加入同步信息）
+                # 4. 一致性验证
                 logger.info(f"[Chapter {chapter_num}] 开始一致性检查...")
                 final_content = self.consistency_checker.ensure_chapter_consistency(
                     chapter_content=raw_content,
                     chapter_outline=chapter_outline.__dict__,
-                    sync_info=sync_info,  # 新增参数
+                    sync_info=sync_info,
                     chapter_idx=chapter_num - 1
                 )
                 logger.info(f"[Chapter {chapter_num}] 一致性检查完成")
@@ -194,23 +248,17 @@ class ContentGenerator:
                         )
                         if finalize_success:
                             logger.info(f"[Chapter {chapter_num}] 定稿成功")
-                            # 更新当前章节进度
-                            self.current_chapter = chapter_num  # 确保在定稿成功后更新进度
+                            self.current_chapter = chapter_num
                         else:
                             logger.error(f"[Chapter {chapter_num}] 定稿失败")
                     else:
                         logger.warning(f"[Chapter {chapter_num}] Finalizer 未提供，跳过定稿步骤。")
-                        # 即使没有 Finalizer，也要更新进度
                         self.current_chapter = chapter_num
-
-                    # 8. 检查并更新缓存/同步信息
                     self._check_and_update_cache(chapter_num)
-
                     success = True
                     break
                 else:
                     raise Exception("保存最终内容失败")
-
             except Exception as e:
                 logger.error(f"[Chapter {chapter_num}] 处理出错: {str(e)}", exc_info=True)
                 success = False
@@ -218,7 +266,6 @@ class ContentGenerator:
                     logger.error(f"[Chapter {chapter_num}] 达到最大重试次数")
                     return False
                 time.sleep(self.config.generation_config.get("retry_delay", 10))
-
         return success
 
     def _load_adjacent_chapter(self, chapter_num: int) -> str:
@@ -234,32 +281,26 @@ class ContentGenerator:
             logger.warning(f"加载第 {chapter_num} 章内容失败: {str(e)}")
         return ""
 
-    def _generate_remaining_chapters(self) -> bool:
-        """生成从 current_chapter 开始的所有剩余章节"""
+    def _generate_remaining_chapters(self, style_name: Optional[str] = None) -> bool:
+        """
+        生成所有剩余章节，支持风格名
+        """
         logger.info(f"开始生成剩余章节，从索引 {self.current_chapter} (即第 {self.current_chapter + 1} 章) 开始...")
-
         initial_start_chapter_index = self.current_chapter
-
         while self.current_chapter < len(self.chapter_outlines):
             current_chapter_num = self.current_chapter + 1
-            success = self._process_single_chapter(current_chapter_num)
-
+            success = self._process_single_chapter(current_chapter_num, style_name=style_name)
             if not success:
-                # 处理失败，中止整个流程
                 logger.error(f"处理第 {current_chapter_num} 章失败，中止剩余章节生成。")
                 return False
-
-            # 处理成功，继续下一章
             self._save_progress()
-
-        # Check if any chapters were processed in this run
         if self.current_chapter > initial_start_chapter_index:
             logger.info("所有剩余章节处理完成。")
             return True
         elif self.current_chapter == len(self.chapter_outlines):
             logger.info("所有章节均已处理完成。")
             return True
-        else: # No chapters were processed (already at the end)
+        else:
             logger.info(f"没有需要生成的剩余章节（当前进度索引: {self.current_chapter}）。")
             return True
 

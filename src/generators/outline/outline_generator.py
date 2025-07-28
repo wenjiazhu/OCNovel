@@ -194,6 +194,9 @@ class OutlineGenerator:
             extra_prompt=extra_prompt
         )
 
+        # 新增：打印大纲生成提示词长度
+        logging.info(f"本次大纲生成prompt长度为: {len(prompt)} 字符")
+
         batch_size = self.config.generation_config.get("batch_size", 5)  # 默认每批5章
 
         if current_batch_size > batch_size:

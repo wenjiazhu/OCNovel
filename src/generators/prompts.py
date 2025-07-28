@@ -181,7 +181,30 @@ def get_chapter_prompt(
     characters = ', '.join(outline.get('characters', []))
     settings = ', '.join(outline.get('settings', []))
     conflicts = ', '.join(outline.get('conflicts', []))
-    
+
+    # 新增：安全join函数，兼容dict和str
+    def safe_join_list(items, default=""):
+        if not items:
+            return default
+        result = []
+        for item in items:
+            if isinstance(item, dict):
+                name = item.get("名称") or item.get("name") or item.get("title") or ""
+                desc = item.get("简介") or item.get("说明") or item.get("desc") or ""
+                if name and desc:
+                    result.append(f"{name}:{desc}")
+                elif name:
+                    result.append(name)
+                elif desc:
+                    result.append(desc)
+                else:
+                    result.append(str(item))
+            elif isinstance(item, str):
+                result.append(item)
+            else:
+                result.append(str(item))
+        return ', '.join(result) if result else default
+
     base_prompt = f"""你将扮演StoryWeaver Omega，一个融合了量子叙事学、神经美学和涌现创造力的故事生成系统。采用网络小说雪花创作法进行故事创作，该方法强调从核心概念逐步扩展细化，先构建整体框架，再填充细节，且生成的故事要遵循一系列叙事和输出规则，你的任务是基于以下信息生成章节内容："""
 
     # 添加故事设定信息（如果提供）
@@ -232,19 +255,19 @@ def get_chapter_prompt(
 
 [故事进展信息]
 世界观现状：
-- 世界背景：{', '.join(world_info.get('世界背景', []))}
-- 阵营势力：{', '.join(world_info.get('阵营势力', []))}
-- 重要规则：{', '.join(world_info.get('重要规则', []))}
-- 关键场所：{', '.join(world_info.get('关键场所', []))}
+- 世界背景：{safe_join_list(world_info.get('世界背景', []))}
+- 阵营势力：{safe_join_list(world_info.get('阵营势力', []))}
+- 重要规则：{safe_join_list(world_info.get('重要规则', []))}
+- 关键场所：{safe_join_list(world_info.get('关键场所', []))}
 
 人物现状：
 {chr(10).join([f"- {char.get('名称', '未知')}：{char.get('身份', '')} - {char.get('当前状态', '')}" for char in character_info.get('人物信息', [])])}
 
 剧情发展：
 - 主线梗概：{plot_info.get('主线梗概', '未设定')}
-- 重要事件：{', '.join(plot_info.get('重要事件', [])[-5:])}  # 最近5个重要事件
-- 进行中冲突：{', '.join(plot_info.get('进行中冲突', []))}
-- 悬念伏笔：{', '.join(plot_info.get('悬念伏笔', [])[-3:])}  # 最近3个伏笔"""
+- 重要事件：{safe_join_list(plot_info.get('重要事件', [])[-5:])}  # 最近5个重要事件
+- 进行中冲突：{safe_join_list(plot_info.get('进行中冲突', []))}
+- 悬念伏笔：{safe_join_list(plot_info.get('悬念伏笔', [])[-3:])}  # 最近3个伏笔"""
 
     base_prompt += f"""
 
