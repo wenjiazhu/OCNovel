@@ -3,6 +3,7 @@ import logging
 import re
 import string
 import random
+import json
 from typing import Optional, Set, Dict, List
 # from opencc import OpenCC # Keep if used elsewhere, otherwise remove
 from ..common.data_structures import Character, ChapterOutline # Keep if Character is used later
@@ -81,9 +82,19 @@ class NovelFinalizer:
             # Generate/update summary
             if update_summary:
                 logger.info(f"开始更新第 {chapter_num} 章摘要...")
-                if not self._update_summary(chapter_num, content):
-                    # _update_summary logs its own errors
-                    return False
+                
+                # 先尝试重新生成指定章节的摘要文件（使用已有摘要）
+                if not self._regenerate_chapter_summary_file(chapter_num, content):
+                    logger.warning(f"重新生成第 {chapter_num} 章摘要文件失败")
+                    
+                    # 如果摘要文件生成失败，再尝试更新summary.json
+                    if not self._update_summary(chapter_num, content):
+                        logger.error(f"更新第 {chapter_num} 章摘要失败")
+                        return False
+                else:
+                    # 摘要文件生成成功，确保summary.json也是最新的
+                    self._update_summary(chapter_num, content)
+                
                 logger.info(f"第 {chapter_num} 章摘要更新成功。")
             
             logging.info(f"第 {chapter_num} 章定稿完成")
@@ -98,6 +109,9 @@ class NovelFinalizer:
                 elif imitation_model_config["type"] == "openai":
                     from src.models.openai_model import OpenAIModel
                     imitation_model = OpenAIModel(imitation_model_config)
+                elif imitation_model_config["type"] == "volcengine":
+                    from src.models.openai_model import OpenAIModel
+                    imitation_model = OpenAIModel(imitation_model_config)  # 火山引擎复用OpenAI兼容实现
                 else:
                     logger.error(f"不支持的模型类型: {imitation_model_config['type']}")
                     imitation_model = self.content_model
@@ -106,16 +120,30 @@ class NovelFinalizer:
                 else:
                     logger.warning(f"第 {chapter_num} 章自动仿写失败，但不影响定稿流程")
             
-            # 新增：定稿章节号为5的倍数时，自动更新sync_info.json
+            # 新增：定稿章节号为5的倍数时，自动更新sync_info.json（根据进度关系决定更新策略）
             if chapter_num % 5 == 0:
                 try:
-                    from ..content.content_generator import ContentGenerator
-                    # 构造临时ContentGenerator实例，仅用于同步信息更新
-                    temp_content_gen = ContentGenerator(self.config, self.content_model, self.knowledge_base)
-                    temp_content_gen.current_chapter = chapter_num
-                    temp_content_gen._load_outline()  # 修复：主动加载大纲
-                    temp_content_gen._trigger_sync_info_update(self.content_model)
-                    logger.info(f"章节号 {chapter_num} 为5的倍数，已自动更新sync_info.json")
+                    # 检查当前进度，避免用历史章节覆盖最新进度
+                    sync_info_file = os.path.join(self.output_dir, "sync_info.json")
+                    current_progress = self._get_current_progress(sync_info_file)
+                    
+                    if current_progress is None:
+                        # 如果没有现有进度，直接更新
+                        logger.info(f"章节号 {chapter_num} 为5的倍数，sync_info.json不存在或无进度记录，直接更新")
+                        self._update_sync_info_for_finalize(chapter_num)
+                    elif chapter_num < current_progress:
+                        # 定稿章节小于当前进度，不更新以保护最新进度
+                        logger.info(f"章节号 {chapter_num} 为5的倍数，但小于当前进度 {current_progress}，跳过sync_info.json更新以保护进度")
+                    elif chapter_num > current_progress:
+                        # 定稿章节大于当前进度，需要更新
+                        logger.info(f"章节号 {chapter_num} 为5的倍数，且大于当前进度 {current_progress}，更新sync_info.json")
+                        self._update_sync_info_for_finalize(chapter_num)
+                    else:
+                        # 定稿章节等于当前进度，备份后更新
+                        logger.info(f"章节号 {chapter_num} 为5的倍数，且等于当前进度 {current_progress}，备份原同步信息后更新")
+                        self._backup_sync_info(sync_info_file)
+                        self._update_sync_info_for_finalize(chapter_num)
+                        
                 except Exception as sync_e:
                     logger.error(f"章节号 {chapter_num} 为5的倍数，但自动更新sync_info.json失败: {sync_e}", exc_info=True)
             
@@ -332,6 +360,110 @@ class NovelFinalizer:
             
         except Exception as e:
             logger.error(f"执行自动仿写时出错: {e}", exc_info=True)
+            return False
+
+    def _regenerate_chapter_summary_file(self, chapter_num: int, content: str) -> bool:
+        """重新生成指定章节的摘要文件"""
+        try:
+            # 从summary.json中获取已生成的摘要，避免重复生成
+            summary_file = os.path.join(self.output_dir, "summary.json")
+            if os.path.exists(summary_file):
+                summaries = load_json_file(summary_file, default_value={})
+                chapter_key = str(chapter_num)
+                
+                if chapter_key in summaries:
+                    # 使用已生成的摘要
+                    summary_content = summaries[chapter_key]
+                    logger.info(f"使用已生成的第 {chapter_num} 章摘要")
+                else:
+                    # 如果summary.json中没有，则重新生成
+                    max_content_for_summary = self.config.generation_config.get("summary_max_content_length", 4000)
+                    prompt = prompts.get_summary_prompt(content[:max_content_for_summary])
+                    new_summary = self.content_model.generate(prompt)
+
+                    if not new_summary or not new_summary.strip():
+                        logger.error(f"模型未能为第 {chapter_num} 章生成有效摘要。")
+                        return False
+
+                    summary_content = self._clean_summary(new_summary)
+            else:
+                # 如果summary.json不存在，则生成新摘要
+                max_content_for_summary = self.config.generation_config.get("summary_max_content_length", 4000)
+                prompt = prompts.get_summary_prompt(content[:max_content_for_summary])
+                new_summary = self.content_model.generate(prompt)
+
+                if not new_summary or not new_summary.strip():
+                    logger.error(f"模型未能为第 {chapter_num} 章生成有效摘要。")
+                    return False
+
+                summary_content = self._clean_summary(new_summary)
+            
+            # 保存到单独的摘要文件
+            summary_filename = f"第{chapter_num}章_摘要.txt"
+            summary_file_path = os.path.join(self.output_dir, summary_filename)
+            
+            with open(summary_file_path, 'w', encoding='utf-8') as f:
+                f.write(summary_content)
+            
+            logger.info(f"已重新生成第 {chapter_num} 章摘要文件: {summary_file_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"重新生成第 {chapter_num} 章摘要文件时出错: {str(e)}", exc_info=True)
+            return False
+
+    def _get_current_progress(self, sync_info_file: str) -> Optional[int]:
+        """获取当前进度"""
+        try:
+            if not os.path.exists(sync_info_file):
+                return None
+
+            with open(sync_info_file, 'r', encoding='utf-8') as f:
+                sync_info = json.load(f)
+
+            current_chapter = sync_info.get("当前章节")
+            if current_chapter is not None:
+                return int(current_chapter)
+            return None
+            
+        except Exception as e:
+            logger.warning(f"获取当前进度时出错: {e}")
+            return None
+
+    def _backup_sync_info(self, sync_info_file: str) -> bool:
+        """备份同步信息文件"""
+        try:
+            if not os.path.exists(sync_info_file):
+                logger.warning(f"同步信息文件不存在，无需备份: {sync_info_file}")
+                return True
+            
+            import time
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            backup_file = f"{sync_info_file}.backup_{timestamp}"
+            
+            import shutil
+            shutil.copy2(sync_info_file, backup_file)
+            logger.info(f"已备份同步信息文件到: {backup_file}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"备份同步信息文件失败: {e}")
+            return False
+
+    def _update_sync_info_for_finalize(self, chapter_num: int) -> bool:
+        """为finalize模式更新同步信息"""
+        try:
+            from ..content.content_generator import ContentGenerator
+            # 构造临时ContentGenerator实例，仅用于同步信息更新
+            temp_content_gen = ContentGenerator(self.config, self.content_model, self.knowledge_base)
+            temp_content_gen.current_chapter = chapter_num
+            temp_content_gen._load_outline()  # 主动加载大纲
+            temp_content_gen._trigger_sync_info_update(self.content_model)
+            logger.info(f"finalize模式已更新sync_info.json，当前章节: {chapter_num}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"finalize模式更新sync_info.json失败: {e}", exc_info=True)
             return False
 
 if __name__ == "__main__":

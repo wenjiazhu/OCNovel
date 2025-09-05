@@ -37,11 +37,12 @@ def init_workspace():
 
 def create_model(model_config: dict):
     """创建AI模型实例"""
-    logging.info(f"正在创建模型: {model_config['type']} - {model_config['model_name']}")
     if model_config["type"] == "gemini":
         return GeminiModel(model_config)
     elif model_config["type"] == "openai":
         return OpenAIModel(model_config)
+    elif model_config["type"] == "volcengine":
+        return OpenAIModel(model_config)  # 复用OpenAI兼容实现
     else:
         raise ValueError(f"不支持的模型类型: {model_config['type']}")
 
@@ -76,6 +77,7 @@ def main():
     # 自动生成命令（包含完整流程）
     auto_parser = subparsers.add_parser('auto', help='自动执行完整生成流程')
     auto_parser.add_argument('--extra-prompt', type=str, help='额外提示词')
+    auto_parser.add_argument('--force-outline', action='store_true', help='强制重新生成所有大纲')
 
     # 仿写命令
     imitate_parser = subparsers.add_parser('imitate', help='根据指定的风格范文仿写文本')
@@ -150,7 +152,6 @@ def main():
         
         # 设置日志
         setup_logging(config.log_config["log_dir"])
-        logging.info(f"配置 {config_path} 加载完成") # 使用 config_path 而非 args.config
         
         # --- 获取小说标题并创建专属备份目录 ---
         novel_title = config.novel_config.get("title")
@@ -164,40 +165,41 @@ def main():
         base_output_dir = config.output_config.get("output_dir", "data/output")
         novel_output_dir = os.path.join(base_output_dir, safe_novel_title)
         os.makedirs(novel_output_dir, exist_ok=True)
-        logging.info(f"小说专属输出目录已创建/确认存在: {novel_output_dir}")
 
         # 复制配置文件快照
         config_snapshot_path = os.path.join(novel_output_dir, "config_snapshot.json")
         try:
             # 复制加载时使用的 config_path
             shutil.copy2(config_path, config_snapshot_path)
-            logging.info(f"配置文件快照已保存至: {config_snapshot_path}")
         except Exception as e:
             logging.error(f"复制配置文件快照失败: {e}", exc_info=True)
         
         # 创建模型实例
-        logging.info("正在初始化AI模型...")
-        content_model = create_model(config.model_config["content_model"])
-        outline_model = create_model(config.model_config["outline_model"])
-        embedding_model = create_model(config.model_config["embedding_model"])
-        logging.info("AI模型初始化完成")
+        from src.config.ai_config import AIConfig
+        ai_config = AIConfig()
+        
+        # 使用 Config 类中创建的模型配置，而不是重新实现
+        outline_model_config = config.get_model_config("outline_model")
+        content_model_config = config.get_model_config("content_model")
+        embedding_model_config = config.get_model_config("embedding_model")
+        
+        # 创建模型实例
+        outline_model = create_model(outline_model_config)
+        content_model = create_model(content_model_config)
+        embedding_model = create_model(embedding_model_config)
         
         # 创建知识库
-        logging.info("正在初始化知识库...")
         knowledge_base = KnowledgeBase(
             config.knowledge_base_config,
             embedding_model
         )
-        logging.info("知识库初始化完成")
         
         # --- 实例化 Finalizer ---
         # Instantiate Finalizer early as ContentGenerator might need it
         finalizer = NovelFinalizer(config, content_model, knowledge_base)
-        logging.info("NovelFinalizer 初始化完成")
         
         # 命令处理
         if args.command == 'outline':
-            logging.info("--- 执行大纲生成任务 ---")
             generator = OutlineGenerator(config, outline_model, knowledge_base, content_model)
             
             # 使用命令行参数或配置文件中的设置
@@ -216,14 +218,12 @@ def main():
             print("大纲生成成功！" if success else "大纲生成失败，请查看日志文件了解详细信息。")
             
         elif args.command == 'content':
-            logging.info("--- 执行内容生成任务 ---")
             # Pass finalizer instance to ContentGenerator
             generator = ContentGenerator(config, content_model, knowledge_base, finalizer=finalizer)
             
             # 处理起始章节和目标章节逻辑
             target_chapter_to_generate = None
             if args.target_chapter is not None:
-                logging.info(f"指定重新生成章节: {args.target_chapter}")
                 target_chapter_to_generate = args.target_chapter
             else:
                 # 如果指定了起始章节，则设置当前章节索引
@@ -231,15 +231,11 @@ def main():
                     # Validate start_chapter against loaded outline length if possible?
                     # For now, trust the input or let ContentGenerator handle invalid index later.
                     if args.start_chapter > 0 :
-                       logging.info(f"指定起始章节: {args.start_chapter}")
                        generator.current_chapter = args.start_chapter - 1
                        # Save the potentially updated starting point?
                        # generator._save_progress() # Optional: save if you want '--start-chapter' to persist
                     else:
                        logging.warning(f"指定的起始章节 ({args.start_chapter}) 无效，将从上次进度开始。")
-                else:
-                    # No target, no start chapter -> generate remaining from current progress
-                    logging.info(f"未指定目标或起始章节，将从进度文件记录的下一章 ({generator.current_chapter + 1}) 开始生成。")
             
             # 调用内容生成方法 (removed update_sync_info)
             success = generator.generate_content(
@@ -250,7 +246,6 @@ def main():
             
         elif args.command == 'finalize':
             # Finalize command remains for manually finalizing a chapter if needed
-            logging.info("--- 执行章节定稿任务 ---")
             # Finalizer is already instantiated
             success = finalizer.finalize_chapter(args.chapter)
             print("章节定稿处理成功！" if success else "章节定稿处理失败，请查看日志文件了解详细信息。")
@@ -258,7 +253,6 @@ def main():
         elif args.command == 'auto':
             # 重新初始化日志系统，并清理旧日志
             setup_logging(config.log_config["log_dir"], clear_logs=True)
-            logging.info("--- 执行自动生成流程 ---")
             # 自动流程需要实例化所有生成器
             outline_generator = OutlineGenerator(config, outline_model, knowledge_base, content_model)
             # Pass finalizer instance to ContentGenerator
@@ -288,42 +282,48 @@ def main():
                 logging.error("配置文件中未找到有效的目标章节数设置 (target_chapters)")
                 return
             
-            logging.info(f"自动生成范围：从第 {actual_start_chapter_num} 章开始，目标共 {end_chapter} 章")
-            
             # 1. 检查并生成大纲
-            logging.info("步骤 1: 检查并生成大纲...")
             outline_generator._load_outline() # Ensure outline is loaded
             current_outline_count = len(outline_generator.chapter_outlines)
 
-            if current_outline_count < end_chapter:
-                logging.info(f"当前大纲章节数 ({current_outline_count}) 小于目标章节数 ({end_chapter})，将生成缺失的大纲...")
-                outline_success = outline_generator.generate_outline(
-                    novel_type=config.novel_config.get("type"),
-                    theme=config.novel_config.get("theme"),
-                    style=config.novel_config.get("style"),
-                    mode='replace',
-                    replace_range=(current_outline_count + 1, end_chapter),
-                    extra_prompt=args.extra_prompt
-                )
+            # 添加强制重新生成选项检查
+            force_regenerate = getattr(args, 'force_outline', False)
+            
+            if current_outline_count < end_chapter or force_regenerate:
+                if force_regenerate:
+                    outline_success = outline_generator.generate_outline(
+                        novel_type=config.novel_config.get("type"),
+                        theme=config.novel_config.get("theme"),
+                        style=config.novel_config.get("style"),
+                        mode='replace',
+                        replace_range=(1, end_chapter),  # 重新生成全部
+                        extra_prompt=args.extra_prompt
+                    )
+                else:
+                    outline_success = outline_generator.generate_outline(
+                        novel_type=config.novel_config.get("type"),
+                        theme=config.novel_config.get("theme"),
+                        style=config.novel_config.get("style"),
+                        mode='replace',
+                        replace_range=(current_outline_count + 1, end_chapter),
+                        extra_prompt=args.extra_prompt
+                    )
+                
                 if not outline_success:
                     print("大纲生成失败，停止流程。")
                     return
-                print("缺失章节大纲生成成功！")
+                print("大纲生成成功！")
                 # Reload outline in content_generator after modification
                 # content_generator._load_outline() # Moved outside
-            else:
-                logging.info(f"大纲章节数充足（当前：{current_outline_count}，目标：{end_chapter}），无需生成新大纲。")
 
             # Ensure content_generator always loads the outline before proceeding
             content_generator._load_outline()
 
             # Check if start chapter is already beyond target
             if actual_start_chapter_num > end_chapter:
-                 logging.info(f"起始章节 ({actual_start_chapter_num}) 已超过目标章节 ({end_chapter})，无需生成内容。")
                  content_success = True # Nothing to do, considered success
             else:
                  # 2. 生成内容 (ContentGenerator now handles finalization internally)
-                 logging.info(f"步骤 2: 生成内容 (包含定稿)，从第 {actual_start_chapter_num} 章开始...")
                  # The generate_content call will handle chapters from generator.current_chapter up to the end of the outline
                  # We rely on the loaded outline length to determine the end point.
                  # We need to ensure the outline actually covers up to end_chapter
@@ -346,38 +346,25 @@ def main():
             print("自动生成流程全部完成！")
 
         elif args.command == 'imitate':
-            logging.info("--- 执行仿写任务 ---")
             try:
                 # 1. 读取输入文件
-                logging.info(f"读取风格源文件: {args.style_source}")
                 with open(args.style_source, 'r', encoding='utf-8') as f:
                     style_text = f.read()
 
-                logging.info(f"读取原始文本文件: {args.input_file}")
                 with open(args.input_file, 'r', encoding='utf-8') as f:
                     input_text = f.read()
 
-                # 2. 初始化模型（改为 imitation_model 配置）
-                logging.info("初始化AI模型...")
-                imitation_model_config = config.get_imitation_model()
-                if imitation_model_config["type"] == "gemini":
-                    imitation_model = GeminiModel(imitation_model_config)
-                elif imitation_model_config["type"] == "openai":
-                    imitation_model = OpenAIModel(imitation_model_config)
-                else:
-                    raise ValueError(f"不支持的模型类型: {imitation_model_config['type']}")
+                # 2. 初始化模型（使用内容生成模型进行仿写）
+                imitation_model = content_model  # 复用已创建的内容生成模型
 
                 # 3. 创建一个临时的、基于风格范文的知识库
-                logging.info("为风格范文动态构建临时知识库...")
                 # 创建一个临时的知识库配置，指向一个专用的仿写缓存目录
                 imitate_kb_config = config.knowledge_base_config.copy()
                 imitate_kb_config["cache_dir"] = os.path.join(config.knowledge_base_config["cache_dir"], "imitation_cache")
                 style_kb = KnowledgeBase(imitate_kb_config, embedding_model)
                 style_kb.build(style_text, force_rebuild=False)
-                logging.info("临时知识库构建完成。")
 
                 # 4. 从风格知识库中检索与原始文本最相关的片段作为范例
-                logging.info("从风格知识库中检索最相关的风格范例...")
                 style_examples = style_kb.search(input_text, k=5)
 
                 # 5. 导入并使用新的仿写提示词
@@ -388,13 +375,10 @@ def main():
                     extra_prompt=args.extra_prompt
                 )
 
-                # 6. 调用模型生成仿写内容前，打印实际模型名
-                logging.info(f"仿写实际调用模型: {imitation_model_config.get('model_name', imitation_model_config)}")
-                logging.info("调用AI模型进行仿写...")
+                # 6. 调用模型生成仿写内容
                 imitated_content = imitation_model.generate(prompt)
 
                 # 7. 保存结果
-                logging.info(f"仿写完成，保存结果到: {args.output_file}")
                 with open(args.output_file, 'w', encoding='utf-8') as f:
                     f.write(imitated_content)
                 print(f"仿写成功！结果已保存至 {args.output_file}")

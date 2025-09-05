@@ -1,13 +1,25 @@
+# AI模型依赖
 openai>=1.0.0
 google-generativeai>=0.3.0
+
+# 向量数据库和嵌入
 chromadb>=0.4.0
 faiss-cpu>=1.7.4
-jieba>=0.42.1
 FlagEmbedding>=1.2.7
+
+# 中文处理
+jieba>=0.42.1
+opencc
+
+# 核心依赖
 python-dotenv>=1.0.0
 tenacity>=8.2.0
 numpy>=1.24.0
-pytest>=7.4.0
 pydantic>=2.0.0
-opencc
 beautifulsoup4
+
+# GUI框架
+PySide6>=6.5.0
+
+# 开发和测试
+pytest>=7.4.0

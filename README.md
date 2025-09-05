@@ -2,14 +2,23 @@
 
 OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据参考小说和用户设定的主题、风格等参数，自动生成完整的长篇小说。
 
+## 🔒 安全特性
+
+- **API密钥安全保护**：系统自动识别和隐藏日志中的敏感信息，API密钥以 `sk-1234****cdef` 格式安全显示
+- **自动安全检查**：提供 `scripts/security_check.py` 脚本，自动检测代码中的潜在API密钥泄露风险
+- **配置安全输出**：所有配置日志都经过安全处理，确保敏感信息不会在终端或日志文件中泄露
+- **安全的错误处理**：错误信息中的敏感数据自动脱敏，提供必要信息的同时保护隐私
+
 ## 功能特点
 
-- 🤖 支持多种 AI 模型（Gemini、OpenAI）
+- 🤖 支持多种 AI 模型（Gemini、OpenAI、火山引擎）
   - Gemini模型：使用 `gemini-2.5-flash`（内容生成）和 `gemini-2.5-pro`（大纲生成）
   - OpenAI模型：支持自定义API端点，兼容多种模型
+  - 🌋 火山引擎模型：支持 DeepSeek-V3.1 模型，默认启用深度思考模式，显著提升内容质量
   - 🔄 智能备用模型系统：当主模型不可用时，自动切换到备用模型
     - Gemini Flash → DeepSeek-R1
     - Gemini Pro → Qwen3-235B-A22B
+    - 火山引擎 → DeepSeek-R1（通过硫基流动API）
     - OpenAI模型 → 相应的备用模型
 - 📚 智能知识库系统，支持参考小说导入和分析
 - 📝 自动生成小说大纲和章节内容
@@ -29,6 +38,12 @@ OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据
   - 🎨 多种风格：内置古风雅致、悬疑紧张、热血激昂等经典风格
   - 🔍 智能检索：基于知识库的语义检索，精准匹配风格片段
   - 📊 质量控制：内置内容保持度和风格一致性检查
+- 🔍 **AI浓度检测与优化系统**
+  - 📊 多维度AI痕迹检测：词汇密度、句式模式、对话自然度等
+  - 🎯 朱雀AI检测适配：专门针对朱雀AI检测器进行优化调整
+  - 📋 详细分析报告：提供完整的检测结果和风险评估
+  - 🔧 智能优化建议：自动生成针对性的改进建议
+  - 🌏 中文优化：完全支持中文引号识别和标点规范
 
 ## 系统要求
 
@@ -76,7 +91,21 @@ pip install -r requirements.txt
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
-# 嵌入模型配置（用于知识库向量化等，也作为备用模型的API密钥）
+# 火山引擎DeepSeek-V3.1配置（可选）
+VOLCENGINE_API_KEY=你的火山引擎API密钥
+VOLCENGINE_API_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3  # API端点
+VOLCENGINE_MODEL_ID=deepseek-v3-1-250821  # 模型标识符
+VOLCENGINE_THINKING_ENABLED=true  # 是否启用深度思考模式（推荐启用）
+VOLCENGINE_TIMEOUT=120  # 请求超时时间（秒）
+VOLCENGINE_MAX_TOKENS=8192  # 最大输出长度（最大32768）
+VOLCENGINE_TEMPERATURE=0.7  # 生成温度
+VOLCENGINE_RETRY_DELAY=15  # 重试延迟（秒）
+VOLCENGINE_MAX_RETRIES=3  # 最大重试次数
+
+# 火山引擎故障转移配置
+VOLCENGINE_FALLBACK_ENABLED=true  # 启用故障转移（推荐）
+
+# 嵌入模型配置（用于知识库向量化等）
 OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
 OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
 
@@ -87,11 +116,6 @@ OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
 # 内容模型配置（用于生成章节内容）
 OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
 OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
-
-# 备用模型配置（可选）
-GEMINI_FALLBACK_ENABLED=True  # 是否启用Gemini备用模型，默认为True
-GEMINI_FALLBACK_BASE_URL=https://api.siliconflow.cn/v1  # 备用API基础URL
-GEMINI_FALLBACK_TIMEOUT=180  # 备用API超时时间（秒）
 ```
 
 5. 准备配置文件 (`config.json`)：
@@ -108,6 +132,7 @@ OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能
 |--------|----------|------|
 | Gemini Flash | DeepSeek-R1 | 当Gemini Flash不可用时自动切换 |
 | Gemini Pro | Qwen3-235B-A22B | 当Gemini Pro不可用时自动切换 |
+| 火山引擎DeepSeek-V3.1 | DeepSeek-R1 | 当火山引擎不可用时自动切换到硫基流动API |
 | OpenAI模型 | 相应备用模型 | 根据模型类型选择对应的备用模型 |
 
 ### 工作原理
@@ -126,10 +151,38 @@ OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能
 
 ## 快速开始
 
+### 模型选择配置
+
+在 `config.json` 中配置模型选择：
+
+```json
+{
+  "generation_config": {
+    "model_selection": {
+      "outline": {
+        "provider": "volcengine",  // 可选: "gemini", "openai", "volcengine"
+        "model_type": "outline"
+      },
+      "content": {
+        "provider": "volcengine",  // 可选: "gemini", "openai", "volcengine"
+        "model_type": "content"
+      }
+    }
+  }
+}
+```
+
+**模型推荐**：
+- **火山引擎DeepSeek-V3.1**：推荐使用，支持深度思考模式，内容质量高
+- **Gemini模型**：稳定可靠，适合长文本生成
+- **OpenAI模型**：兼容性好，支持多种第三方API
+
 ### 基本使用示例
 
 1. **生成完整小说（包含自动仿写）**：
 ```bash
+python3 main.py auto
+# 或
 python main.py auto
 ```
 
@@ -290,7 +343,134 @@ python src/tools/process_novel.py <输入目录> <输出目录> -e <结束章节
 ```
 *(此工具的功能和用法请参考其内部实现或相关文档)*
 
-### 4. 备用模型功能示例
+### 4. AI浓度检测与优化
+
+OCNovel 提供了强大的AI浓度检测工具，帮助评估和优化生成内容的自然度，规避AI检测系统。
+
+#### 4.1 AI浓度检测工具 (`ai_density_checker.py`)
+
+**功能特点**：
+- 🔍 **多维度检测**：从词汇密度、句式模式、对话自然度、情感真实度等多个维度分析AI痕迹
+- 🎯 **朱雀AI检测适配**：专门针对朱雀AI检测器进行优化，提供具体的改进建议
+- 📊 **详细分析报告**：提供完整的检测结果和风险评估
+- 🔧 **改进建议**：自动生成针对性的优化建议
+- 🌏 **中文优化**：完全支持中文引号识别和中文对话检测
+
+**使用方法**：
+
+```python
+# 导入AI密度检测器
+from src.tools.ai_density_checker import EnhancedAIDensityChecker, check_chapter_ai_density
+
+# 1. 检测文本的AI浓度
+checker = EnhancedAIDensityChecker()
+text = "要检测的文本内容"
+result = checker.check_density(text)
+
+print(f"总体AI分数: {result['total_score']:.1f}")
+print(f"朱雀风险分数: {result['zhuque_analysis']['zhuque_risk_score']:.1f}")
+
+# 2. 检测章节文件
+result = check_chapter_ai_density('path/to/chapter.txt')
+print(f"AI浓度分数: {result['ai_density_score']:.1f}")
+print(f"评估: {result['assessment']}")
+
+# 3. 获取改进建议
+for suggestion in result['suggestions']:
+    print(f"- {suggestion}")
+```
+
+**检测维度说明**：
+
+1. **AI词汇密度**：检测使用"伴随着"、"与此同时"、"毫无疑问"等AI化词汇的频率
+2. **句式模式**：分析是否存在过于规范的句式结构
+3. **对话自然度**：评估对话比例和对话中的自然化表达
+4. **情感真实度**：检测情感表达的真实性和人性化程度
+5. **语言变化度**：分析句子长度和结构的变化程度
+6. **朱雀AI检测特征**：针对朱雀AI检测器的特殊优化检查
+
+**朱雀AI检测优化重点**：
+- ✅ **重复结构分数≤83.3分**：避免相同句式的重复使用
+- ✅ **缺乏犹豫分数≤70.0分**：增加"呃"、"那个"、"怎么说呢"等犹豫词
+- ✅ **正式转折分数≤3.0分**：用口语化转折词替换正式表达
+- ✅ **技术精确性保持0.0分**：避免过于技术化的描述
+- 🎯 **目标**：将朱雀AI检测风险分数降到20分以下
+
+**输出结果示例**：
+
+```python
+{
+    'total_score': 45.2,  # 总体AI分数（越低越好）
+    'dimension_scores': {
+        'ai_vocabulary_score': 35.0,      # AI词汇密度
+        'sentence_pattern_score': 40.0,   # 句式模式
+        'dialogue_naturality_score': 60.0, # 对话自然度
+        'emotional_authenticity_score': 30.0, # 情感真实度
+        'linguistic_variation_score': 25.0    # 语言变化度
+    },
+    'zhuque_analysis': {
+        'zhuque_risk_score': 38.5,         # 朱雀风险分数
+        'high_risk_features': ['缺乏犹豫', '重复结构'],
+        'targeted_suggestions': [
+            '增加犹豫词：呃、那个、怎么说呢',
+            '减少重复句式，增加语言变化'
+        ]
+    },
+    'improvement_suggestions': [
+        '大幅增加人物对话，目标比例40%以上',
+        '替换AI化词汇：伴随着→然后、与此同时→这时候',
+        '使用更多不完整句子和口语化表达'
+    ]
+}
+```
+
+#### 4.2 中文标点符号规范化支持
+
+AI密度检测器完全支持中文标点符号规范化要求：
+
+- ✅ **中文引号识别**：正确识别 `""` 和 `''` 等中文引号
+- ✅ **冒号对话检测**：支持 `某某道："对话内容"` 格式
+- ✅ **混合对话格式**：同时支持直接引号对话和冒号引导对话
+- ✅ **标点符号规范**：强制要求使用中文省略号（……）和破折号（——）
+
+#### 4.3 实际应用建议
+
+**在小说生成流程中的应用**：
+
+1. **生成后检测**：
+   ```bash
+   # 在章节生成完成后进行检测
+   python -c "from src.tools.ai_density_checker import check_chapter_ai_density; 
+   result = check_chapter_ai_density('data/output/novel/第1章.txt'); 
+   print(f'AI分数: {result[\"ai_density_score\"]:.1f}')"
+   ```
+
+2. **批量检测**：
+   ```python
+   import os
+   from src.tools.ai_density_checker import check_chapter_ai_density
+   
+   # 检测所有章节
+   for filename in os.listdir('data/output/novel/'):
+       if filename.endswith('.txt'):
+           result = check_chapter_ai_density(f'data/output/novel/{filename}')
+           print(f"{filename}: {result['ai_density_score']:.1f}分")
+   ```
+
+3. **结合仿写优化**：
+   ```bash
+   # 对高AI分数的章节进行仿写
+   python main.py imitate --style-source style.txt --input-file high_ai_chapter.txt --output-file optimized_chapter.txt
+   ```
+
+**分数评级标准**：
+- **0-20分**：自然度很高，AI痕迹很少 ✅
+- **21-40分**：自然度较高，有轻微AI痕迹 ✅
+- **41-60分**：自然度一般，AI痕迹明显 ⚠️
+- **61-80分**：AI痕迹较重，需要优化 ❌
+- **81-100分**：AI痕迹很重，急需改进 ❌
+
+### 5. 备用模型功能示例
 
 ```bash
 python examples/fallback_usage_example.py
@@ -335,9 +515,10 @@ OCNovel/
 │   │   ├── gemini_model.py
 │   │   └── openai_model.py
 │   └── tools/           # 辅助工具脚本
-│       ├── generate_config.py    # 自动生成配置文件脚本
-│       ├── generate_marketing.py # 营销内容生成
-│       └── process_novel.py      # 章节内容整理
+│       ├── ai_density_checker.py    # AI浓度检测与优化工具
+│       ├── generate_config.py       # 自动生成配置文件脚本
+│       ├── generate_marketing.py    # 营销内容生成
+│       └── process_novel.py         # 章节内容整理
 ├── tests/               # 测试文件
 ├── examples/            # 使用示例
 │   └── fallback_usage_example.py  # 备用模型使用示例
@@ -349,6 +530,29 @@ OCNovel/
 └── README.md           # 项目说明
 
 ## 故障排除
+
+### 安全检查
+
+如果担心API密钥泄露问题，可以运行安全检查脚本：
+
+```bash
+python3 scripts/security_check.py
+```
+
+此脚本会：
+- 扫描代码中的潜在API密钥泄露风险
+- 验证日志输出的安全性
+- 测试安全输出函数的正常工作
+
+### 火山引擎模型配置问题
+
+如果遇到 "ERROR - 不支持的模型类型: volcengine" 错误：
+
+1. **问题原因**：项目已经修复了该问题，如果仍然出现，可能是缓存问题
+2. **解决方案**：
+   - 重新启动程序
+   - 检查 `VOLCENGINE_API_KEY` 环境变量是否正确设置
+   - 确保配置文件中的模型选择正确
 
 ### Gemini API 调用失败
 
@@ -383,6 +587,20 @@ OCNovel/
 # Gemini API配置
 GEMINI_API_KEY=你的Gemini API密钥
 
+# 火山引擎DeepSeek-V3.1配置（推荐）
+VOLCENGINE_API_KEY=你的火山引擎API密钥
+VOLCENGINE_API_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3  # API端点
+VOLCENGINE_MODEL_ID=deepseek-v3-1-250821  # 模型标识符
+VOLCENGINE_THINKING_ENABLED=true  # 深度思考模式（推荐启用）
+VOLCENGINE_TIMEOUT=120  # 请求超时时间（秒）
+VOLCENGINE_MAX_TOKENS=8192  # 最大输出长度（最大32768）
+VOLCENGINE_TEMPERATURE=0.7  # 生成温度
+VOLCENGINE_RETRY_DELAY=15  # 重试延迟（秒）
+VOLCENGINE_MAX_RETRIES=3  # 最大重试次数
+
+# 火山引擎故障转移配置
+VOLCENGINE_FALLBACK_ENABLED=true  # 启用故障转移（推荐）
+
 # 嵌入模型配置（用于知识库向量化等）
 OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
 OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
@@ -397,6 +615,8 @@ OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
 ```
 
 - `GEMINI_API_KEY`：用于 Gemini LLM 的 API 密钥。
+- `VOLCENGINE_API_KEY`：用于火山引擎DeepSeek-V3.1模型的API密钥。
+- `VOLCENGINE_THINKING_ENABLED`：是否启用深度思考模式（推荐启用）。
 - `OPENAI_EMBEDDING_API_KEY`/`OPENAI_EMBEDDING_API_BASE`：用于知识库嵌入模型（如文本向量化）。
 - `OPENAI_OUTLINE_API_KEY`/`OPENAI_OUTLINE_API_BASE`：用于生成小说大纲的 LLM。
 - `OPENAI_CONTENT_API_KEY`/`OPENAI_CONTENT_API_BASE`：用于生成章节内容的 LLM。
@@ -586,3 +806,77 @@ python test_imitation_demo.py
 
 更多关于仿写功能的详细说明，请参考：
 - [仿写功能使用指南](仿写功能使用指南.md) - 完整的功能说明和使用教程
+
+## 🔄 更新日志
+
+### v1.2.0 (2025-08-24)
+
+#### 新增功能
+- ✨ **火山引擎DeepSeek-V3.1模型支持**
+  - 新增对火山引擎DeepSeek-V3.1模型的完整支持
+  - 默认启用深度思考模式，显著提升生成内容质量
+  - 基于OpenAI兼容架构实现，保持系统一致性
+  - 支持故障转移机制，自动切换到备用模型
+
+#### 安全性增强
+- 🔒 **API密钥安全保护**
+  - 实现智能的敏感信息识别和隐藏机制
+  - API密钥在日志中以 `sk-1234****cdef` 格式安全显示
+  - 所有配置输出都经过安全处理，防止意外泄露
+  - 新增 `scripts/security_check.py` 安全检查脚本
+
+#### 问题修复
+- 🔧 **模型类型支持修复**
+  - 修复了 "ERROR - 不支持的模型类型: volcengine" 错误
+  - 在所有模型类（OutlineModel、ContentModel、EmbeddingModel）中添加volcengine支持
+  - 优化了模型初始化错误处理
+
+#### 文档更新
+- 📚 **完善的文档**
+  - 新增 `VOLCENGINE_INTEGRATION_GUIDE.md` 火山引擎集成指南
+  - 新增 `API_SECURITY_FIX_REPORT.md` 安全修复报告
+  - 更新 README.md，添加火山引擎和安全特性说明
+  - 优化配置指南和故障排除部分
+
+#### 技术改进
+- ⚙️ **代码质量提升**
+  - 重构配置管理模块，增加安全输出功能
+  - 优化错误处理和日志输出机制
+  - 添加全面的安全检查和验证机制
+
+### 升级指南
+
+如果你正在使用旧版本，请按以下步骤升级：
+
+1. **备份现有配置**：
+   ```bash
+   cp config.json config.json.backup
+   cp .env .env.backup
+   ```
+
+2. **更新代码**：
+   ```bash
+   git pull origin main
+   ```
+
+3. **安装新依赖**：
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **配置火山引擎（可选）**：
+   在 `.env` 文件中添加：
+   ```
+   VOLCENGINE_API_KEY=你的火山引擎API密钥
+   VOLCENGINE_THINKING_ENABLED=true
+   ```
+
+5. **运行安全检查**：
+   ```bash
+   python3 scripts/security_check.py
+   ```
+
+6. **测试运行**：
+   ```bash
+   python3 main.py auto
+   ```

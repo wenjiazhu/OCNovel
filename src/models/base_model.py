@@ -26,4 +26,8 @@ class BaseModel(ABC):
             raise ValueError("API key is required")
         if not self.model_name:
             raise ValueError("Model name is required")
-        return True 
+        return True
+    
+    def close(self):
+        """关闭模型客户端，子类应该重写此方法"""
+        pass 

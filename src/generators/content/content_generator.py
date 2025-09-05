@@ -175,9 +175,11 @@ class ContentGenerator:
             logger.error(f"生成章节内容时发生未预期错误: {str(e)}", exc_info=True)
             return False
 
-    def _process_single_chapter(self, chapter_num: int, external_prompt: Optional[str] = None, max_retries: int = 3, style_name: Optional[str] = None) -> bool:
+    def _process_single_chapter(self, chapter_num: int, external_prompt: Optional[str] = None, max_retries: int = 3, style_name: Optional[str] = None, is_target_chapter: bool = False) -> bool:
         """
         处理单个章节的生成、验证、保存和定稿，支持风格名
+        Args:
+            is_target_chapter: 是否为指定重新生成的章节，如果是则不更新sync_info
         """
         if not (1 <= chapter_num <= len(self.chapter_outlines)):
             logger.error(f"无效的章节号: {chapter_num}")
@@ -254,7 +256,9 @@ class ContentGenerator:
                     else:
                         logger.warning(f"[Chapter {chapter_num}] Finalizer 未提供，跳过定稿步骤。")
                         self.current_chapter = chapter_num
-                    self._check_and_update_cache(chapter_num)
+                    
+                    # content模式不触发同步信息更新，只有auto模式和finalize模式才更新
+                    logger.info(f"[Chapter {chapter_num}] content模式不触发同步信息更新，仅保存章节内容")
                     success = True
                     break
                 else:
@@ -289,7 +293,7 @@ class ContentGenerator:
         initial_start_chapter_index = self.current_chapter
         while self.current_chapter < len(self.chapter_outlines):
             current_chapter_num = self.current_chapter + 1
-            success = self._process_single_chapter(current_chapter_num, style_name=style_name)
+            success = self._process_single_chapter(current_chapter_num, style_name=style_name, is_target_chapter=False)
             if not success:
                 logger.error(f"处理第 {current_chapter_num} 章失败，中止剩余章节生成。")
                 return False
@@ -651,8 +655,10 @@ class ContentGenerator:
                         json_content = sync_info[json_start:json_end]
                         logger.info(f"提取到JSON内容，长度: {len(json_content)}")
                         sync_info_dict = json.loads(json_content)
-                        # 在保存前，确保更新时间字段
-                        sync_info_dict["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        # 应用进度保护逻辑
+                        sync_info_dict = self._apply_progress_protection(sync_info_dict, self.current_chapter)
+                        
                         logger.info(f"成功解析同步信息JSON，准备写入文件: {self.sync_info_file}")
                         with open(self.sync_info_file, 'w', encoding='utf-8') as f:
                             json.dump(sync_info_dict, f, ensure_ascii=False, indent=2)
@@ -681,51 +687,289 @@ class ContentGenerator:
             logger.error(f"更新同步信息时出错: {str(e)}", exc_info=True)
             self._fallback_sync_info_update()
 
+    def _should_protect_progress(self, current_generating_chapter: int, existing_progress: int) -> bool:
+        """
+        判断是否需要保护现有进度
+        
+        Args:
+            current_generating_chapter: 当前正在生成的章节号
+            existing_progress: 现有同步信息中的进度
+        
+        Returns:
+            bool: True表示需要保护现有进度，False表示可以更新进度
+        """
+        # 处理各种边界情况
+        if existing_progress is None:
+            # 如果现有进度为空，则不需要保护
+            logger.info(f"现有进度为空，正常更新进度为 {current_generating_chapter}")
+            return False
+        
+        # 确保输入参数为整数类型，处理更多异常情况
+        try:
+            # 处理字符串类型的章节号
+            if isinstance(current_generating_chapter, str):
+                current_generating_chapter = current_generating_chapter.strip()
+                if not current_generating_chapter:
+                    logger.warning("当前章节号为空字符串，无法比较进度，不保护现有进度")
+                    return False
+            
+            if isinstance(existing_progress, str):
+                existing_progress = existing_progress.strip()
+                if not existing_progress:
+                    logger.warning("现有进度为空字符串，正常更新进度")
+                    return False
+            
+            current_generating_chapter = int(current_generating_chapter)
+            existing_progress = int(existing_progress)
+            
+            # 验证章节号的合理性
+            if current_generating_chapter <= 0:
+                logger.warning(f"当前章节号无效 ({current_generating_chapter})，不保护现有进度")
+                return False
+            
+            if existing_progress <= 0:
+                logger.warning(f"现有进度无效 ({existing_progress})，正常更新进度")
+                return False
+                
+        except (ValueError, TypeError) as e:
+            logger.warning(f"章节号格式错误，无法比较进度: current={current_generating_chapter}, existing={existing_progress}, error={e}，不保护现有进度")
+            return False
+        
+        # 如果当前生成章节小于现有进度，则需要保护现有进度
+        should_protect = current_generating_chapter < existing_progress
+        
+        if should_protect:
+            logger.info(f"进度保护触发：当前生成章节 {current_generating_chapter} < 现有进度 {existing_progress}，保护现有进度")
+        else:
+            logger.info(f"进度正常更新：当前生成章节 {current_generating_chapter} >= 现有进度 {existing_progress}，更新进度")
+        
+        return should_protect
+
+    def _apply_progress_protection(self, sync_info_dict: dict, current_chapter: int) -> dict:
+        """
+        应用进度保护到同步信息字典
+        
+        Args:
+            sync_info_dict: 同步信息字典（可能来自模型生成）
+            current_chapter: 当前生成的章节号
+        
+        Returns:
+            dict: 应用进度保护后的同步信息字典
+        """
+        try:
+            # 确保sync_info_dict是字典类型
+            if not isinstance(sync_info_dict, dict):
+                logger.warning(f"sync_info_dict不是字典类型: {type(sync_info_dict)}，创建新字典")
+                sync_info_dict = {}
+            
+            # 加载现有同步信息以获取真实的当前进度
+            existing_sync_info = self._load_sync_info()
+            existing_progress = existing_sync_info.get("当前章节")
+            
+            # 处理现有进度的各种异常情况
+            if existing_progress is not None:
+                try:
+                    # 尝试将现有进度转换为整数
+                    if isinstance(existing_progress, str):
+                        existing_progress = existing_progress.strip()
+                        if not existing_progress:
+                            logger.warning("现有进度为空字符串，视为无现有进度")
+                            existing_progress = None
+                        else:
+                            existing_progress = int(existing_progress)
+                    elif not isinstance(existing_progress, int):
+                        logger.warning(f"现有进度类型异常: {type(existing_progress)}，尝试转换为整数")
+                        existing_progress = int(existing_progress)
+                    
+                    # 验证现有进度的合理性
+                    if existing_progress is not None and existing_progress <= 0:
+                        logger.warning(f"现有进度值无效 ({existing_progress})，视为无现有进度")
+                        existing_progress = None
+                        
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"现有进度格式错误，无法解析: {existing_sync_info.get('当前章节')} - {e}，视为无现有进度")
+                    existing_progress = None
+            
+            # 判断是否需要保护进度
+            if self._should_protect_progress(current_chapter, existing_progress):
+                # 保护现有进度，使用现有同步信息中的进度
+                sync_info_dict["当前章节"] = existing_progress
+                logger.info(f"应用进度保护：保持现有进度 {existing_progress}，不更新为 {current_chapter}")
+            else:
+                # 正常更新进度
+                sync_info_dict["当前章节"] = current_chapter
+                logger.info(f"正常更新进度：从 {existing_progress} 更新为 {current_chapter}")
+            
+            # 始终更新"最后更新时间"字段
+            sync_info_dict["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 确保向后兼容性：保留其他现有字段（如果存在）
+            if existing_sync_info:
+                for key, value in existing_sync_info.items():
+                    if key not in sync_info_dict and key != "当前章节":
+                        # 保留现有字段，但不覆盖新生成的字段
+                        sync_info_dict[key] = value
+                        logger.debug(f"保留现有字段: {key}")
+            
+            return sync_info_dict
+            
+        except Exception as e:
+            logger.error(f"应用进度保护时出错: {str(e)}", exc_info=True)
+            # 出错时确保返回有效的字典，并设置基本字段
+            if not isinstance(sync_info_dict, dict):
+                sync_info_dict = {}
+            
+            # 尝试保留原有的sync_info_dict内容
+            try:
+                # 确保至少有基本字段
+                sync_info_dict["当前章节"] = current_chapter
+                sync_info_dict["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 尝试从现有文件中恢复其他字段以保持向后兼容性
+                existing_sync_info = self._load_sync_info()
+                if existing_sync_info:
+                    for key, value in existing_sync_info.items():
+                        if key not in sync_info_dict and key != "当前章节":
+                            sync_info_dict[key] = value
+                            
+            except Exception as recovery_error:
+                logger.error(f"恢复同步信息字段时也出错: {recovery_error}")
+                # 最后的保底措施
+                sync_info_dict = {
+                    "当前章节": current_chapter,
+                    "最后更新时间": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+            
+            return sync_info_dict
+
     def _fallback_sync_info_update(self) -> None:
-        """降级方案：手动更新同步信息"""
+        """
+        降级方案：手动更新同步信息
+        处理各种异常情况以确保向后兼容性
+        """
         try:
             logger.info("使用降级方案更新同步信息")
             
-            # 加载现有同步信息
-            existing_sync_info = {}
-            if os.path.exists(self.sync_info_file):
-                try:
-                    with open(self.sync_info_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        if content.strip():
-                            existing_sync_info = json.loads(content)
-                except Exception as e:
-                    logger.warning(f"读取现有同步信息失败: {e}")
+            # 使用已有的_load_sync_info方法加载现有同步信息
+            # 这个方法已经处理了各种异常情况
+            existing_sync_info = self._load_sync_info()
             
-            # 更新当前章节进度
-            existing_sync_info["当前章节"] = self.current_chapter
-            existing_sync_info["最后更新时间"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            # 如果加载失败，创建基本的同步信息结构
+            if not existing_sync_info:
+                logger.info("创建新的同步信息结构")
+                existing_sync_info = {
+                    "当前章节": None,
+                    "最后更新时间": None,
+                    "世界观": {},
+                    "人物设定": {},
+                    "剧情发展": {},
+                    "前情提要": []
+                }
             
-            # 添加新的前情提要
+            # 应用进度保护逻辑
+            existing_sync_info = self._apply_progress_protection(existing_sync_info, self.current_chapter)
+            
+            # 确保必要字段存在
             if "前情提要" not in existing_sync_info:
+                existing_sync_info["前情提要"] = []
+            elif not isinstance(existing_sync_info["前情提要"], list):
+                logger.warning(f"'前情提要'字段类型异常: {type(existing_sync_info['前情提要'])}，重置为空列表")
                 existing_sync_info["前情提要"] = []
             
             # 获取最近完成的章节信息
             recent_chapters = []
-            for chapter_num in range(max(1, self.current_chapter - 4), self.current_chapter + 1):
-                if chapter_num - 1 < len(self.chapter_outlines):
-                    outline = self.chapter_outlines[chapter_num - 1]
-                    if outline:
-                        recent_chapters.append(f"第{chapter_num}章：{outline.title}")
+            try:
+                for chapter_num in range(max(1, self.current_chapter - 4), self.current_chapter + 1):
+                    if chapter_num - 1 < len(self.chapter_outlines):
+                        outline = self.chapter_outlines[chapter_num - 1]
+                        if outline and hasattr(outline, 'title'):
+                            recent_chapters.append(f"第{chapter_num}章：{outline.title}")
+                        else:
+                            logger.warning(f"第{chapter_num}章大纲信息缺失或无效")
+            except Exception as e:
+                logger.warning(f"获取最近章节信息时出错: {e}")
             
+            # 添加新的前情提要
             if recent_chapters:
                 summary = f"最近完成章节：{', '.join(recent_chapters)}"
-                if summary not in existing_sync_info["前情提要"]:
-                    existing_sync_info["前情提要"].append(summary)
+                try:
+                    if summary not in existing_sync_info["前情提要"]:
+                        existing_sync_info["前情提要"].append(summary)
+                        logger.debug(f"添加前情提要: {summary}")
+                except Exception as e:
+                    logger.warning(f"添加前情提要时出错: {e}")
+            
+            # 确保其他基本字段存在
+            basic_fields = {
+                "世界观": {},
+                "人物设定": {},
+                "剧情发展": {}
+            }
+            
+            for field, default_value in basic_fields.items():
+                if field not in existing_sync_info:
+                    existing_sync_info[field] = default_value
+                    logger.debug(f"添加缺失字段: {field}")
             
             # 保存更新后的同步信息
-            with open(self.sync_info_file, 'w', encoding='utf-8') as f:
-                json.dump(existing_sync_info, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"降级方案同步信息更新完成")
+            try:
+                # 确保输出目录存在
+                os.makedirs(os.path.dirname(self.sync_info_file), exist_ok=True)
+                
+                # 先写入临时文件，然后重命名，避免写入过程中出错导致文件损坏
+                temp_file = self.sync_info_file + ".tmp"
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(existing_sync_info, f, ensure_ascii=False, indent=2)
+                
+                # 原子性地替换文件
+                if os.path.exists(temp_file):
+                    if os.path.exists(self.sync_info_file):
+                        # 备份原文件
+                        backup_file = self.sync_info_file + ".backup"
+                        try:
+                            import shutil
+                            shutil.copy2(self.sync_info_file, backup_file)
+                            logger.debug(f"已备份原同步信息文件到 {backup_file}")
+                        except Exception as backup_error:
+                            logger.warning(f"备份原文件失败: {backup_error}")
+                    
+                    # 替换文件
+                    os.replace(temp_file, self.sync_info_file)
+                    logger.info(f"降级方案同步信息更新完成，文件大小: {os.path.getsize(self.sync_info_file)} 字节")
+                else:
+                    logger.error("临时文件创建失败，无法保存同步信息")
+                    
+            except OSError as e:
+                logger.error(f"保存同步信息文件时发生系统错误: {e}")
+                # 尝试直接写入（不使用临时文件）
+                try:
+                    with open(self.sync_info_file, 'w', encoding='utf-8') as f:
+                        json.dump(existing_sync_info, f, ensure_ascii=False, indent=2)
+                    logger.info("使用直接写入方式保存同步信息成功")
+                except Exception as direct_write_error:
+                    logger.error(f"直接写入也失败: {direct_write_error}")
+                    raise
             
         except Exception as e:
             logger.error(f"降级方案也失败了: {str(e)}", exc_info=True)
+            
+            # 最后的保底措施：创建最基本的同步信息文件
+            try:
+                minimal_sync_info = {
+                    "当前章节": self.current_chapter,
+                    "最后更新时间": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "前情提要": [f"降级方案生成 - 当前章节: {self.current_chapter}"]
+                }
+                
+                os.makedirs(os.path.dirname(self.sync_info_file), exist_ok=True)
+                with open(self.sync_info_file, 'w', encoding='utf-8') as f:
+                    json.dump(minimal_sync_info, f, ensure_ascii=False, indent=2)
+                
+                logger.info("已创建最基本的同步信息文件作为保底措施")
+                
+            except Exception as final_error:
+                logger.error(f"保底措施也失败了: {final_error}")
+                # 此时已经无法创建同步信息文件，但不应该影响主要功能
 
     def _create_sync_info_prompt(self, story_content: str) -> str:
         """创建生成同步信息的提示词"""
@@ -744,36 +988,126 @@ class ContentGenerator:
         )
 
     def _load_sync_info(self) -> dict:
-        """加载同步信息并解析为字典"""
-        if os.path.exists(self.sync_info_file):
-            try:
-                with open(self.sync_info_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    # 处理空文件的情况
-                    if not content.strip():
-                         logger.warning(f"同步信息文件 {self.sync_info_file} 为空，返回空字典。")
-                         return {}
-                    # 解析 JSON 内容
-                    return json.loads(content)
-            except json.JSONDecodeError as e:
-                # 处理 JSON 解析错误
-                logger.error(f"解析同步信息文件 {self.sync_info_file} 失败: {e}。返回空字典。")
-                # 可以选择保存错误内容以便调试
-                # try:
-                #     with open(self.sync_info_file + ".error", 'w', encoding='utf-8') as f_err:
-                #         f_err.write(content)
-                # except NameError: # Handle case where 'content' might not be defined if open failed
-                #     logger.error(f"无法写入错误日志，因为读取 {self.sync_info_file} 可能已失败。")
-                # except Exception as write_err:
-                #     logger.error(f"写入 sync_info.error 文件失败: {write_err}")
+        """
+        加载同步信息并解析为字典
+        处理各种异常情况以确保向后兼容性
+        """
+        # 处理同步信息文件不存在的情况
+        if not os.path.exists(self.sync_info_file):
+            logger.info(f"同步信息文件 {self.sync_info_file} 不存在，返回空字典（首次运行或文件被删除）")
+            return {}
+        
+        try:
+            # 检查文件权限
+            if not os.access(self.sync_info_file, os.R_OK):
+                logger.error(f"同步信息文件 {self.sync_info_file} 无读取权限，返回空字典")
                 return {}
-            except Exception as e:
-                 # 处理其他可能的读取错误
-                 logger.error(f"读取同步信息文件 {self.sync_info_file} 时发生其他错误: {e}。返回空字典。")
-                 return {}
-        else:
-            # 文件不存在，返回空字典
-            logger.warning(f"同步信息文件 {self.sync_info_file} 不存在，返回空字典。")
+            
+            with open(self.sync_info_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+                # 处理空文件的情况
+                if not content.strip():
+                    logger.warning(f"同步信息文件 {self.sync_info_file} 为空，返回空字典")
+                    return {}
+                
+                # 尝试解析 JSON 内容
+                try:
+                    sync_info = json.loads(content)
+                    
+                    # 验证解析结果是否为字典
+                    if not isinstance(sync_info, dict):
+                        logger.error(f"同步信息文件内容不是字典格式: {type(sync_info)}，返回空字典")
+                        return {}
+                    
+                    # 处理"当前章节"字段的各种异常情况
+                    if "当前章节" in sync_info:
+                        current_chapter = sync_info["当前章节"]
+                        
+                        # 处理字段值为None的情况
+                        if current_chapter is None:
+                            logger.warning("同步信息中'当前章节'字段为None，保持原样")
+                        
+                        # 处理字段值为空字符串的情况
+                        elif isinstance(current_chapter, str) and not current_chapter.strip():
+                            logger.warning("同步信息中'当前章节'字段为空字符串，设置为None")
+                            sync_info["当前章节"] = None
+                        
+                        # 处理字段值为非数字字符串的情况
+                        elif isinstance(current_chapter, str):
+                            try:
+                                # 尝试转换为整数
+                                chapter_num = int(current_chapter.strip())
+                                if chapter_num <= 0:
+                                    logger.warning(f"同步信息中'当前章节'字段值无效 ({chapter_num})，设置为None")
+                                    sync_info["当前章节"] = None
+                                else:
+                                    sync_info["当前章节"] = chapter_num
+                                    logger.debug(f"成功将'当前章节'字段从字符串转换为整数: {chapter_num}")
+                            except ValueError:
+                                logger.warning(f"同步信息中'当前章节'字段无法转换为整数: '{current_chapter}'，设置为None")
+                                sync_info["当前章节"] = None
+                        
+                        # 处理字段值为浮点数的情况
+                        elif isinstance(current_chapter, float):
+                            if current_chapter.is_integer() and current_chapter > 0:
+                                sync_info["当前章节"] = int(current_chapter)
+                                logger.debug(f"将'当前章节'字段从浮点数转换为整数: {int(current_chapter)}")
+                            else:
+                                logger.warning(f"同步信息中'当前章节'字段为无效浮点数: {current_chapter}，设置为None")
+                                sync_info["当前章节"] = None
+                        
+                        # 处理字段值为布尔类型的情况
+                        elif isinstance(current_chapter, bool):
+                            logger.warning(f"同步信息中'当前章节'字段为布尔类型: {current_chapter}，设置为None")
+                            sync_info["当前章节"] = None
+                        
+                        # 处理字段值为其他类型的情况
+                        elif not isinstance(current_chapter, int):
+                            logger.warning(f"同步信息中'当前章节'字段类型异常: {type(current_chapter)}，设置为None")
+                            sync_info["当前章节"] = None
+                        
+                        # 处理字段值为负数或零的情况
+                        elif isinstance(current_chapter, int) and current_chapter <= 0:
+                            logger.warning(f"同步信息中'当前章节'字段值无效: {current_chapter}，设置为None")
+                            sync_info["当前章节"] = None
+                    
+                    logger.debug(f"成功加载同步信息，包含 {len(sync_info)} 个字段")
+                    return sync_info
+                    
+                except json.JSONDecodeError as e:
+                    # 处理 JSON 解析错误
+                    logger.error(f"解析同步信息文件 {self.sync_info_file} 失败: {e}")
+                    
+                    # 保存错误内容以便调试（可选）
+                    try:
+                        error_file = self.sync_info_file + ".error"
+                        with open(error_file, 'w', encoding='utf-8') as f_err:
+                            f_err.write(content)
+                        logger.info(f"已保存损坏的同步信息内容到 {error_file} 以供调试")
+                    except Exception as write_err:
+                        logger.warning(f"无法保存错误内容到调试文件: {write_err}")
+                    
+                    return {}
+                    
+        except UnicodeDecodeError as e:
+            # 处理文件编码错误
+            logger.error(f"同步信息文件 {self.sync_info_file} 编码错误: {e}，返回空字典")
+            return {}
+            
+        except PermissionError as e:
+            # 处理权限错误
+            logger.error(f"读取同步信息文件 {self.sync_info_file} 权限不足: {e}，返回空字典")
+            return {}
+            
+        except OSError as e:
+            # 处理其他系统级错误（如磁盘空间不足、文件系统错误等）
+            logger.error(f"读取同步信息文件 {self.sync_info_file} 时发生系统错误: {e}，返回空字典")
+            return {}
+            
+        except Exception as e:
+            # 处理其他未预期的错误
+            logger.error(f"读取同步信息文件 {self.sync_info_file} 时发生未知错误: {e}，返回空字典", exc_info=True)
             return {}
 
 if __name__ == "__main__":
