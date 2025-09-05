@@ -9,10 +9,11 @@ from opencc import OpenCC
 def setup_logging(log_dir: str, clear_logs: bool = False):
     """设置日志系统"""
     root_logger = logging.getLogger()
-    # 检查是否已存在相同格式的处理器
-    for handler in root_logger.handlers:
-        if isinstance(handler, logging.StreamHandler) and handler.formatter._fmt == '%(asctime)s - %(levelname)s - %(message)s':
-            return  # 已存在，直接返回
+    
+    # 清理所有现有的处理器，避免重复
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        handler.close()
 
     # 清理旧的日志文件
     log_file = os.path.join(log_dir, "generation.log")
@@ -20,18 +21,18 @@ def setup_logging(log_dir: str, clear_logs: bool = False):
         try:
             os.remove(log_file)
         except Exception as e:
-            logging.error(f"清理日志文件失败: {e}")
+            print(f"清理日志文件失败: {e}")
 
     # 配置根日志记录器
     root_logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    # 添加文件处理器（唯一）
+    # 添加文件处理器
     file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    # 添加控制台处理器（唯一）
+    # 添加控制台处理器
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)

@@ -256,7 +256,8 @@ class OutlineGenerator:
                 return False 
 
             if valid_count == current_batch_size:
-                self._update_sync_info(batch_start_num, batch_end_num, self.outline_model)
+                # 移除outline模式下的同步信息更新，只有auto模式和finalize模式才更新
+                logging.info(f"outline模式不触发同步信息更新，仅保存大纲")
                 successful_outlines_in_run.extend([o for o in new_outlines_batch if isinstance(o, ChapterOutline)])
                 return True
             else:
@@ -330,34 +331,38 @@ class OutlineGenerator:
             logging.error(f"_parse_model_response: 处理响应时出错: {e}")
             return None
 
+    def _get_default_sync_info(self) -> dict:
+        """获取默认的同步信息结构"""
+        return {
+            "世界观": {
+                "世界背景": [],
+                "阵营势力": [],
+                "重要规则": [],
+                "关键场所": []
+            },
+            "人物设定": {
+                "人物信息": [],
+                "人物关系": []
+            },
+            "剧情发展": {
+                "主线梗概": "",
+                "重要事件": [],
+                "悬念伏笔": [],
+                "已解决冲突": [],
+                "进行中冲突": []
+            },
+            "前情提要": [],
+            "当前章节": 0,
+            "最后更新时间": ""
+        }
+
     def _load_sync_info(self) -> dict:
         """加载同步信息文件"""
         try:
             if os.path.exists(self.sync_info_file):
                 with open(self.sync_info_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            return {
-                "世界观": {
-                    "世界背景": [],
-                    "阵营势力": [],
-                    "重要规则": [],
-                    "关键场所": []
-                },
-                "人物设定": {
-                    "人物信息": [],
-                    "人物关系": []
-                },
-                "剧情发展": {
-                    "主线梗概": "",
-                    "重要事件": [],
-                    "悬念伏笔": [],
-                    "已解决冲突": [],
-                    "进行中冲突": []
-                },
-                "前情提要": [],
-                "当前章节": 0,
-                "最后更新时间": ""
-            }
+            return self._get_default_sync_info()
         except Exception as e:
             logging.error(f"加载同步信息文件时出错: {str(e)}", exc_info=True)
             return self._get_default_sync_info()
@@ -705,19 +710,37 @@ class OutlineGenerator:
                 search_queries.extend(outline.characters)
                 search_queries.extend(outline.settings)
             
-            # 2. 基于同步信息的关键信息
+            # 2. 基于同步信息的关键信息（限制为当前章节前3章内的信息）
             if self.sync_info:
-                # 添加世界观相关查询
+                # 计算需要参考的章节范围：当前章节前3章
+                reference_start = max(1, batch_start - 3)
+                reference_end = batch_start - 1
+                
+                # 只添加相关章节范围内的世界观信息
                 world_building = self.sync_info.get("世界观", {})
                 for key, values in world_building.items():
                     if values:
-                        search_queries.extend(values)
+                        # 过滤出与前3章相关的世界观信息
+                        filtered_values = self._filter_sync_info_by_chapter_range(
+                            values, reference_start, reference_end
+                        )
+                        search_queries.extend(filtered_values)
                 
-                # 添加人物相关查询
+                # 只添加前3章内出现的人物信息
                 character_info = self.sync_info.get("人物设定", {}).get("人物信息", [])
+                recent_characters = set()
+                
+                # 从前3章的大纲中收集角色
+                for outline in previous_outlines:
+                    if outline and reference_start <= outline.chapter_number <= reference_end:
+                        recent_characters.update(outline.characters)
+                
+                # 只添加在前3章中出现过的角色
                 for char in character_info:
                     if isinstance(char, dict):
-                        search_queries.append(char.get("名称", ""))
+                        char_name = char.get("名称", "")
+                        if char_name in recent_characters:
+                            search_queries.append(char_name)
             
             # 3. 基于当前章节范围的查询
             search_queries.append(f"第{batch_start}章到第{batch_end}章")
@@ -740,6 +763,35 @@ class OutlineGenerator:
         except Exception as e:
             logging.error(f"获取知识库参考信息时出错: {str(e)}")
             return ""
+    
+    def _filter_sync_info_by_chapter_range(self, values: list, start_chapter: int, end_chapter: int) -> list:
+        """根据章节范围过滤同步信息"""
+        try:
+            filtered_values = []
+            for value in values:
+                # 如果值中包含章节信息，检查是否在范围内
+                if isinstance(value, str):
+                    # 检查是否包含章节号模式（如"第X章"）
+                    import re
+                    chapter_matches = re.findall(r'第(\d+)章', value)
+                    if chapter_matches:
+                        # 如果包含章节号，检查是否在范围内
+                        for chapter_num_str in chapter_matches:
+                            chapter_num = int(chapter_num_str)
+                            if start_chapter <= chapter_num <= end_chapter:
+                                filtered_values.append(value)
+                                break
+                    else:
+                        # 如果不包含明确的章节号，保留该信息（可能是通用信息）
+                        filtered_values.append(value)
+                else:
+                    # 非字符串类型直接保留
+                    filtered_values.append(value)
+            
+            return filtered_values
+        except Exception as e:
+            logging.error(f"过滤同步信息时出错: {str(e)}")
+            return values  # 出错时返回原始值
 
 if __name__ == "__main__":
     import argparse

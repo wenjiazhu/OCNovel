@@ -40,6 +40,8 @@ def create_model(model_config):
         return GeminiModel(model_config)
     elif model_config["type"] == "openai":
         return OpenAIModel(model_config)
+    elif model_config["type"] == "volcengine":
+        return OpenAIModel(model_config)  # 火山引擎复用OpenAI兼容实现
     else:
         raise ValueError(f"不支持的模型类型: {model_config['type']}")
 

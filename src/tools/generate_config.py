@@ -82,7 +82,7 @@ def call_llm_to_fill_config(theme, novel_config_template):
         temperature = gemini_outline_config.get("temperature", 1.0) # 使用配置的 temperature
 
         if not api_key:
-            print("错误: 从 AIConfig 获取的 GEMINI_API_KEY 为空。")
+            print("错误: 未设置GEMINI_API_KEY环境变量或配置无效。")
             return None
         if not model_name:
              print("错误: 从 AIConfig 获取的 Gemini outline 模型名称为空。")
@@ -271,12 +271,12 @@ if __name__ == "__main__":
     # 检查 .env 文件是否存在并包含 GEMINI_API_KEY (由 AIConfig 内部处理，这里仅作提示)
     env_path = os.path.join(project_root_dir, ".env")
     if not os.path.exists(env_path):
-        print("警告: 未找到 .env 文件。请确保已创建 .env 文件并设置了所需的 API 密钥（如 GEMINI_API_KEY）。")
+        print("警告: 未找到 .env 文件。请确保已创建 .env 文件并设置了所需的 API 密钥。")
     else:
         # 简单检查下 .env 是否包含 GEMINI_API_KEY
         with open(env_path, 'r') as f:
             if 'GEMINI_API_KEY' not in f.read():
-                 print("警告: .env 文件中似乎缺少 'GEMINI_API_KEY'。请确保已正确设置。")
+                 print("警告: .env 文件中缺少必要的API密钥配置。请确保已正确设置。")
 
 
     print(f"将使用模板 '{os.path.basename(default_template_file)}' 和 AIConfig 中的 Gemini 模型生成 '{os.path.basename(default_output_file)}'。")

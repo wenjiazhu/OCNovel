@@ -5,6 +5,38 @@ import logging
 from dotenv import load_dotenv
 from .ai_config import AIConfig
 
+def _sanitize_config_for_logging(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    清理配置对象中的敏感信息，用于安全的日志输出
+    
+    Args:
+        config: 原始配置字典
+        
+    Returns:
+        清理后的配置字典，敏感信息已被替换为星号
+    """
+    if not isinstance(config, dict):
+        return config
+        
+    sanitized = {}
+    sensitive_keys = {'api_key', 'fallback_api_key', 'password', 'secret', 'token'}
+    
+    for key, value in config.items():
+        if isinstance(value, dict):
+            sanitized[key] = _sanitize_config_for_logging(value)
+        elif any(sensitive_key in key.lower() for sensitive_key in sensitive_keys):
+            # 如果值不为空，则显示前4位和后4位，中间用星号替代
+            if value and len(str(value)) > 8:
+                sanitized[key] = f"{str(value)[:4]}****{str(value)[-4:]}"
+            elif value:
+                sanitized[key] = "****"
+            else:
+                sanitized[key] = "未设置"
+        else:
+            sanitized[key] = value
+    
+    return sanitized
+
 class Config:
     """配置管理类"""
     
@@ -16,7 +48,11 @@ class Config:
             config_file: 配置文件路径
         """
         self.base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.config_file = config_file
+        # 如果配置文件路径不是绝对路径，则相对于项目根目录
+        if not os.path.isabs(config_file):
+            self.config_file = os.path.join(self.base_dir, config_file)
+        else:
+            self.config_file = config_file
         
         # 加载环境变量
         load_dotenv()
@@ -42,13 +78,17 @@ class Config:
             model_selection = self.config["generation_config"].get("model_selection", {})
             # outline_model
             outline_sel = model_selection.get("outline", {"provider": "gemini", "model_type": "outline"})
-            if outline_sel["provider"] == "openai":
+            if outline_sel["provider"] == "volcengine":
+                self.model_config["outline_model"] = self.ai_config.get_volcengine_config(outline_sel["model_type"])
+            elif outline_sel["provider"] == "openai":
                 self.model_config["outline_model"] = self.ai_config.get_openai_config(outline_sel["model_type"])
             else:
                 self.model_config["outline_model"] = self.ai_config.get_gemini_config(outline_sel["model_type"])
             # content_model
             content_sel = model_selection.get("content", {"provider": "gemini", "model_type": "content"})
-            if content_sel["provider"] == "openai":
+            if content_sel["provider"] == "volcengine":
+                self.model_config["content_model"] = self.ai_config.get_volcengine_config(content_sel["model_type"])
+            elif content_sel["provider"] == "openai":
                 self.model_config["content_model"] = self.ai_config.get_openai_config(content_sel["model_type"])
             else:
                 self.model_config["content_model"] = self.ai_config.get_gemini_config(content_sel["model_type"])
@@ -92,8 +132,8 @@ class Config:
         # 仿写配置
         self.imitation_config = self.config.get("imitation_config", {})
 
-        # 启动时打印当前 model_config 便于调试
-        logging.info(f"[调试] 当前 model_config: {self.model_config}")
+        # 启动时打印当前 model_config 便于调试（安全输出）
+        logging.info(f"[调试] 当前 model_config: {_sanitize_config_for_logging(self.model_config)}")
     
     def get_model_config(self, model_type: str) -> Dict[str, Any]:
         """
@@ -138,17 +178,22 @@ class Config:
         """
         获取仿写专用模型配置，优先级：
         1. model_config['imitation_model']
-        2. ai_config.gemini_config['fallback']（补全必要字段）
-        3. content_model
+        2. content_model（默认使用当前内容生成模型）
+        3. ai_config.gemini_config['fallback']（作为最后备用选项）
         """
         # 1. 优先使用 model_config['imitation_model']
         if "imitation_model" in self.model_config:
-            logging.info(f"[仿写模型选择] 使用 model_config['imitation_model']: {self.model_config['imitation_model']}")
+            logging.info(f"[仿写模型选择] 使用 model_config['imitation_model']: {_sanitize_config_for_logging(self.model_config['imitation_model'])}")
             return self.model_config["imitation_model"]
-        # 2. 其次使用 ai_config.gemini_config['fallback']
+        # 2. 默认使用 content_model（推荐）
+        content_model = self.model_config.get("content_model")
+        if content_model:
+            logging.info(f"[仿写模型选择] 使用 content_model: {_sanitize_config_for_logging(content_model)}")
+            return content_model
+        # 3. 最后使用 ai_config.gemini_config['fallback'] 作为备用
         fallback = getattr(self.ai_config, "gemini_config", {}).get("fallback")
         if fallback and fallback.get("enabled", False):
-            fallback_model_name = fallback.get("models", {}).get("default", "deepseek-ai/DeepSeek-R1")
+            fallback_model_name = fallback.get("models", {}).get("default", "deepseek-ai/DeepSeek-V3.1")
             imitation_fallback_config = {
                 "type": "gemini",
                 "model_name": fallback_model_name,
@@ -156,8 +201,7 @@ class Config:
                 "base_url": fallback.get("base_url", "https://api.siliconflow.cn/v1"),
                 "timeout": fallback.get("timeout", 180),
             }
-            logging.info(f"[仿写模型选择] 使用 gemini_config['fallback']: {imitation_fallback_config}")
+            logging.info(f"[仿写模型选择] 使用 gemini_config['fallback'] 作为最后备用: {_sanitize_config_for_logging(imitation_fallback_config)}")
             return imitation_fallback_config
-        # 3. 最后 fallback 到 content_model
-        logging.info(f"[仿写模型选择] fallback 到 content_model: {self.model_config.get('content_model')}")
-        return self.model_config.get("content_model") 
+        # 4. 如果所有配置都不可用，抛出异常
+        raise ValueError("无法获取仿写模型配置：未配置 imitation_model、content_model 或 fallback 模型") 
