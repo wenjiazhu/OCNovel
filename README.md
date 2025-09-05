@@ -1,882 +1,183 @@
-# OCNovel - AI 小说生成工具
+# OCNovel - AI小说生成系统
 
-OCNovel 是一个基于大语言模型的智能小说生成工具，能够根据参考小说和用户设定的主题、风格等参数，自动生成完整的长篇小说。
-
-## 🔒 安全特性
-
-- **API密钥安全保护**：系统自动识别和隐藏日志中的敏感信息，API密钥以 `sk-1234****cdef` 格式安全显示
-- **自动安全检查**：提供 `scripts/security_check.py` 脚本，自动检测代码中的潜在API密钥泄露风险
-- **配置安全输出**：所有配置日志都经过安全处理，确保敏感信息不会在终端或日志文件中泄露
-- **安全的错误处理**：错误信息中的敏感数据自动脱敏，提供必要信息的同时保护隐私
-
-## 功能特点
-
-- 🤖 支持多种 AI 模型（Gemini、OpenAI、火山引擎）
-  - Gemini模型：使用 `gemini-2.5-flash`（内容生成）和 `gemini-2.5-pro`（大纲生成）
-  - OpenAI模型：支持自定义API端点，兼容多种模型
-  - 🌋 火山引擎模型：支持 DeepSeek-V3.1 模型，默认启用深度思考模式，显著提升内容质量
-  - 🔄 智能备用模型系统：当主模型不可用时，自动切换到备用模型
-    - Gemini Flash → DeepSeek-R1
-    - Gemini Pro → Qwen3-235B-A22B
-    - 火山引擎 → DeepSeek-R1（通过硫基流动API）
-    - OpenAI模型 → 相应的备用模型
-- 📚 智能知识库系统，支持参考小说导入和分析
-- 📝 自动生成小说大纲和章节内容
-- 💡 支持手动更新和优化小说大纲
-- 🔄 支持手动更新已生成章节的摘要信息
-- 👥 智能角色管理系统 (待实现)
-- 🎯 支持章节重新生成和内容优化 (通过 `content --target-chapter`)
-- ✨ 章节内容自动定稿与优化 (集成在 `content` 和 `auto` 流程中)
-- 📂 基于小说标题的专属输出目录管理和配置快照
-- ⚙️ 自动工作目录初始化
-- 📄 首次运行时可交互生成基础配置文件
-- 📊 完整的日志记录系统
-- 🎨 支持生成营销内容（标题、封面提示词等）
-- ✍️ 智能文本仿写功能，支持风格迁移和文风转换
-  - 🎭 手动仿写：支持自定义风格源文件进行文本风格迁移
-  - 🤖 自动仿写：在小说生成流程中自动触发，无需手动干预
-  - 🎨 多种风格：内置古风雅致、悬疑紧张、热血激昂等经典风格
-  - 🔍 智能检索：基于知识库的语义检索，精准匹配风格片段
-  - 📊 质量控制：内置内容保持度和风格一致性检查
-- 🔍 **AI浓度检测与优化系统**
-  - 📊 多维度AI痕迹检测：词汇密度、句式模式、对话自然度等
-  - 🎯 朱雀AI检测适配：专门针对朱雀AI检测器进行优化调整
-  - 📋 详细分析报告：提供完整的检测结果和风险评估
-  - 🔧 智能优化建议：自动生成针对性的改进建议
-  - 🌏 中文优化：完全支持中文引号识别和标点规范
-
-## 系统要求
-
-- Python 3.9+
-- 足够的磁盘空间用于存储知识库和生成内容
-- API 密钥（Gemini 和/或 OpenAI）
-
-## 安装说明
-
-1. 克隆项目到本地：
-```bash
-git clone https://github.com/yourusername/OCNovel.git
-cd OCNovel
-```
-
-2. 创建并激活虚拟环境：
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# 或
-.venv\Scripts\activate  # Windows
-```
-
-3. 安装依赖：
-```bash
-pip install -r requirements.txt
-```
-
-> 主要依赖说明：
-> - openai：用于调用 OpenAI API（嵌入/内容/大纲模型）
-> - google-generativeai：用于调用 Gemini API（支持 gemini-2.5-flash、gemini-2.5-pro 等模型）
-> - chromadb、faiss-cpu：知识库向量化与检索
-> - jieba：中文分词
-> - FlagEmbedding：中文语义重排序
-> - python-dotenv：环境变量加载
-> - tenacity：自动重试机制
-> - numpy：向量与数值处理
-> - pytest：单元测试
-> - pydantic：类型校验
-> - opencc：繁简转换（章节整理工具用）
-
-4. 配置环境变量：
-创建 `.env` 文件并添加以下内容：
-```
-# Gemini API配置
-GEMINI_API_KEY=你的Gemini API密钥
-
-# 火山引擎DeepSeek-V3.1配置（可选）
-VOLCENGINE_API_KEY=你的火山引擎API密钥
-VOLCENGINE_API_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3  # API端点
-VOLCENGINE_MODEL_ID=deepseek-v3-1-250821  # 模型标识符
-VOLCENGINE_THINKING_ENABLED=true  # 是否启用深度思考模式（推荐启用）
-VOLCENGINE_TIMEOUT=120  # 请求超时时间（秒）
-VOLCENGINE_MAX_TOKENS=8192  # 最大输出长度（最大32768）
-VOLCENGINE_TEMPERATURE=0.7  # 生成温度
-VOLCENGINE_RETRY_DELAY=15  # 重试延迟（秒）
-VOLCENGINE_MAX_RETRIES=3  # 最大重试次数
-
-# 火山引擎故障转移配置
-VOLCENGINE_FALLBACK_ENABLED=true  # 启用故障转移（推荐）
-
-# 嵌入模型配置（用于知识库向量化等）
-OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
-OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
-
-# 大纲模型配置（用于生成小说大纲）
-OPENAI_OUTLINE_API_KEY=你的OpenAI大纲模型API密钥
-OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
-
-# 内容模型配置（用于生成章节内容）
-OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
-OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
-```
-
-5. 准备配置文件 (`config.json`)：
-   - 你可以手动复制 `config.json.example` 并重命名为 `config.json`，然后根据需要修改。
-   - **首次运行** `main.py` 时，如果 `config.json` 不存在，程序会提示你输入小说主题，并自动调用 `src/tools/generate_config.py` 生成一个基础的 `config.json` 文件。
-
-## 备用模型系统
-
-OCNovel 实现了智能的备用模型系统，确保在主模型不可用时能够自动切换到备用模型，提高系统的稳定性和可用性。
-
-### 备用模型映射
-
-| 主模型 | 备用模型 | 说明 |
-|--------|----------|------|
-| Gemini Flash | DeepSeek-R1 | 当Gemini Flash不可用时自动切换 |
-| Gemini Pro | Qwen3-235B-A22B | 当Gemini Pro不可用时自动切换 |
-| 火山引擎DeepSeek-V3.1 | DeepSeek-R1 | 当火山引擎不可用时自动切换到硫基流动API |
-| OpenAI模型 | 相应备用模型 | 根据模型类型选择对应的备用模型 |
-
-### 工作原理
-
-1. **自动检测**：系统会监控主模型的调用状态
-2. **错误识别**：当检测到连接错误、超时或API错误时，触发备用模型
-3. **无缝切换**：自动切换到配置的备用模型，保持相同的生成参数
-4. **日志记录**：详细记录切换过程和结果
-
-### 配置选项
-
-- `GEMINI_FALLBACK_ENABLED`：是否启用备用模型功能（默认：True）
-- `GEMINI_FALLBACK_BASE_URL`：备用API的基础URL
-- `GEMINI_FALLBACK_TIMEOUT`：备用API的超时时间
-- `OPENAI_EMBEDDING_API_KEY`：用作备用模型的API密钥
-
-## 快速开始
-
-### 模型选择配置
-
-在 `config.json` 中配置模型选择：
-
-```json
-{
-  "generation_config": {
-    "model_selection": {
-      "outline": {
-        "provider": "volcengine",  // 可选: "gemini", "openai", "volcengine"
-        "model_type": "outline"
-      },
-      "content": {
-        "provider": "volcengine",  // 可选: "gemini", "openai", "volcengine"
-        "model_type": "content"
-      }
-    }
-  }
-}
-```
-
-**模型推荐**：
-- **火山引擎DeepSeek-V3.1**：推荐使用，支持深度思考模式，内容质量高
-- **Gemini模型**：稳定可靠，适合长文本生成
-- **OpenAI模型**：兼容性好，支持多种第三方API
-
-### 基本使用示例
-
-1. **生成完整小说（包含自动仿写）**：
-```bash
-python3 main.py auto
-# 或
-python main.py auto
-```
-
-2. **文本仿写**：
-```bash
-python main.py imitate --style-source style.txt --input-file original.txt --output-file output.txt
-```
-
-3. **生成营销内容**：
-```bash
-python src/tools/generate_marketing.py --keywords "玄幻" "修仙" --characters "主角" "反派"
-```
-
-4. **全局仿写配置**：
-```bash
-# 开启全局仿写（默认已开启）
-# 在config.json中设置：trigger_all_chapters: true
-
-# 关闭全局仿写，仅对指定章节进行仿写
-# 在config.json中设置：trigger_all_chapters: false
-```
-
-## 使用方法
-
-### 1. 主程序运行 (main.py)
-
-```bash
-python main.py [--config <配置文件路径>] [command] [options]
-```
-- `--config`：可选，指定配置文件的路径，默认为 `config.json`。
-
-支持以下子命令：
-
-#### (1) 自动生成完整小说流程 (`auto`)
-```bash
-python main.py auto [--extra-prompt "额外提示词"]
-```
-- **功能**：自动执行完整的小说生成流程。从 `summary.json` (位于输出目录) 读取进度，检查并生成缺失的大纲，然后从上次进度开始生成章节内容并自动定稿，直至达到 `config.json` 中设定的 `target_chapters`。
-- **参数**：
-  - `--extra-prompt`：可选，用于指导生成的额外提示词，会传递给大纲和内容生成阶段。
-
-#### (2) 单独生成大纲 (`outline`)
-```bash
-python main.py outline \
-    --start <起始章节> \
-    --end <结束章节> \
-    [--novel-type <小说类型>] \
-    [--theme <主题>] \
-    [--style <写作风格>] \
-    [--extra-prompt "额外提示词"]
-```
-- **功能**：生成或更新指定章节范围的小说大纲 (`outline.json`)。
-- **参数**：
-  - `--start`：必需，起始章节号（从 1 开始）。
-  - `--end`：必需，结束章节号（包含）。
-  - `--novel-type`：可选，小说类型（如未提供，使用配置文件中的设置）。
-  - `--theme`：可选，主题（如未提供，使用配置文件中的设置）。
-  - `--style`：可选，写作风格（如未提供，使用配置文件中的设置）。
-  - `--extra-prompt`：可选，用于指导大纲生成的额外提示词。
-
-#### (3) 生成章节内容 (`content`)
-```bash
-python main.py content \
-    [--start-chapter <起始章节>] \
-    [--target-chapter <指定章节>] \
-    [--extra-prompt "额外提示词"]
-```
-- **功能**：生成或重新生成章节内容。默认从上次中断的章节（记录在 `progress.json`）开始生成，直至大纲结束。生成过程中会自动调用定稿逻辑。
-- **参数**：
-  - `--start-chapter`：可选，指定从哪一章开始生成。如果指定，将覆盖 `progress.json` 中的记录。
-  - `--target-chapter`：可选，指定仅重新生成某一个章节。优先级高于 `--start-chapter`。
-  - `--extra-prompt`：可选，用于指导内容生成的额外提示词。
-
-#### (4) 手动章节定稿处理 (`finalize`)
-```bash
-python main.py finalize --chapter <章节号>
-```
-- **功能**：对指定章节进行手动的定稿处理（通常已集成到 `content` 和 `auto` 流程中，此命令主要用于特殊情况或调试）。
-- **参数**：
-  - `--chapter`：必需，需要定稿的章节号（从 1 开始）。
-
-#### (5) 文本仿写功能 (`imitate`)
-```bash
-python main.py imitate \
-    --style-source <风格源文件> \
-    --input-file <原始文本文件> \
-    --output-file <输出文件> \
-    [--extra-prompt "额外要求"]
-```
-- **功能**：根据指定的风格范文对原始文本进行仿写，实现风格的智能迁移。系统会构建临时知识库分析风格特征，然后使用AI模型生成符合目标风格的文本。
-- **参数**：
-  - `--style-source`：必需，作为风格参考的源文件路径（如：`style.txt`）
-  - `--input-file`：必需，需要进行仿写的原始文本文件路径（如：`original.txt`）
-  - `--output-file`：必需，仿写结果的输出文件路径（如：`output.txt`）
-  - `--extra-prompt`：可选，额外的仿写要求或指导（如："保持古风韵味"、"增加悬疑氛围"等）
-- **工作原理**：
-  1. 读取风格源文件，构建临时知识库
-  2. 使用嵌入模型分析原始文本与风格文本的相似性
-  3. 检索最相关的风格片段作为范例
-  4. 生成仿写提示词，调用AI模型进行风格迁移
-  5. 输出仿写结果到指定文件
-- **使用示例**：
-  ```bash
-  # 将简单描述仿写为古风雅致的文风
-  python main.py imitate --style-source style.txt --input-file original.txt --output-file imitation_output.txt --extra-prompt "保持古风韵味"
-  
-  # 将现代文仿写为悬疑风格
-  python main.py imitate --style-source mystery_style.txt --input-file modern_text.txt --output-file mystery_output.txt --extra-prompt "增加悬疑氛围和紧张感"
-  ```
-
-#### (6) 自动仿写功能
-- **功能**：在auto流程的定稿阶段自动触发仿写功能，无需手动干预。系统会根据配置对每个章节自动进行风格仿写。
-- **触发条件**：在`config.json`的`imitation_config.auto_imitation.trigger_all_chapters`中配置（默认：true，对所有章节进行仿写）
-- **工作流程**：
-  1. 章节内容生成完成后进入定稿阶段
-  2. 检查是否开启全局仿写功能
-  3. 如果开启，自动读取默认风格源文件
-  4. 构建临时知识库并检索风格范例
-  5. 生成仿写内容并保存（文件名后缀：`_imitated`）
-  6. 备份原文件（文件名后缀：`_original`）
-- **配置说明**：
-  ```json
-  "imitation_config": {
-    "enabled": true,
-    "auto_imitation": {
-      "enabled": true,
-      "trigger_all_chapters": true,
-      "style_sources": [
-        {
-          "name": "古风雅致",
-          "file_path": "data/reference/古风风格参考.txt",
-          "description": "古风雅致的文风，适合玄幻仙侠类小说",
-          "extra_prompt": "保持古风韵味，增加诗词意境"
-        }
-      ],
-      "default_style": "古风雅致",
-      "output_suffix": "_imitated",
-      "backup_original": true
-    }
-  }
-  ```
-- **全局仿写配置说明**：
-  - `trigger_all_chapters: true`：开启全局仿写，每个章节都会自动进行仿写
-  - `trigger_all_chapters: false`：关闭全局仿写，仅对指定章节进行仿写
-  - 当关闭全局仿写时，可以使用`trigger_chapters`数组指定需要仿写的章节号
-
-### 2. 生成营销内容
-
-```bash
-python src/tools/generate_marketing.py --keywords "关键词1" "关键词2" --characters "角色1" "角色2"
-```
-*(此工具的功能和用法请参考其内部实现或相关文档)*
-
-### 3. 整理章节内容
-
-```bash
-python src/tools/process_novel.py <输入目录> <输出目录> -e <结束章节号> [-s <起始章节号>] [--split-sentences]
-```
-*(此工具的功能和用法请参考其内部实现或相关文档)*
-
-### 4. AI浓度检测与优化
-
-OCNovel 提供了强大的AI浓度检测工具，帮助评估和优化生成内容的自然度，规避AI检测系统。
-
-#### 4.1 AI浓度检测工具 (`ai_density_checker.py`)
-
-**功能特点**：
-- 🔍 **多维度检测**：从词汇密度、句式模式、对话自然度、情感真实度等多个维度分析AI痕迹
-- 🎯 **朱雀AI检测适配**：专门针对朱雀AI检测器进行优化，提供具体的改进建议
-- 📊 **详细分析报告**：提供完整的检测结果和风险评估
-- 🔧 **改进建议**：自动生成针对性的优化建议
-- 🌏 **中文优化**：完全支持中文引号识别和中文对话检测
-
-**使用方法**：
-
-```python
-# 导入AI密度检测器
-from src.tools.ai_density_checker import EnhancedAIDensityChecker, check_chapter_ai_density
-
-# 1. 检测文本的AI浓度
-checker = EnhancedAIDensityChecker()
-text = "要检测的文本内容"
-result = checker.check_density(text)
-
-print(f"总体AI分数: {result['total_score']:.1f}")
-print(f"朱雀风险分数: {result['zhuque_analysis']['zhuque_risk_score']:.1f}")
-
-# 2. 检测章节文件
-result = check_chapter_ai_density('path/to/chapter.txt')
-print(f"AI浓度分数: {result['ai_density_score']:.1f}")
-print(f"评估: {result['assessment']}")
-
-# 3. 获取改进建议
-for suggestion in result['suggestions']:
-    print(f"- {suggestion}")
-```
-
-**检测维度说明**：
-
-1. **AI词汇密度**：检测使用"伴随着"、"与此同时"、"毫无疑问"等AI化词汇的频率
-2. **句式模式**：分析是否存在过于规范的句式结构
-3. **对话自然度**：评估对话比例和对话中的自然化表达
-4. **情感真实度**：检测情感表达的真实性和人性化程度
-5. **语言变化度**：分析句子长度和结构的变化程度
-6. **朱雀AI检测特征**：针对朱雀AI检测器的特殊优化检查
-
-**朱雀AI检测优化重点**：
-- ✅ **重复结构分数≤83.3分**：避免相同句式的重复使用
-- ✅ **缺乏犹豫分数≤70.0分**：增加"呃"、"那个"、"怎么说呢"等犹豫词
-- ✅ **正式转折分数≤3.0分**：用口语化转折词替换正式表达
-- ✅ **技术精确性保持0.0分**：避免过于技术化的描述
-- 🎯 **目标**：将朱雀AI检测风险分数降到20分以下
-
-**输出结果示例**：
-
-```python
-{
-    'total_score': 45.2,  # 总体AI分数（越低越好）
-    'dimension_scores': {
-        'ai_vocabulary_score': 35.0,      # AI词汇密度
-        'sentence_pattern_score': 40.0,   # 句式模式
-        'dialogue_naturality_score': 60.0, # 对话自然度
-        'emotional_authenticity_score': 30.0, # 情感真实度
-        'linguistic_variation_score': 25.0    # 语言变化度
-    },
-    'zhuque_analysis': {
-        'zhuque_risk_score': 38.5,         # 朱雀风险分数
-        'high_risk_features': ['缺乏犹豫', '重复结构'],
-        'targeted_suggestions': [
-            '增加犹豫词：呃、那个、怎么说呢',
-            '减少重复句式，增加语言变化'
-        ]
-    },
-    'improvement_suggestions': [
-        '大幅增加人物对话，目标比例40%以上',
-        '替换AI化词汇：伴随着→然后、与此同时→这时候',
-        '使用更多不完整句子和口语化表达'
-    ]
-}
-```
-
-#### 4.2 中文标点符号规范化支持
-
-AI密度检测器完全支持中文标点符号规范化要求：
-
-- ✅ **中文引号识别**：正确识别 `""` 和 `''` 等中文引号
-- ✅ **冒号对话检测**：支持 `某某道："对话内容"` 格式
-- ✅ **混合对话格式**：同时支持直接引号对话和冒号引导对话
-- ✅ **标点符号规范**：强制要求使用中文省略号（……）和破折号（——）
-
-#### 4.3 实际应用建议
-
-**在小说生成流程中的应用**：
-
-1. **生成后检测**：
-   ```bash
-   # 在章节生成完成后进行检测
-   python -c "from src.tools.ai_density_checker import check_chapter_ai_density; 
-   result = check_chapter_ai_density('data/output/novel/第1章.txt'); 
-   print(f'AI分数: {result[\"ai_density_score\"]:.1f}')"
-   ```
-
-2. **批量检测**：
-   ```python
-   import os
-   from src.tools.ai_density_checker import check_chapter_ai_density
-   
-   # 检测所有章节
-   for filename in os.listdir('data/output/novel/'):
-       if filename.endswith('.txt'):
-           result = check_chapter_ai_density(f'data/output/novel/{filename}')
-           print(f"{filename}: {result['ai_density_score']:.1f}分")
-   ```
-
-3. **结合仿写优化**：
-   ```bash
-   # 对高AI分数的章节进行仿写
-   python main.py imitate --style-source style.txt --input-file high_ai_chapter.txt --output-file optimized_chapter.txt
-   ```
-
-**分数评级标准**：
-- **0-20分**：自然度很高，AI痕迹很少 ✅
-- **21-40分**：自然度较高，有轻微AI痕迹 ✅
-- **41-60分**：自然度一般，AI痕迹明显 ⚠️
-- **61-80分**：AI痕迹较重，需要优化 ❌
-- **81-100分**：AI痕迹很重，急需改进 ❌
-
-### 5. 备用模型功能示例
-
-```bash
-python examples/fallback_usage_example.py
-```
-这个示例展示了如何使用备用模型功能，包括：
-- Gemini模型的备用模型切换
-- OpenAI模型的备用模型切换
-- 错误处理和日志记录
+一个基于Python的AI小说自动生成系统，支持东方玄幻、仙侠、武侠等多种类型的小说创作。系统采用模块化设计，集成了多种AI模型接口，提供从大纲生成到章节内容创作的全流程自动化。
 
 ## 项目结构
 
 ```
 OCNovel/
-├── data/                 # 数据目录 (自动创建)
-│   ├── cache/           # 知识库、模型缓存等
-│   ├── logs/            # 日志文件
-│   ├── output/          # 生成输出根目录
-│   │   ├──  <novel_title>/ # 基于小说标题的专属输出目录
-│   │   │   └── config_snapshot.json # 本次运行的配置快照
-│   │   ├── content_kb/  # 章节知识库
-│   │   ├── outline.json # 生成的小说大纲
-│   │   ├── summary.json # 各章节摘要信息
-│   │   └── sync_info.json # 同步信息
-│   └── reference/       # 参考小说存放处
-├── src/                 # 源代码
-│   ├── config/          # 配置管理
-│   │   ├── ai_config.py     # AI Config类，加载和管理LLM配置
-│   │   └── config.py     # Config类，加载和管理配置
-│   ├── generators/      # 生成器模块
-│   │   ├── common/       # 通用工具 (如 utils.py)
-│   │   ├── content/      # 章节内容生成
-│   │   │   └── content_generator.py
-│   │   ├── finalizer/    # 章节定稿处理
-│   │   │   └── finalizer.py
-│   │   ├── outline/      # 大纲生成
-│   │   │   └── outline_generator.py
-│   │   └── prompts.py    # 提示词生成（包含仿写功能提示词）
-│   ├── knowledge_base/  # 知识库管理
-│   │   └── knowledge_base.py
-│   ├── models/          # AI模型接口
-│   │   ├── base_model.py # 基础模型类
-│   │   ├── gemini_model.py
-│   │   └── openai_model.py
-│   └── tools/           # 辅助工具脚本
-│       ├── ai_density_checker.py    # AI浓度检测与优化工具
-│       ├── generate_config.py       # 自动生成配置文件脚本
-│       ├── generate_marketing.py    # 营销内容生成
-│       └── process_novel.py         # 章节内容整理
-├── tests/               # 测试文件
-├── examples/            # 使用示例
-│   └── fallback_usage_example.py  # 备用模型使用示例
-├── .env                 # 环境变量 (API Keys等)
-├── config.json          # 主配置文件
-├── config.json.example   # 配置文件示例
-├── main.py              # 主程序入口
-├── requirements.txt     # Python依赖列表
-└── README.md           # 项目说明
+├── main.py                    # 主程序入口
+├── config.json.example        # 配置文件模板
+├── config.json               # 配置文件（基于模板生成）
+├── requirements.txt          # Python依赖包列表
+├── .env.example              # 环境变量模板
+├── .env                      # 环境变量配置
+├── README.md                 # 项目说明文档
+├── .gitignore               # Git忽略配置
+│
+├── src/                      # 源代码目录
+│   ├── config/               # 配置管理模块
+│   │   ├── ai_config.py      # AI模型配置管理
+│   │   └── config.py         # 通用配置管理
+│   │
+│   ├── generators/           # 内容生成器模块
+│   │   ├── common/           # 通用数据结构和工具
+│   │   │   ├── data_structures.py  # 数据结构定义
+│   │   │   └── utils.py      # 通用工具函数
+│   │   │
+│   │   ├── content/          # 章节内容生成
+│   │   │   ├── content_generator.py    # 内容生成器
+│   │   │   ├── consistency_checker.py # 一致性检查器
+│   │   │   └── validators.py          # 内容验证器
+│   │   │
+│   │   ├── outline/          # 大纲生成
+│   │   │   └── outline_generator.py   # 大纲生成器
+│   │   │
+│   │   ├── finalizer/        # 内容最终化处理
+│   │   │   └── finalizer.py           # 内容最终化器
+│   │   │
+│   │   ├── models.py         # 生成模型定义
+│   │   ├── prompts.py        # 提示词模板
+│   │   ├── title_generator.py        # 标题生成器
+│   │   └── humanization_prompts.py  # 人性化提示词
+│   │
+│   ├── models/               # AI模型接口
+│   │   ├── base_model.py     # 基础模型抽象类
+│   │   ├── gemini_model.py   # Google Gemini模型接口
+│   │   └── openai_model.py   # OpenAI模型接口
+│   │
+│   ├── knowledge_base/       # 知识库模块
+│   │   └── knowledge_base.py # 知识库管理
+│   │
+│   └── tools/                # 工具和辅助功能
+│       ├── generate_config.py       # 配置生成工具
+│       └── generate_marketing.py     # 营销内容生成
+│
+└── data/                     # 数据目录
+    ├── cache/                # 缓存数据存储
+    ├── logs/                 # 日志文件存储
+    ├── output/               # 生成内容输出目录
+    ├── marketing/            # 营销内容存储
+    ├── reference/            # 参考资料存储
+    └── style_sources/        # 风格源文件存储
+```
 
-## 故障排除
+## 核心模块功能
 
-### 安全检查
+### 1. 配置管理模块 (`src/config/`)
+- **config.py**: 统一的配置管理类，支持环境变量加载和敏感信息过滤
+- **ai_config.py**: AI模型配置管理，支持多模型切换和配置
 
-如果担心API密钥泄露问题，可以运行安全检查脚本：
+### 2. 内容生成模块 (`src/generators/`)
+- **outline_generator.py**: 小说大纲生成器，支持章节结构规划
+- **content_generator.py**: 章节内容生成器，集成一致性检查和验证
+- **consistency_checker.py**: 内容一致性检查，确保情节连贯
+- **validators.py**: 内容验证器，检查逻辑和重复内容
+- **finalizer.py**: 内容最终化处理，优化输出质量
 
+### 3. AI模型接口 (`src/models/`)
+- **base_model.py**: 基础模型抽象类，定义统一接口
+- **gemini_model.py**: Google Gemini模型接口实现
+- **openai_model.py**: OpenAI模型接口实现
+- 支持多模型切换和备用模型机制
+
+### 4. 知识库模块 (`src/knowledge_base/`)
+- **knowledge_base.py**: 知识库管理，支持参考文件加载和缓存
+- 支持文本分块和语义搜索功能
+
+### 环境配置
+- Python 3.9+
+- 支持的AI模型API密钥（OpenAI、Gemini、VolcEngine等）
+- 配置文件 `config.json`（基于 `config.json.example` 生成）
+- 环境变量文件 `.env`（包含API密钥等敏感信息）
+
+## 基础使用示例
+
+### 1. 安装依赖
 ```bash
-python3 scripts/security_check.py
+pip install -r requirements.txt
 ```
 
-此脚本会：
-- 扫描代码中的潜在API密钥泄露风险
-- 验证日志输出的安全性
-- 测试安全输出函数的正常工作
-
-### 火山引擎模型配置问题
-
-如果遇到 "ERROR - 不支持的模型类型: volcengine" 错误：
-
-1. **问题原因**：项目已经修复了该问题，如果仍然出现，可能是缓存问题
-2. **解决方案**：
-   - 重新启动程序
-   - 检查 `VOLCENGINE_API_KEY` 环境变量是否正确设置
-   - 确保配置文件中的模型选择正确
-
-### Gemini API 调用失败
-
-如果遇到 "404 models/gemini-2.5-flash-preview is not found" 错误：
-
-1. **问题原因**：模型名称已更新，旧版本模型名称不再可用
-2. **解决方案**：项目已自动使用正确的模型名称：
-   - 内容生成：`gemini-2.5-flash`
-   - 大纲生成：`gemini-2.5-pro`
-
-### 其他常见问题
-
-1. **API密钥错误**：确保在 `.env` 文件中正确设置了所有必需的API密钥
-2. **网络连接问题**：如果使用代理，确保代理设置正确
-3. **模型超时**：可以调整配置文件中的 `timeout` 参数
-4. **仿写功能问题**：
-   - **风格文件为空**：确保风格源文件包含足够的文本内容
-   - **仿写效果不理想**：尝试提供更具体的 `--extra-prompt` 参数
-   - **知识库构建失败**：检查风格文件的编码格式，确保为UTF-8
-
-## 配置说明 (`config.json`)
-
-配置文件是指导小说生成的核心。如果 `config.json` 不存在，首次运行 `main.py` 时会尝试自动调用 `src/tools/generate_config.py` 生成一个基础文件。
-
-主要配置项分为以下部分：
-
-### 1. AI 模型配置（.env 文件）
-
-在项目根目录创建 `.env` 文件，配置 AI 模型相关参数：
-
-```
-# Gemini API配置
-GEMINI_API_KEY=你的Gemini API密钥
-
-# 火山引擎DeepSeek-V3.1配置（推荐）
-VOLCENGINE_API_KEY=你的火山引擎API密钥
-VOLCENGINE_API_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3  # API端点
-VOLCENGINE_MODEL_ID=deepseek-v3-1-250821  # 模型标识符
-VOLCENGINE_THINKING_ENABLED=true  # 深度思考模式（推荐启用）
-VOLCENGINE_TIMEOUT=120  # 请求超时时间（秒）
-VOLCENGINE_MAX_TOKENS=8192  # 最大输出长度（最大32768）
-VOLCENGINE_TEMPERATURE=0.7  # 生成温度
-VOLCENGINE_RETRY_DELAY=15  # 重试延迟（秒）
-VOLCENGINE_MAX_RETRIES=3  # 最大重试次数
-
-# 火山引擎故障转移配置
-VOLCENGINE_FALLBACK_ENABLED=true  # 启用故障转移（推荐）
-
-# 嵌入模型配置（用于知识库向量化等）
-OPENAI_EMBEDDING_API_KEY=你的OpenAI嵌入模型API密钥
-OPENAI_EMBEDDING_API_BASE=你的OpenAI嵌入模型API基础URL
-
-# 大纲模型配置（用于生成小说大纲）
-OPENAI_OUTLINE_API_KEY=你的OpenAI大纲模型API密钥
-OPENAI_OUTLINE_API_BASE=你的OpenAI大纲模型API基础URL
-
-# 内容模型配置（用于生成章节内容）
-OPENAI_CONTENT_API_KEY=你的OpenAI内容模型API密钥
-OPENAI_CONTENT_API_BASE=你的OpenAI内容模型API基础URL
-```
-
-- `GEMINI_API_KEY`：用于 Gemini LLM 的 API 密钥。
-- `VOLCENGINE_API_KEY`：用于火山引擎DeepSeek-V3.1模型的API密钥。
-- `VOLCENGINE_THINKING_ENABLED`：是否启用深度思考模式（推荐启用）。
-- `OPENAI_EMBEDDING_API_KEY`/`OPENAI_EMBEDDING_API_BASE`：用于知识库嵌入模型（如文本向量化）。
-- `OPENAI_OUTLINE_API_KEY`/`OPENAI_OUTLINE_API_BASE`：用于生成小说大纲的 LLM。
-- `OPENAI_CONTENT_API_KEY`/`OPENAI_CONTENT_API_BASE`：用于生成章节内容的 LLM。
-
-如不需要某项功能，可留空对应配置。
-
-### 2. 项目配置（config.json）
-
-将`config.json.example`的文件名改为`config.json`，编辑 `config.json` 文件，设置项目相关参数。详细配置说明如下：
-
-#### 2.1 知识库配置 (knowledge_base_config)
-
-用于管理和处理参考小说的配置项。
-
-```json
-{
-  "reference_files": ["data/reference/my_novel.txt"],  // 参考小说文件路径列表，支持多个文件
-  "chunk_size": 1000,                                  // 文本分块大小，用于将长文本分割成小块进行处理
-  "chunk_overlap": 200,                                // 分块重叠大小，确保上下文连贯性
-  "cache_dir": "data/cache"                            // 知识库缓存目录，用于存储处理后的文本块
-}
-```
-
-#### 2.2 日志配置 (log_config)
-
-用于记录系统运行状态的配置项。
-
-```json
-{
-  "max_retries": 3,          // 单个任务（如生成章节）失败时的最大重试次数
-  "retry_delay": 10,         // 重试之间的延迟时间（秒）
-  "force_rebuild_kb": false, // 是否强制重新构建知识库，即使缓存存在
-  "validation": {            // 内容验证选项 (部分可能未完全实现)
-    "check_logic": true,
-    "check_consistency": true,
-    "check_duplicates": true
-  }
-}
-```
-
-### 5. 输出配置 (`output_config`)
-
-控制生成结果的保存方式。
-
-```json
-{
-  "format": "txt",               // 输出文件格式 (目前主要影响 process_novel.py)
-  "encoding": "utf-8",           // 输出文件编码
-  "save_outline": true,          // 是否保存生成的小说大纲 (outline.json)
-  "save_character_states": false, // 是否保存角色状态信息 (待移除)
-  "output_dir": "data/output"    // 生成文件的根目录，实际输出会在 data/output/<novel_title>/ 下
-}
-```
-
-#### 2.6 仿写配置 (`imitation_config`)
-
-控制文本仿写功能的配置项。
-
-```json
-{
-  "enabled": true,                    // 是否启用仿写功能
-  "auto_imitation": {                 // 自动仿写配置
-    "enabled": true,                  // 是否启用自动仿写
-    "trigger_all_chapters": true,     // 是否对所有章节进行仿写（true=全部章节，false=仅指定章节）
-    "trigger_chapters": [5, 10, 15, 20, 25, 30, 35, 40, 45, 50],  // 当trigger_all_chapters=false时，触发自动仿写的章节号
-    "style_sources": [                // 风格源文件配置
-      {
-        "name": "古风雅致",           // 风格名称
-        "file_path": "data/reference/古风风格参考.txt",  // 风格源文件路径
-        "description": "古风雅致的文风，适合玄幻仙侠类小说",  // 风格描述
-        "extra_prompt": "保持古风韵味，增加诗词意境"  // 额外仿写要求
-      }
-    ],
-    "default_style": "古风雅致",      // 默认使用的风格
-    "output_suffix": "_imitated",     // 仿写结果文件后缀
-    "backup_original": true           // 是否备份原文件
-  },
-  "manual_imitation": {               // 手动仿写配置
-    "enabled": true,                  // 是否启用手动仿写
-    "default_output_dir": "data/imitation_output",  // 默认输出目录
-    "temp_kb_cache_dir": "data/cache/imitation_cache"  // 临时知识库缓存目录
-  },
-  "quality_control": {                // 质量控制配置
-    "min_style_similarity": 0.7,      // 最小风格相似度阈值
-    "max_retries": 3,                 // 最大重试次数
-    "content_preservation_check": true,  // 是否检查内容保持度
-    "style_consistency_check": true   // 是否检查风格一致性
-  }
-}
-```
-
-## 故障排除
-
-### FAISS索引维度不匹配错误
-
-如果遇到以下错误：
-```
-AssertionError: assert d == self.d
-```
-
-这是因为知识库的嵌入模型配置发生了变化，导致新生成的查询向量维度与缓存中的索引维度不匹配。
-
-**解决方案：**
-
-1. **自动解决（推荐）**：
-   - 程序已内置自动检测和修复机制
-   - 当检测到维度不匹配时，会自动重新构建知识库
-   - 只需重新运行程序即可
-
-2. **手动清理缓存**：
-   ```bash
-   python scripts/clear_kb_cache.py
-   ```
-   此脚本会清理所有知识库缓存文件，下次运行时会重新构建知识库。
-
-3. **直接删除缓存目录**：
-   ```bash
-   rm -rf data/cache/*
-   ```
-
-**预防措施：**
-- 避免频繁更改嵌入模型配置
-- 如需更改模型配置，建议先清理缓存再运行程序
-
-## 仿写功能测试与验证
-
-### 功能测试
-
-项目提供了完整的仿写功能测试脚本，用于验证功能的正常运行：
-
+### 2. 配置设置
+复制配置文件模板并修改：
 ```bash
-# 运行仿写逻辑验证测试
-python test_imitation_logic.py
-
-# 运行仿写功能演示测试
-python test_imitation_demo.py
+cp config.json.example config.json
+cp .env.example .env
 ```
 
-### 测试内容
-
-1. **仿写逻辑验证测试** (`test_imitation_logic.py`)：
-   - 检查风格源文件是否存在且内容有效
-   - 验证仿写配置是否正确设置
-   - 测试自动仿写触发逻辑
-   - 验证知识库检索功能
-
-2. **仿写功能演示测试** (`test_imitation_demo.py`)：
-   - 测试手动仿写命令执行
-   - 验证仿写结果生成
-   - 展示仿写效果对比
-
-### 测试结果示例
-
-```
-🎭 仿写功能演示测试
-==================================================
-
-=== 测试自动仿写触发逻辑 ===
-测试章节触发情况:
-  章节  1: ✓ 触发
-  章节  5: ✓ 触发
-  章节 10: ✓ 触发
-  章节 15: ✓ 触发
-  章节 20: ✓ 触发
-  章节 25: ✓ 触发
-  章节 30: ✓ 触发
-
-仿写配置信息:
-  全局仿写: ✓ 启用
-  默认风格: 古风雅致
-  风格源数量: 3
-
-=== 测试手动仿写功能 ===
-✓ 创建测试原始文本文件: test_original.txt
-✓ 仿写命令执行成功
-✓ 仿写结果已保存到: test_imitation_output.txt
-仿写内容长度: 531 字符
-
---- 仿写结果预览 ---
-这是一个寻常的午后，赤乌衔耀，金芒凿破疏窗，洒落在案牍之上...
---- 预览结束 ---
-
-🎉 所有测试通过！仿写功能运行正常。
+编辑 `config.json` 配置小说参数：
+```json
+{
+    "novel_config": {
+        "type": "东方玄幻",
+        "theme": "凡人流、成长、冒险",
+        "title": "牧神记",
+        "target_chapters": 100,
+        "chapter_length": 2500
+    }
+}
 ```
 
-### 详细使用指南
+编辑 `.env` 配置API密钥：
+```bash
+OPENAI_API_KEY=your_openai_api_key
+GEMINI_API_KEY=your_gemini_api_key
+VOLCENGINE_ACCESS_KEY=your_volcengine_key
+VOLCENGINE_SECRET_KEY=your_volcengine_secret
+```
 
-更多关于仿写功能的详细说明，请参考：
-- [仿写功能使用指南](仿写功能使用指南.md) - 完整的功能说明和使用教程
+### 3. 运行小说生成
+```bash
+# 生成小说大纲（第1-10章）
+python main.py outline --start 1 --end 10
 
-## 🔄 更新日志
+# 生成指定章节内容（重新生成第5章）
+python main.py content --target-chapter 5
 
-### v1.2.0 (2025-08-24)
+# 生成章节内容（从第3章开始继续）
+python main.py content --start-chapter 3
 
-#### 新增功能
-- ✨ **火山引擎DeepSeek-V3.1模型支持**
-  - 新增对火山引擎DeepSeek-V3.1模型的完整支持
-  - 默认启用深度思考模式，显著提升生成内容质量
-  - 基于OpenAI兼容架构实现，保持系统一致性
-  - 支持故障转移机制，自动切换到备用模型
+# 处理章节定稿（处理第8章）
+python main.py finalize --chapter 8
 
-#### 安全性增强
-- 🔒 **API密钥安全保护**
-  - 实现智能的敏感信息识别和隐藏机制
-  - API密钥在日志中以 `sk-1234****cdef` 格式安全显示
-  - 所有配置输出都经过安全处理，防止意外泄露
-  - 新增 `scripts/security_check.py` 安全检查脚本
+# 自动执行完整流程（大纲+内容+定稿）
+python main.py auto
 
-#### 问题修复
-- 🔧 **模型类型支持修复**
-  - 修复了 "ERROR - 不支持的模型类型: volcengine" 错误
-  - 在所有模型类（OutlineModel、ContentModel、EmbeddingModel）中添加volcengine支持
-  - 优化了模型初始化错误处理
+# 强制重新生成所有大纲后执行完整流程
+python main.py auto --force-outline
 
-#### 文档更新
-- 📚 **完善的文档**
-  - 新增 `VOLCENGINE_INTEGRATION_GUIDE.md` 火山引擎集成指南
-  - 新增 `API_SECURITY_FIX_REPORT.md` 安全修复报告
-  - 更新 README.md，添加火山引擎和安全特性说明
-  - 优化配置指南和故障排除部分
+# 仿写文本（基于风格范文）
+python main.py imitate --style-source data/style_sources/范文.txt --input-file data/input/原始文本.txt --output-file data/output/仿写结果.txt
 
-#### 技术改进
-- ⚙️ **代码质量提升**
-  - 重构配置管理模块，增加安全输出功能
-  - 优化错误处理和日志输出机制
-  - 添加全面的安全检查和验证机制
+# 使用额外提示词
+python main.py outline --start 1 --end 5 --extra-prompt "增加悬疑元素"
+python main.py content --extra-prompt "增加人物对话"
+python main.py auto --extra-prompt "保持轻松幽默风格"
+```
 
-### 升级指南
+## 配置说明
 
-如果你正在使用旧版本，请按以下步骤升级：
+### 主要配置项
+- **knowledge_base_config**: 知识库配置（分块大小、重叠、缓存目录）
+- **log_config**: 日志配置（目录、级别、格式）
+- **novel_config**: 小说配置（类型、主题、风格、标题、目标章节数）
+- **generation_config**: 生成配置（重试次数、批量大小、模型选择）
+- **output_config**: 输出配置（格式、编码、保存选项）
+- **imitation_config**: 风格模仿配置（启用状态、风格源文件）
 
-1. **备份现有配置**：
-   ```bash
-   cp config.json config.json.backup
-   cp .env .env.backup
-   ```
+### 支持的小说类型
+- 东方玄幻
+- 仙侠修真  
+- 武侠江湖
+- 都市异能
+- 历史架空
+- 科幻奇幻
 
-2. **更新代码**：
-   ```bash
-   git pull origin main
-   ```
+## 开发说明
 
-3. **安装新依赖**：
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **配置火山引擎（可选）**：
-   在 `.env` 文件中添加：
-   ```
-   VOLCENGINE_API_KEY=你的火山引擎API密钥
-   VOLCENGINE_THINKING_ENABLED=true
-   ```
-
-5. **运行安全检查**：
-   ```bash
-   python3 scripts/security_check.py
-   ```
-
-6. **测试运行**：
-   ```bash
-   python3 main.py auto
-   ```
+### 架构设计原则
+1. **分层架构**: 表示层、业务逻辑层、服务层、数据层分离
+2. **模块化设计**: 各功能模块独立，便于扩展和维护
+3. **统一接口**: AI模型统一接口设计，支持多模型切换
+4. **错误处理**: 完善的错误处理和重试机制
+5. **配置管理**: 统一的配置管理和环境变量支持
