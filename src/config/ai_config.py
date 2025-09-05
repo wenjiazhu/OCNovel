@@ -25,14 +25,14 @@ class AIConfig:
                     "name": "deepgeminipro",  # 使用本地服务器支持的模型
                     "temperature": 1.0,
                     "api_key": os.getenv("OPENAI_OUTLINE_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://deepclaude.20140107.xyz/v1"),
+                    "base_url": os.getenv("OPENAI_OUTLINE_API_BASE", "https://api.siliconflow.cn/v1"),
                     "timeout": int(os.getenv("OPENAI_OUTLINE_TIMEOUT", "120"))
                 },
                 "content": {
                     "name": "deepgeminiflash",  # 使用deepclaude接口的模型
                     "temperature": 0.7,
                     "api_key": os.getenv("OPENAI_CONTENT_API_KEY", ""),
-                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://deepclaude.20140107.xyz/v1"),
+                    "base_url": os.getenv("OPENAI_CONTENT_API_BASE", "https://api.siliconflow.cn/v1"),
                     "timeout": int(os.getenv("OPENAI_CONTENT_TIMEOUT", "180"))  # 内容生成需要更长时间
                 },
                 "reranker": {

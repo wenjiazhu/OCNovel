@@ -27,13 +27,11 @@ build/
 .qoder/
 
 # 项目特定文件
-data/*/*
+data/
+src/gui/
 !data/*/.gitkeep
 config*.json
-config.json.*
-cookies.json
 .cursor/rules/*
-/chapters/*
 *.log
 web_ui/
 backup/
