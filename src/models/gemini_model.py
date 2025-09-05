@@ -119,9 +119,9 @@ class GeminiModel(BaseModel):
         self.fallback_base_url = self.config.get("fallback_base_url", "https://api.siliconflow.cn/v1")
         self.fallback_api_key = self.config.get("fallback_api_key", os.getenv("OPENAI_EMBEDDING_API_KEY", ""))
         fallback_models = self.config.get("fallback_models", {
-            "flash": "deepseek-ai/DeepSeek-R1",
+            "flash": "deepseek-ai/DeepSeek-V3.1",
             "pro": "Qwen/Qwen3-235B-A22B-Thinking-2507", 
-            "default": "deepseek-ai/DeepSeek-R1"
+            "default": "deepseek-ai/DeepSeek-V3.1"
         })
         if "flash" in self.model_name.lower():
             self.fallback_model_name = fallback_models.get("flash", fallback_models["default"])

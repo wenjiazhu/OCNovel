@@ -193,7 +193,7 @@ class Config:
         # 3. 最后使用 ai_config.gemini_config['fallback'] 作为备用
         fallback = getattr(self.ai_config, "gemini_config", {}).get("fallback")
         if fallback and fallback.get("enabled", False):
-            fallback_model_name = fallback.get("models", {}).get("default", "deepseek-ai/DeepSeek-R1")
+            fallback_model_name = fallback.get("models", {}).get("default", "deepseek-ai/DeepSeek-V3.1")
             imitation_fallback_config = {
                 "type": "gemini",
                 "model_name": fallback_model_name,

@@ -45,7 +45,7 @@ class OpenAIModel(BaseModel):
         if self.fallback_enabled:
             self.fallback_base_url = config.get("fallback_base_url", "https://api.siliconflow.cn/v1")
             self.fallback_api_key = config.get("fallback_api_key", "")
-            self.fallback_model_name = config.get("fallback_model_name", "deepseek-ai/DeepSeek-R1")
+            self.fallback_model_name = config.get("fallback_model_name", "deepseek-ai/DeepSeek-V3.1")
         
         # 初始化火山引擎客户端
         self.volcengine_client = OpenAI(
@@ -71,7 +71,7 @@ class OpenAIModel(BaseModel):
         elif "gemini-2.5-pro" in self.model_name:
             self.fallback_model_name = "Qwen/Qwen3-235B-A22B-Thinking-2507"  # 使用Qwen作为gemini-2.5-pro的备用
         else:
-            self.fallback_model_name = "deepseek-ai/DeepSeek-R1"  # 默认备用模型
+            self.fallback_model_name = "deepseek-ai/DeepSeek-V3.1"  # 默认备用模型
         
         # 初始化网络管理客户端（如果可用）
         if NETWORK_AVAILABLE:

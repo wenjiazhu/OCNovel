@@ -60,7 +60,7 @@ class AIConfig:
                 "models": {
                     "flash": "moonshotai/Kimi-K2-Instruct",  # flash模型的备用
                     "pro": "Qwen/Qwen3-235B-A22B-Thinking-2507",  # pro模型的备用
-                    "default": "deepseek-ai/DeepSeek-R1"  # 默认备用模型
+                    "default": "deepseek-ai/DeepSeek-V3.1"  # 默认备用模型
                 }
             },
             "models": {
@@ -99,7 +99,7 @@ class AIConfig:
             "fallback": {
                 "enabled": os.getenv("VOLCENGINE_FALLBACK_ENABLED", "true").lower() == "true",
                 "provider": "openai",  # 备用到OpenAI兼容模型
-                "model_name": "deepseek-ai/DeepSeek-R1",
+                "model_name": "deepseek-ai/DeepSeek-V3.1",
                 "api_key": os.getenv("OPENAI_EMBEDDING_API_KEY", ""),  # 使用嵌入模型的API密钥作为备用
                 "base_url": "https://api.siliconflow.cn/v1"  # 使用硅基流动的API地址
             }
